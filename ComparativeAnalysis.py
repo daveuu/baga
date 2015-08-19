@@ -2115,7 +2115,11 @@ class Plotter:
 
         if use_names:
             d = _re.compile('[\t ]+')
-            name_translate = dict([_re.split(d, l.rstrip()) for l in open(use_names) if len(l)])
+            try:
+                name_translate = dict([_re.split(d, l.rstrip()) for l in open(use_names) if len(l)])
+            except IOError:
+                _sys.exit('Could not access the requested --use_names file: {}'.format(use_name))
+            
             for t in tip_labels:
                 e = 'cannot find tip label {} in supplied tip name translation file: {}'.format(t, use_names)
                 assert t in name_translate, e
