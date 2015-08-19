@@ -6,9 +6,9 @@
 
 Work on this software was started at [**The University of Liverpool**](https://www.liv.ac.uk), UK with funding from [**The Wellcome Trust**](http://www.wellcome.ac.uk/) (093306/Z/10) awarded to:
 
-*Dr **Steve Paterson** (The University of Liverpool, UK)
-*Dr **Craig Winstanley** (The University of Liverpool, UK)
-*Dr **Michael A Brockhurst** (University of York, UK)
+* Dr **Steve Paterson** (The University of Liverpool, UK)
+* Dr **Craig Winstanley** (The University of Liverpool, UK)
+* Dr **Michael A Brockhurst** (University of York, UK)
 
 
 Copyright (C) 2015 David Williams
