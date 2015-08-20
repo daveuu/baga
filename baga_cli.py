@@ -31,9 +31,8 @@ path_to_baga_package = os.path.sep.join(os.path.realpath(__file__).split(os.path
 # so importing the module needs to be done from there
 sys.path.append(path_to_baga_package)
 
-
 from baga import Dependencies
-from baga import CollectData
+
 def check_files(files):
     have_these = set()
     if isinstance(files, dict):
@@ -710,7 +709,6 @@ if hasattr(args, 'GATK_jar_path') and args.GATK_jar_path:
 
 ### Check Dependencies ###
 
-from baga import Dependencies
 
 if args.subparser == 'Dependencies':
     print('\n-- Dependencies check/get module --')
