@@ -523,7 +523,7 @@ class MultipleSequenceAlignment:
         excluded_sites = set()
         for snum,(sample,these_variants) in enumerate(self.SNPs.items()):
             dropped = []
-            print('Building aligned sequence for {} ({} of {})'.format(sample, s, len(self.SNPs)))
+            print('Building aligned sequence for {} ({} of {})'.format(sample, snum, len(self.SNPs)))
             this_sequence = _array('c')
             if include_invariants:
                 variant_or_missing = sorted(set(gaps.keys() + these_variants.keys()))
