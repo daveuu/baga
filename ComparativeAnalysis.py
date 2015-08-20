@@ -2119,7 +2119,7 @@ class Plotter:
         if use_names:
             d = _re.compile('[\t ]+')
             try:
-                name_translate = dict([_re.split(d, l.rstrip()) for l in open(use_names) if len(l)])
+                name_translate = dict([_re.split(d, l.rstrip(), maxsplit = 1) for l in open(use_names) if len(l)])
             except IOError:
                 _sys.exit('Could not access the requested --use_names file: {}'.format(use_name))
             
