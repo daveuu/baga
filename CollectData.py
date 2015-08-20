@@ -382,8 +382,13 @@ class Reads:
         Given a path to pairs of fastq short read files, parse them ready for analysis 
         with the Bacteria and Archaea Genome (BAG) Analyser.
         '''    
-        file_list = sorted(_glob(_os.path.sep.join([path_to_fastq, '*.fastq'])))
-        file_list_gz = sorted(_glob(_os.path.sep.join([path_to_fastq, '*.fastq.gz'])))
+        file_list = _glob(_os.path.sep.join([path_to_fastq, '*.fastq']))
+        file_list += _glob(_os.path.sep.join([path_to_fastq, '*.fq']))
+        file_list.sort()
+
+        file_list_gz = _glob(_os.path.sep.join([path_to_fastq, '*.fastq.gz']))
+        file_list_gz += _glob(_os.path.sep.join([path_to_fastq, '*.fq.gz']))
+        file_list_gz.sort()
 
         if len(file_list) == 0 and len(file_list_gz) == 0:
             print('Error: did not find any files at {} nor {}'.format(file_list, file_list_gz))
