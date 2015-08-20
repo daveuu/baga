@@ -963,9 +963,10 @@ if args.subparser == 'PrepareReads':
                 stage2s = check_files(reads.adaptorcut_read_files)
                 if stage2s:
                     if stage1s:
-                        # delete stage 1 files if have all
-                        print('Deleting original or subsampled fastq files . . .')
-                        total_size += delete_files(reads.read_files, extra = '_subsmp')
+                        # delete stage 1 files if have all <== not for now . . .
+                        # print('Deleting original or subsampled fastq files . . .')
+                        # total_size += delete_files(reads.read_files, extra = '_subsmp')
+                        print('Retaining original fastq files even though processed versions exist because re-downloading is time consuming!')
                     else:
                         print('Some or all of original or subsampled fastq files seem to have been deleted')
                 else:
