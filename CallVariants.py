@@ -29,6 +29,7 @@ from random import sample as _sample
 from collections import OrderedDict as _OrderedDict
 from collections import defaultdict as _defaultdict
 from collections import Counter as _Counter
+from glob import glob as _glob
 
 from baga import _subprocess
 from baga import _os
@@ -70,7 +71,7 @@ def parseVCF(path_to_VCF):
             section, value = _re.match(pattern, line.rstrip()).groups()
             header_section_order[section] = True
             header[section] += [line.rstrip()]
-    
+
     header = dict(header)
     header_section_order = list(header_section_order)
     return(header, header_section_order, colnames, variants)
@@ -83,7 +84,6 @@ def sortVariantsKeepFilter(header, colnames, variantrows):
     Per sample filters stored in INFO columns must be described in header 
     ##INFO entries and have Descriptions starting "FILTER:".
     '''
-    
     # identify chromosome for this VCF <== this will fail if running against > 1 contigs . . .
     try:
         pattern = _re.compile('##contig=<ID=([A-Za-z0-9]+\.[0-9]+),length=([0-9]+)>')
@@ -92,13 +92,13 @@ def sortVariantsKeepFilter(header, colnames, variantrows):
         genome_length = int(genome_length)
     except KeyError:
         print("Failed to identify which chromosome the variants were called on (couldn't find '##contig=')")
-    
+
     print('Variants were called against {:,} bp genome: {}\n'.format(genome_length, genome_id))
-    
+
     parameter_names = colnames[:colnames.index('FORMAT')+1]
     parameter_names[0] = parameter_names[0].lstrip('#')
     sample_names = colnames[colnames.index('FORMAT')+1:]
-    
+
     # dict-ify VCF header
     pattern1 = _re.compile(''',(?=(?:[^'"]|'[^']*'|"[^"]*")*$)''')
     pattern2 = _re.compile('''=(?=(?:[^'"]|'[^']*'|"[^"]*")*$)''')
@@ -113,31 +113,31 @@ def sortVariantsKeepFilter(header, colnames, variantrows):
                     headerdict[headersection] += [thisheaderdict]
                 except KeyError:
                     headerdict[headersection] = [thisheaderdict]
-    
+
     FILTERfilters = set()
     for FILTER in headerdict['FILTER']:
         FILTERfilters.add(FILTER['ID'].strip('\'"'))
-    
+
     INFOfilters = set()
     for INFO in headerdict['INFO']:
         if INFO['Description'].strip('"')[:len('FILTER:')] == 'FILTER:':
             INFOfilters.add(INFO['ID'].strip('\'"'))
-    
+
     cols = dict(zip(parameter_names, variantrows[0].rstrip().split('\t')[:len(parameter_names)]))
-    
+
     e = 'Could not find FORMAT column in this VCF file. Probably no genotype data.'
     assert 'FORMAT' in cols, e
     e = 'Could not find GT under FORMAT column as per http://samtools.github.io/hts-specs/VCFv4.2.pdf. Probably no genotype data.'
     assert 'GT' in cols['FORMAT'], e
-    
+
     sample_variant_info = cols['FORMAT'].split(':')
-    
+
     # by sample chromosome position ref,query | filterlist
-    
+
     # three level automatic dicts
     #                       sample               chromosome           position = [[ref,query], [filterlist]]
     variants = _defaultdict(lambda: _defaultdict(lambda: _defaultdict(dict)))
-    
+
     for row in variantrows:
         # variant info
         cols = dict(zip(parameter_names, row.rstrip().split('\t')[:len(parameter_names)]))
@@ -174,10 +174,130 @@ def sortVariantsKeepFilter(header, colnames, variantrows):
         variants[k1] = dict(v1)
         for k2,v2 in variants[k1].items():
             variants[k1][k2] = dict(v2)
-    
+
     allfilters = FILTERfilters | INFOfilters
-    
+
     return(variants, allfilters)
+
+def reportCumulative(filter_order, reference_id, VCFs, VCFs_indels = False):
+    '''Generate simple table of cumulative effects of filters applied to a VCF file'''
+    # cumulative affect of filters
+
+    ## build table column names
+    colnames = ["Cumulative filters applied"]
+    for dataset in sorted(VCFs):
+        for v in ['SNPs', 'InDels']:
+            colnames += ["{} {}".format(v, dataset)]
+
+    variant_type_order = ['SNPs', 'InDels']
+
+    for v in variant_type_order:
+        colnames += ["{} all samples".format(v)]
+
+
+    # non-BAGA filters (e.g., from GATK) that are worth knowing about
+    other_filters = {'GATK':('LowQual', 'standard_hard_filter')}
+
+    # determine order of filters to include
+
+    # GATK's LowQual and standard_hard_filter
+    short2fullnames = dict(other_filters.items())
+    short2fullnames['genome_repeats'] = ('genome_repeats',)
+    short2fullnames['rearrangements'] = ('rearrangements1', 'rearrangements2')
+    # names for table
+    filter_names = {
+                ('LowQual', 'standard_hard_filter'): "GATK standard 'hard' filter", 
+                ('genome_repeats',): 'baga reference genome repeats', 
+                ('rearrangements1', 'rearrangements2'): 'baga genome rearrangements'
+    }
+
+    # start with no filters
+    filters_applied_ordered = [()]
+    # then add some
+    for filtername in filter_order:
+        filters_applied_ordered += [short2fullnames[filtername]]
+
+    collect_baga_filters = [f for f in filter_order if 'GATK' not in f]
+    from glob import glob as _glob
+    # find actual VCFs . . find the VCFs with suffices that match the requested filters
+    VCFs_use = {}
+    for dataset,varianttypes in sorted(VCFs.items()):
+        VCFs_use[dataset] = {}
+        for varianttype,filename in varianttypes.items():
+            bits = filename.split(_os.path.extsep)
+            pattern = _os.path.extsep.join(bits[:-1]) + '*' + bits[-1]
+            for checkthis in _glob(pattern):
+                filter_present = []
+                for fltr in collect_baga_filters:
+                    if 'F_'+fltr in checkthis:
+                        filter_present += [fltr]
+                
+                if set(filter_present) <= set(collect_baga_filters):
+                    # OK if additional filters included in a VCF
+                    VCFs_use[dataset][varianttype] = checkthis
+
+
+    # build table
+
+    cumulative_filters = set()
+
+    rows = []
+    for filters in filters_applied_ordered:
+        cumulative_filters.update(filters)
+        print(cumulative_filters)
+        try:
+            this_row = [filter_names[filters]]
+        except KeyError:
+            this_row = ['None']
+        
+        totals_by_type = dict(zip(variant_type_order, [0] * len(variant_type_order)))
+        for dataset,varianttypes in sorted(VCFs_use.items()):
+            print(dataset)
+            for varianttype in variant_type_order:
+                filename = varianttypes[varianttype]
+                header, header_section_order, these_colnames, variantrows = parseVCF(filename)
+                variants, allfilters = sortVariantsKeepFilter(header, these_colnames, variantrows)
+                by_position, by_position_filtered = to_by_position_filtered(variants, cumulative_filters)
+                print(varianttype, len(by_position[reference_id]))
+                this_row += [len(by_position[reference_id])]
+                totals_by_type[varianttype] += len(by_position[reference_id])
+        
+        this_row += map(totals_by_type.get, variant_type_order)
+        
+        rows += [this_row]
+
+    outfilename = 'Table_of_cumulative_variant_totals_with_filters.csv'
+    print('Printing to {}'.format(outfilename))
+    with open(outfilename, 'w') as fout:
+        fout.write(','.join(['"{}"'.format(c) for c in colnames])+'\n')
+        for row in rows:
+            fout.write(','.join(['"{}"'.format(row[0])]+[str(c) for c in row[1:]])+'\n')
+
+
+def to_by_position_filtered(variants, filters_applied, summarise = True):
+    by_position = _defaultdict(_Counter)
+    by_position_filtered = _defaultdict(_Counter)
+    for sample, chromosomes in variants.items():
+        for chromosome, positions in chromosomes.items():
+            for position, ((reference,query),filters) in sorted(positions.items()):
+                if len(filters & filters_applied) == 0:
+                    by_position[chromosome][(position,reference,query,None)] += 1
+                else:
+                    for f in filters & filters_applied:
+                        by_position_filtered[chromosome][(position,reference,query,f)] += 1
+                    
+    if summarise:
+        for f1 in sorted(filters_applied):
+            print('-- {} --'.format(f1))
+            these = []
+            for position,reference,query,f2 in sorted(by_position_filtered[chromosome]):
+                if f1 == f2:
+                    these += ['{}: {} => {}, {}'.format(position,reference,query,f2)]
+            
+            print('Total: {}'.format(len(these)))
+            print('\n'.join(these))
+
+    return(by_position,by_position_filtered)
 class Caller:
     '''
     A collection of short read datasets that have been aligned to the same genome 
@@ -647,7 +767,7 @@ class Filter:
         return variant VCF rows changing:
             FILTER cell if sample_index = False (applies to all samples)
             adding an entry to INFO describing which sample filtered if sample_index provided
-        
+
         sample_index is base-0 index of sample column order
         '''
         new_rows = []
@@ -697,7 +817,7 @@ class Filter:
                 new_rows += ['\t'.join(cells)]
             else:
                 new_rows += [row]
-        
+
         return(new_rows, filtered)
 
     def markVariants(self, filters_to_apply):
@@ -770,7 +890,7 @@ class Filter:
                 
                 open(newname, 'w').write(new_VCF_content)
                 use_VCF_path = newname
-        
+
         self.all_filtered = all_filtered
 
 
@@ -840,7 +960,6 @@ class Filter:
         filter dict keys must be in known_filters dict below
         values are a list or dict of ranges
         '''
-        
         # do some checks on provided genome and VCFs
         genome_ids = {}
         genome_lengths = {}
@@ -858,16 +977,16 @@ class Filter:
                 
             e = "Failed to identify which chromosome the variants in {} were called on (couldn't find '##contig=')".format(VCF)
             assert identified, e
-        
+
         e = 'Differing reference genome among provided VCFs? {}'.format(genome_ids.items())
         assert len(genome_ids) == 1, e
-        
+
         ## is this only part that uses genome (i.e. not necessary)
         # e = 'Genome provided ({}) does not match genome ID in provided VCFs: {}'.format(self.genome_genbank_record.id, genome_ids.keys()[0])
         # assert self.genome_genbank_record.id == genome_ids.keys()[0], e
         # print('Variants were called against {:,} bp genome: {}\n'.format(int(genome_length), genome_id))
-        
-        
+
+
         filters_to_apply = {}
         for this_filter, ranges in filters.items():
             try:
@@ -875,9 +994,9 @@ class Filter:
                 filters_to_apply[this_filter]['ranges'] = ranges
             except KeyError:
                 print('Known filter type: {}. Choose from {}'.format(this_filter, ', '.join(self.known_filters) ))
-        
+
         self.markVariants(filters_to_apply)
-        
+
         self.reportFiltered()
 
 
