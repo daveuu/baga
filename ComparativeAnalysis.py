@@ -605,7 +605,7 @@ class MultipleSequenceAlignment:
         
         print("{} sites excluded".format(len(excluded_sites)))
         if not strict_core:
-            print("Excluded sites were in reference genome only")
+            print("Excluded sites contained data for reference genome only")
         
         if include_invariants:
             if strict_core:
