@@ -100,6 +100,7 @@ def sortVariantsKeepFilter(header, colnames, variantrows):
     sample_names = colnames[colnames.index('FORMAT')+1:]
 
     # dict-ify VCF header
+    # re for quotes
     pattern1 = _re.compile(''',(?=(?:[^'"]|'[^']*'|"[^"]*")*$)''')
     pattern2 = _re.compile('''=(?=(?:[^'"]|'[^']*'|"[^"]*")*$)''')
     headerdict = {}
@@ -161,14 +162,15 @@ def sortVariantsKeepFilter(header, colnames, variantrows):
             except KeyError:
                 samples_filtered[sample_name] = thesefilterflags
         
-        
         # sample info
         sample_data = dict(zip(sample_names, row.rstrip().split('\t')[len(parameter_names):]))
         sample_data = dict([(s, dict(zip(sample_variant_info, d.split(':')))) for s,d in sample_data.items()])
+        
         for sample,data in sample_data.items():
             if data['GT'] != '.':
                 variants[sample][cols['CHROM']][int(cols['POS'])] = [[cols['REF'], cols['ALT'].split(',')[int(data['GT'])-1]], samples_filtered[sample]]
-        
+
+    # convert nested defaultdicts to dicts
     variants = dict(variants)
     for k1,v1 in variants.items():
         variants[k1] = dict(v1)
@@ -232,7 +234,7 @@ def reportCumulative(filter_order, reference_id, VCFs, VCFs_indels = False):
                     if 'F_'+fltr in checkthis:
                         filter_present += [fltr]
                 
-                if set(filter_present) <= set(collect_baga_filters):
+                if set(filter_present) >= set(collect_baga_filters):
                     # OK if additional filters included in a VCF
                     VCFs_use[dataset][varianttype] = checkthis
 
@@ -244,7 +246,6 @@ def reportCumulative(filter_order, reference_id, VCFs, VCFs_indels = False):
     rows = []
     for filters in filters_applied_ordered:
         cumulative_filters.update(filters)
-        print(cumulative_filters)
         try:
             this_row = [filter_names[filters]]
         except KeyError:
@@ -279,13 +280,16 @@ def to_by_position_filtered(variants, filters_applied, summarise = True):
     by_position_filtered = _defaultdict(_Counter)
     for sample, chromosomes in variants.items():
         for chromosome, positions in chromosomes.items():
+            # iterate through varinats by position
             for position, ((reference,query),filters) in sorted(positions.items()):
                 if len(filters & filters_applied) == 0:
+                    # retain variants without any filters flagged (of those we are interested in)
                     by_position[chromosome][(position,reference,query,None)] += 1
                 else:
                     for f in filters & filters_applied:
+                        # also retain those with a filter flag, seperately for each filter
                         by_position_filtered[chromosome][(position,reference,query,f)] += 1
-                    
+
     if summarise:
         for f1 in sorted(filters_applied):
             print('-- {} --'.format(f1))
