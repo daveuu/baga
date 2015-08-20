@@ -54,6 +54,7 @@ def main():
     pass
 
 def parseVCF(path_to_VCF):
+    '''returns (header, header_section_order, colnames, variants)'''
     header_section_order = _OrderedDict()
     header = _defaultdict(list)
     pattern = _re.compile('##([^=]+)=(.+)$')
