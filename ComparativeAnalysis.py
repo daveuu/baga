@@ -626,7 +626,10 @@ class MultipleSequenceAlignment:
         
         forMSA = []
         for sample, sequence_array in sorted(alignment_arrays.items()):
-            forMSA += [_SeqRecord( id = sample, seq = _Seq(''.join(sequence_array)) )]
+            # without explicitly setting description = '', BioPython adds "<unknown description>" to sequence file
+            # for each record. Some sequence file parsers include "<unknown description>" with id which can confuse
+            # things e.g., ClonalFrameML where tree tip label will not match a sequence
+            forMSA += [_SeqRecord( id = sample, name = '', description = '', seq = _Seq(''.join(sequence_array)) )]
         
         MSA = _MultipleSeqAlignment(forMSA)
         
