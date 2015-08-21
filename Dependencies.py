@@ -277,10 +277,11 @@ def check_no_error(path = '', system = False, java_commands = False, extra = Fal
 
 def check_python_package(package, maj_version = False, system = False, package_path = 'local_packages'):
     if system:
-        # try system installed
+        # try system installed <== currently not implemented in CLI nor tested here
         x = _sys.path.pop(0)
         try:
-            globals()[package] = __import__(package)
+            globals()['_'+package] = __import__(package)
+            # this doesn't seem like a good idea if testing other system packages after this one . . .
             _sys.path.insert(0,'local_packages')
             
         except ImportError:
@@ -289,21 +290,23 @@ def check_python_package(package, maj_version = False, system = False, package_p
             return(False)
     else:
         try:
-            globals()[package] = __import__(package)
+            # import as with initial underscore to avoid name collisions
+            # maybe should use importlib here
+            globals()['_'+package] = __import__(package)
             
-        except ImportError:
+        except ImportError as e:
             print('Failed to import {} from system {}'.format(package, package_path))
+            print(e)
             return(False)
         
-    if hasattr(globals()[package], '__version__'):
-        v = getattr(globals()[package], '__version__')
-    elif hasattr(globals()[package], 'version'):
-        v = getattr(globals()[package], 'version')
+    if hasattr(globals()['_'+package], '__version__'):
+        v = getattr(globals()['_'+package], '__version__')
+    elif hasattr(globals()['_'+package], 'version'):
+        v = getattr(globals()['_'+package], 'version')
     else:
         v = 'unknown'
     
     if maj_version:
-        print(v)
         if isinstance(v, str):
             try:
                 this_maj_version = int(v.split('.')[0].split('_')[0])
@@ -315,14 +318,14 @@ def check_python_package(package, maj_version = False, system = False, package_p
             print('Could not check verions of this package: {} (either package does not report version in a conventional way (unknown) or this is a baga bug!)'.format(v))
         
         if maj_version == this_maj_version:
-            print('Successfully imported {} required version {} from {}'.format(package, v, getattr(globals()[package], '__file__')))
+            print('Successfully imported {} required version {} from {}'.format(package, v, getattr(globals()['_'+package], '__file__')))
             return(True)
         elif maj_version > this_maj_version or maj_version < this_maj_version:
-            print('Successfully imported {} at version {} from {}'.format(package, v, getattr(globals()[package], '__file__')))
+            print('Successfully imported {} at version {} from {}'.format(package, v, getattr(globals()['_'+package], '__file__')))
             print('baga is not tested with this version. Version {} is required which can be installed locally with the --get option'.format(maj_version))
             return(False)
     else:
-        print('Successfully imported {} version {} from {}'.format(package, v, getattr(globals()[package], '__file__')))
+        print('Successfully imported {} version {} from {}'.format(package, v, getattr(globals()['_'+package], '__file__')))
         print("baga's Dependencies module doesn't specify a version for this package so we'll assume it's OK")
         return(True)
 

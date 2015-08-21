@@ -173,14 +173,19 @@ are available and optionally get them.',
 group_check_or_get = parser_Dependencies.add_mutually_exclusive_group()
 
 group_check_or_get.add_argument('-c', "--check", 
-    help = "check BAG Analyser has access to a dependency either in the \
-system path or locally",
+    help = "check BAG Analyser has access to a dependency either in the system path or locally",
     type = str,
     choices = sorted(Dependencies.dependencies),
     nargs = '+')
 
 group_check_or_get.add_argument('-g', "--get", 
     help = "get (or explain how to get) a dependency for BAG Analyser",
+    type = str,
+    choices = sorted(Dependencies.dependencies),
+    nargs = '+')
+
+group_check_or_get.add_argument('-C', "--checkget", 
+    help = "check a dependency for BAG Analyser and attempt to get if not available",
     type = str,
     choices = sorted(Dependencies.dependencies),
     nargs = '+')
@@ -720,50 +725,88 @@ if hasattr(args, 'GATK_jar_path') and args.GATK_jar_path:
 
 if args.subparser == 'Dependencies':
     print('\n-- Dependencies check/get module --')
-    if args.get is not None:
-        for name in args.get:
-            if Dependencies.dependencies[name]['source'] == 'git':
-                Dependencies.get_git(**Dependencies.dependencies[name])
-            elif Dependencies.dependencies[name]['source'] == 'download':
-                Dependencies.get_download(**Dependencies.dependencies[name])
+    def get(name):
+        if Dependencies.dependencies[name]['source'] == 'git':
+            Dependencies.get_git(**Dependencies.dependencies[name])
+        elif Dependencies.dependencies[name]['source'] == 'download':
+            Dependencies.get_download(**Dependencies.dependencies[name])
     
-    if args.check is not None:
+    def check(name):
+        # this would need changing with the dependencies dict in Dependencies
+        if 'local_packages' in Dependencies.dependencies[name]['destination']:
+            checker = Dependencies.dependencies[name]['checker']['function']
+            checker_args = Dependencies.dependencies[name]['checker']['arguments']
+            result = checker(Dependencies.dependencies[name]['name'], **checker_args)
+            #checker(dependencies[name]['name'], system = True)
+        elif 'external_programs' in Dependencies.dependencies[name]['destination']:
+            checker = Dependencies.dependencies[name]['checker']['function']
+            checker_args = Dependencies.dependencies[name]['checker']['arguments']
+            result = checker(**checker_args)
+        else:
+            sys.exit('The destination for this package or program is unknown: {}\n'.format(
+                                            Dependencies.dependencies[name]['destination'])
+                                            )
+        return(result)
+    
+    if args.get:
+        for name in args.get:
+            get(name)
+    
+    if args.check:
         check_summary = []
         check_results = []
         for name in args.check:
             print('\nChecking for {}:\n'.format(name))
-            # this would need changing with the dependencies dict in Dependencies
-            if 'local_packages' in Dependencies.dependencies[name]['destination']:
-                checker = Dependencies.dependencies[name]['checker']['function']
-                checker_args = Dependencies.dependencies[name]['checker']['arguments']
-                result = checker(Dependencies.dependencies[name]['name'], **checker_args)
-                #checker(dependencies[name]['name'], system = True)
-            elif 'external_programs' in Dependencies.dependencies[name]['destination']:
-                checker = Dependencies.dependencies[name]['checker']['function']
-                checker_args = Dependencies.dependencies[name]['checker']['arguments']
-                result = checker(**checker_args)
-            else:
-                sys.exit('The destination for this package or program is unknown: {}'.format(
-                                                Dependencies.dependencies[name]['destination'])
-                                                )
-            
-            if result:
+            check_results += [check(name)]
+            if check_results[-1]:
                 check_summary += ['\n{}: found!'.format(name)]
             else:
                 check_summary += ['\n{0}: not found . . . \nTry "{1} Dependencies --get {0}"'.format(name, sys.argv[0])]
             
             print(check_summary[-1])
-            check_results += [result]
         
         if len(check_summary) > 1:
             print(''.join(['\n\nSummary:\n'] + sorted(check_summary))+'\n')
         
         if not all(check_results):
             sys.exit('\n\nOne or more dependencies are unavailable . . . \n')
-
-
-
-
+    
+    if args.checkget:
+        check_summary = []
+        check_results = []
+        for name in args.checkget:
+            print('\nChecking for {}:\n'.format(name))
+            alreadygot = check(name)
+            
+            if alreadygot:
+                check_summary += ['\n{}: found!'.format(name)]
+                check_results += [alreadygot]
+            else:
+                check_summary += ['\n{0}: not found . . . \nAttempting to install.\n'.format(name, sys.argv[0])]
+                get(name)
+                if 'local_packages' in Dependencies.dependencies[name]['destination']:
+                    # it's a python package so need to forget the import if it was an older version and re-import
+                    # imported as _name to avoid collisions . . .
+                    try:
+                        del sys.modules[name]
+                        #del globals()['_'+name]
+                    except KeyError:
+                        pass
+                
+                gotnow = check(name)
+                if gotnow:
+                    check_summary[-1] += "Installed successfully: found!"
+                else:
+                    check_summary[-1] += "Failed to install . . . there may be dependencies missing or some other problem . . ."
+                    check_summary[-1] += ". . . currently python modules like dendropy cannot be checked straight after getting . . . so rerunning this command may succeed for those: try that."
+                
+                check_results += [gotnow]
+        
+        if len(check_summary): # > 1:
+            print(''.join(['\n\nSummary:\n'] + sorted(check_summary))+'\n')
+        
+        if not all(check_results):
+            sys.exit('\n\nOne or more baga dependencies are unavailable and could not be installed . . . \n')
         
 
 ### Download Genomes ###
