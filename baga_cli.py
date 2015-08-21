@@ -1076,6 +1076,7 @@ if using:
         import baga
         
         from baga import AlignReads
+        from baga import CollectData
         
         if args.align:
             print('Loading processed reads group %s' % use_name_reads)
@@ -1202,6 +1203,7 @@ if args.subparser == 'Repeats':
     
     import baga
     from baga import Repeats
+    from baga import CollectData
     
     use_name_genome = args.genome_name.replace('baga.CollectData.Genome-', '' , 1).replace('.baga', '')
     
@@ -1250,6 +1252,7 @@ if args.subparser == 'Structure':
     print('\n-- Chromosome sequence rearrangement detection module --\n')
     import baga
     from baga import Structure
+    from baga import CollectData
     
     if not(args.check or args.plot or args.plot_range):
         parser_Structure.error('Need at least one of --check/-c, --plot/-p or --plot_range/-r')
@@ -1669,6 +1672,7 @@ if args.subparser == 'ComparativeAnalysis':
     from baga import AlignReads
     from baga import CallVariants
     from baga import ComparativeAnalysis
+    from baga import CollectData
     
     if args.build_MSA:
         # baga pipeline information provided <== only way currently implemented
@@ -1758,7 +1762,6 @@ if args.subparser == 'ComparativeAnalysis':
     if args.plot_phylogeny:
         # should check either or etc here
         if args.genome_name:
-            from baga import CollectData
             use_name_genome = args.genome_name.replace('baga.CollectData.Genome-', '' , 1).replace('.baga', '')
             print('Loading genome %s' % use_name_genome)
             genome = CollectData.Genome(local_path = 'baga.CollectData.Genome-{}.baga'.format(use_name_genome), format = 'baga')
