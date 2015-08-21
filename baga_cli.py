@@ -729,6 +729,7 @@ if args.subparser == 'Dependencies':
     
     if args.check is not None:
         check_summary = []
+        check_results = []
         for name in args.check:
             print('\nChecking for {}:\n'.format(name))
             # this would need changing with the dependencies dict in Dependencies
@@ -752,9 +753,18 @@ if args.subparser == 'Dependencies':
                 check_summary += ['\n{0}: not found . . . \nTry "{1} Dependencies --get {0}"'.format(name, sys.argv[0])]
             
             print(check_summary[-1])
+            check_results += [result]
         
         if len(check_summary) > 1:
             print(''.join(['\n\nSummary:\n'] + sorted(check_summary))+'\n')
+        
+        if not all(check_results):
+            sys.exit('\n\nOne or more dependencies are unavailable . . . \n')
+
+
+
+
+        
 
 ### Download Genomes ###
 
