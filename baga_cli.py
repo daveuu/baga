@@ -706,7 +706,7 @@ if hasattr(args, 'GATK_jar_path') and args.GATK_jar_path:
         sys.exit('Java could not find jar file for GATK at: {}\nPlease provide path to GATK v3.3 jar file with --GATK_jar_path.'.format(args.GATK_jar_path))
     else:
         try:
-            maj, min1, min2, min3 = re.findall('\(GATK\) v([0-9])\.([0-9])-([0-9])-([a-z0-9]+),', output.split('\n')[1])[0]
+            maj, min1, min2, min3 = re.findall('\(GATK\) v([0-9])\.([0-9]+)-([0-9]+)-([a-z0-9]+),', output.split('\n')[1])[0]
             maj, min1, min2 = map(int, [maj, min1, min2])
             if maj == 3 and min1 == 3:
                 print('GATK v3.3: found!')
@@ -1768,6 +1768,9 @@ if args.subparser == 'ComparativeAnalysis':
             genome_length = len(genome.sequence)
         elif args.genome_length:
             genome_length = genome_length
+        else:
+            print('Provide --genome_name or --genome_length for a scale bar unit of actual substitutions')
+            genome_length = False
         
         if args.plot_transfers:
             bits = args.path_to_tree.split(os.path.extsep)
