@@ -110,7 +110,13 @@ class Genome:
                     ORF_ranges[f.qualifiers['locus_tag'][0]] = (f.location.start.position,f.location.end.position,f.location.strand, thisgene)
                     
                 if f.type == 'misc_feature':
-                    if _re.search(GI_prophage, f.qualifiers['note'][0]) and f.location.nofuzzy_end - f.location.nofuzzy_start > 10000:
+                    try:
+                        # not all misc_features have a "note"
+                        feature_note = f.qualifiers['note'][0]
+                    except KeyError:
+                        continue
+                    
+                    if _re.search(GI_prophage, feature_note) and f.location.nofuzzy_end - f.location.nofuzzy_start > 10000:
                         large_mobile_element_ranges[f.qualifiers['note'][0]] = f.location.nofuzzy_start, f.location.nofuzzy_end
             
             # filter ORFs within ORFs (artifacts? PLES_21351 and PLES_21361 in LESB58)
