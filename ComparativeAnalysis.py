@@ -1960,6 +1960,20 @@ class Plotter:
         if len(outgroup_label_list):
             self.reroot_to_outgroup(outgroup_label_list)
 
+
+        if plot_transfers:
+            ## ClonalFrameML seems to set a minimum edge length of 1e-7
+            ## even when PhyML provides edges of 0 and resolution to 1e-8
+            ## seems to be a loss of information
+            # only applies to internals
+            # self.tree.collapse_unweighted_edges(threshold=1e-07, update_bipartitions=True)
+            edges = [e for e in self.tree.postorder_edge_iter() if e.length is not None]
+            shorties = [e for e in edges if e.length == 1e-7]
+            if min([e.length for e in edges]) == 1e-7:
+                print('Warning: rounding {} edge with lengths 1e-7 down to 0. These were probably introduced by ClonalFrameML'.format(len(shorties)))
+                for e in shorties:
+                    e.length = 0
+
         self.getTipOrder()
 
         # get start and finish info in y-axis for each edge
@@ -2027,7 +2041,9 @@ class Plotter:
                 # processed ClonalFrameML output provided
                 total_region = 0
                 affected = {}
+                # this is a misnomer! Recombinant haplotypes is better . . .
                 homoplasies = {}
+                SNPs_per_homoplasy = {}
                 for (MSA_s,MSA_e),SNPs in sorted(plot_transfers.items()):
                     these_samples = set()
                     for samples in SNPs.values():
@@ -2046,9 +2062,10 @@ class Plotter:
                     # this time record in terms of reference genome positions
                     SNP_ref_positions = [SNP[0] for SNP in SNPs]
                     homoplasy = min(SNP_ref_positions),max(SNP_ref_positions)
-                    
+                    SNPs_here = SNPs
                     if homoplasy not in homoplasies:
                         homoplasies[homoplasy] = []
+                        SNPs_per_homoplasy[homoplasy] = SNPs
                     
                     homoplasies[homoplasy] += [(
                                      # name of node
