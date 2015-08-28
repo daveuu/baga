@@ -1062,7 +1062,14 @@ class Phylogenetics:
                         try:
                             SNPs_by_homoplasies[s,e][variable_positions_pos1[s+n], ref_seq[n], ch] += [sample]
                         except KeyError:
-                            SNPs_by_homoplasies[s,e][variable_positions_pos1[s+n], ref_seq[n], ch] = [sample]
+                            try:
+                                print(variable_positions_pos1[s+n])
+                                print(ref_seq[n])
+                                print(ch)
+                                SNPs_by_homoplasies[s,e][variable_positions_pos1[s+n], ref_seq[n], ch] = [sample]
+                            except KeyError:
+                                # not a SNP?
+                                pass
                 
                 if len(SNPs_by_homoplasies[s,e]) == 0:
                     print(sample_seq)
