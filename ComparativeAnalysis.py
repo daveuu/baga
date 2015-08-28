@@ -55,20 +55,20 @@ try:
     import pysam as _pysam
 except ImportError:
     print('WARNING: the MultipleSequenceAlignment Class requires PySAM but it could not be imported')
-    print('Try "{} Dependencies --get pysam" to install locally'.format(sys.argv[0]))
+    print('Try "{} Dependencies --get pysam" to install locally'.format(_sys.argv[0]))
 
 
 try:
     import dendropy as _dendropy
 except ImportError:
     print('WARNING: the Plotter Class requires the DendroPy version 4 module but DendroPy could not be imported')
-    print('Try "{} Dependencies --get dendropy" to install locally'.format(sys.argv[0]))
+    print('Try "{} Dependencies --get dendropy" to install locally'.format(_sys.argv[0]))
 
 try:
     import svgwrite as _svgwrite
 except ImportError:
     print('WARNING: the Plotter Class requires the svgwrite module but it could not be imported')
-    print('Try "{} Dependencies --get svgwrite" to install locally'.format(sys.argv[0]))
+    print('Try "{} Dependencies --get svgwrite" to install locally'.format(_sys.argv[0]))
 
 
 def main():
@@ -1639,7 +1639,7 @@ class Plotter:
                                         text_anchor='middle', 
                                         font_size = '10pt'))
 
-        # some things have to be as CSS style stings for InkScape
+        # some things have to be as CSS style strings for InkScape
         add_to_this.add(self.dwg.line(  (x, s), (x, e), 
                                 stroke = self.rgb(*colour), 
                                 style = 'stroke-linecap:%s' % ends, 

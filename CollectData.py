@@ -436,10 +436,10 @@ class Reads:
             try:
                 if _os.path.getsize(p2) == 0:
                     print('File access fail: {}'.format(p2))
-                    sys.exit(1)
+                    _sys.exit(1)
             except OSError:
                 print('File access fail: {}'.format(p2))
-                sys.exit(1)
+                _sys.exit(1)
             
             p1_f = p1.split(_os.path.sep)[-1]
             p2_f = p2.split(_os.path.sep)[-1]
