@@ -251,7 +251,12 @@ def reportCumulative(filter_order, reference_id, VCFs, VCFs_indels = False):
         except KeyError:
             this_row = ['None']
         
-        totals_by_type = dict(zip(variant_type_order, [0] * len(variant_type_order)))
+        # must be saved as sets to only count variants once each
+        #totals_by_type = dict(zip(variant_type_order, [set()] * len(variant_type_order)))
+        totals_by_type = {}
+        for varianttype in variant_type_order:
+            totals_by_type[varianttype] = set()
+        
         for dataset,varianttypes in sorted(VCFs_use.items()):
             print(dataset)
             for varianttype in variant_type_order:
@@ -261,9 +266,10 @@ def reportCumulative(filter_order, reference_id, VCFs, VCFs_indels = False):
                 by_position, by_position_filtered = to_by_position_filtered(variants, cumulative_filters)
                 print(varianttype, len(by_position[reference_id]))
                 this_row += [len(by_position[reference_id])]
-                totals_by_type[varianttype] += len(by_position[reference_id])
+                totals_by_type[varianttype].update([info[0] for info in by_position[reference_id]])
+                print(totals_by_type[varianttype])
         
-        this_row += map(totals_by_type.get, variant_type_order)
+        this_row += [len(totals_by_type[varianttype]) for varianttype in variant_type_order]
         
         rows += [this_row]
 
@@ -280,7 +286,7 @@ def to_by_position_filtered(variants, filters_applied, summarise = True):
     by_position_filtered = _defaultdict(_Counter)
     for sample, chromosomes in variants.items():
         for chromosome, positions in chromosomes.items():
-            # iterate through varinats by position
+            # iterate through variants by position
             for position, ((reference,query),filters) in sorted(positions.items()):
                 if len(filters & filters_applied) == 0:
                     # retain variants without any filters flagged (of those we are interested in)
@@ -826,7 +832,7 @@ class Filter:
 
     def markVariants(self, filters_to_apply):
         '''
-        Given details of one or more filter to apply, write new VCFs with varinats marked
+        Given details of one or more filter to apply, write new VCFs with variants marked
         '''
         all_filtered = {}
         for VCF_path in self.VCF_paths:
@@ -898,11 +904,12 @@ class Filter:
         self.all_filtered = all_filtered
 
 
-    def reportFiltered(self):
+    def reportFiltered(self, to_csv = True):
         '''
         Generate a "comma separated values" (.csv) text file for loading into a 
         spreadsheet or importing into a document that summarises variants in one or 
-        more VCF files.
+        more VCF files. If to_csv = False, parsed variants are only stored as an 
+        attribute for further analysis.
         '''
         #self.known_filters['genome_repeats']['per_sample']
         for VCF, filters in self.all_filtered.items():
@@ -934,29 +941,34 @@ class Filter:
                             else:
                                 per_sample_per_position_info[sample][position] = [(ref_char_state, sample_char_state, this_filter)]
             
-            outfilename = VCF[:-3] + 'filtered.csv'
-            print('Writing list of filtered variants to:\n{}'.format(outfilename))
-            with open(outfilename, 'w') as fout:
-                colnames = ['sample', 'position', 'CDS', 'reference', 'variant', 'filter']
-                fout.write(','.join(['"'+c+'"' for c in colnames])+'\n')
-                for sample, positions in sorted(per_sample_per_position_info.items()):
-                    for position, info in sorted(positions.items()):
-                        ORFs = [ORF for ORF,(s, e, d, name) in self.ORF_ranges.items() if s < position <= e]
-                        ORFnames = []
-                        for ORF in ORFs:
-                            if len(name):
-                                ORFnames += ['{} ({})'.format(ORF,name)]
+            # save for general use
+            self.per_sample_per_position_info = per_sample_per_position_info
+            
+            if to_csv:
+                outfilename = VCF[:-3] + 'filtered.csv'
+                print('Writing list of filtered variants to:\n{}'.format(outfilename))
+                with open(outfilename, 'w') as fout:
+                    colnames = ['sample', 'position', 'CDS', 'reference', 'variant', 'filter']
+                    fout.write(','.join(['"'+c+'"' for c in colnames])+'\n')
+                    for sample, positions in sorted(per_sample_per_position_info.items()):
+                        for position, info in sorted(positions.items()):
+                            ORFs = [ORF for ORF,(s, e, d, name) in self.ORF_ranges.items() if s < position <= e]
+                            ORFnames = []
+                            for ORF in ORFs:
+                                if len(name):
+                                    ORFnames += ['{} ({})'.format(ORF,name)]
+                                else:
+                                    ORFnames += ['{}'.format(ORF)]
+                            
+                            if len(ORFnames) > 0:
+                                ORF = '"'+','.join(ORFnames)+'"'
                             else:
-                                ORFnames += ['{}'.format(ORF)]
-                        
-                        if len(ORFnames) > 0:
-                            ORF = '"'+','.join(ORFnames)+'"'
-                        else:
-                            ORF = '""'
-                        
-                        for (ref_char_state, sample_char_state, this_filter) in info:
-                            row_cells = ['"'+sample+'"', str(position), ORF, '"'+ref_char_state+'"', '"'+sample_char_state+'"', '"'+this_filter+'"']
-                            fout.write(','.join(row_cells)+'\n')
+                                ORF = '""'
+                            
+                            for (ref_char_state, sample_char_state, this_filter) in info:
+                                row_cells = ['"'+sample+'"', str(position), ORF, '"'+ref_char_state+'"', '"'+sample_char_state+'"', '"'+this_filter+'"']
+                                fout.write(','.join(row_cells)+'\n')
+
 
 
     def doFiltering(self, filters):
