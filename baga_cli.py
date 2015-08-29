@@ -220,8 +220,9 @@ mutually_exclusive_group.add_argument("-r", "--reads_download",
     nargs = '+')
 
 mutually_exclusive_group.add_argument("-R", "--reads_path", 
-    help="path to local short reads in fastq files for analysis", 
-    type = str)
+    help="path to local short reads in fastq files for analysis. All read files will be collcted. Alternatively, a pattern containing '*' '?' and other shell expansion characters or an explicit list of read files can also be supplied.", 
+    type = str,
+    nargs = '+')
 
 
 parser_CollectData.add_argument('-e', "--email_address", 
@@ -931,13 +932,14 @@ if args.subparser == 'CollectData':
 
 if args.subparser == 'CollectData':
     if args.reads_path is not None:
-        # check read group name provided for Entrez, if any accession found
+        # check read group name provided
         if args.reads_group_name is None:
-            print(textwrap.fill('--reads_group_name is required for loading reads \
-from a local path', text_width))
+            print(textwrap.fill('--reads_group_name is required for loading reads from a local path', text_width))
             sys.exit(1)
         
-        use_reads_path = args.reads_path.strip('"').strip("'")
+        use_reads_path = []
+        for path in args.reads_path:
+            use_reads_path += [path.strip('"').strip("'")]
         
         use_reads_group_name, sanitised = sanitize_filename(args.reads_group_name)
         

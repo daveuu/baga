@@ -388,34 +388,40 @@ class Reads:
         Given a path to pairs of fastq short read files, parse them ready for analysis 
         with the Bacteria and Archaea Genome (BAG) Analyser.
         '''    
-        file_list = _glob(_os.path.sep.join([path_to_fastq, '*.fastq']))
-        file_list += _glob(_os.path.sep.join([path_to_fastq, '*.fq']))
-        file_list.sort()
 
-        file_list_gz = _glob(_os.path.sep.join([path_to_fastq, '*.fastq.gz']))
-        file_list_gz += _glob(_os.path.sep.join([path_to_fastq, '*.fq.gz']))
-        file_list_gz.sort()
-
-        if len(file_list) == 0 and len(file_list_gz) == 0:
-            print('Error: did not find any files at {} nor {}'.format(file_list, file_list_gz))
-            print('Please check paths and try again . . .')
-            _sys.exit(1)
+        if len(path_to_fastq) == 1:
+            # supplied with path to folder - need to check contents
+            file_list = _glob(_os.path.sep.join([path_to_fastq[0], '*.fastq']))
+            file_list += _glob(_os.path.sep.join([path_to_fastq[0], '*.fq']))
+            file_list.sort()
             
-        elif len(file_list) == 0 and len(file_list_gz) > 0:
-            print('Found {} total gzipped fastq files'.format(len(file_list_gz)))
-            use_files = file_list_gz
+            file_list_gz = _glob(_os.path.sep.join([path_to_fastq[0], '*.fastq.gz']))
+            file_list_gz += _glob(_os.path.sep.join([path_to_fastq[0], '*.fq.gz']))
+            file_list_gz.sort()
             
-        elif len(file_list) > 0 and len(file_list_gz) == 0:
-            print('Found {} total uncompressed fastq files'.format(len(file_list)))
-            use_files = file_list
-            
+            if len(file_list) == 0 and len(file_list_gz) == 0:
+                print('Error: did not find any files at {} nor {}'.format(file_list, file_list_gz))
+                print('Please check paths and try again . . .')
+                _sys.exit(1)
+                
+            elif len(file_list) == 0 and len(file_list_gz) > 0:
+                print('Found {} total gzipped fastq files'.format(len(file_list_gz)))
+                use_files = file_list_gz
+                
+            elif len(file_list) > 0 and len(file_list_gz) == 0:
+                print('Found {} total uncompressed fastq files'.format(len(file_list)))
+                use_files = file_list
+                
+            else:
+                print('Found compressed and uncompressed fastq files.\n\
+            Using {} gzipped files'.format(len(file_list_gz)))
+                # could select from a combination without doubling up . . .
+                # preference for uncompressed:
+                # use_files = sorted(list(set(file_list_gz) - set([f+'.gz' for f in file_list])) + file_list)
+                use_files = file_list_gz
         else:
-            print('Found compressed and uncompressed fastq files.\n\
-        Using {} gzipped files'.format(len(file_list_gz)))
-            # could select from a combination without doubling up . . .
-            # preference for uncompressed:
-            # use_files = sorted(list(set(file_list_gz) - set([f+'.gz' for f in file_list])) + file_list)
-            use_files = file_list_gz
+            # supplied with list of reads or shell expansion
+            use_files = sorted(path_to_fastq)
 
         if len(use_files) % 2 != 0:
             print('Please supply an even number of paired files')
