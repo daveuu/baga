@@ -428,6 +428,7 @@ class Reads:
             _sys.exit(1)
 
         # match pairs
+        checked_read_files = {}
         for n,f in enumerate(use_files[::2]):
             #print(f,use_files[n*2 + 1])
             p1, p2 = f,use_files[n*2 + 1]
@@ -449,7 +450,6 @@ class Reads:
             
             p1_f = p1.split(_os.path.sep)[-1]
             p2_f = p2.split(_os.path.sep)[-1]
-            checked_read_files = {}
             for a in range(len(p1)):
                 if p1_f[a] != p2_f[a]:
                     break
