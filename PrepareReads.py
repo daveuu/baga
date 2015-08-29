@@ -89,13 +89,19 @@ class Reads:
         fileout = 'baga.PrepareReads.Reads-%s.baga' % name
         print('Saving to %s' % fileout)
         _cPickle.dump(self, _gzip.open(fileout, 'wb'))
-    def subsample(self, genome_size = 6601757, read_cov_depth = 80, pc_loss = 0.2, force = False):
+    def subsample(self, genome_size = 6601757, 
+                        read_cov_depth = 80, 
+                        pc_loss = 0.2, 
+                        force = False, 
+                        cov_closeness = 5):
         '''
         Given the size in basepairs of a genome sequence, downsample fastq files to a 
         desired average read coverage depth predicted after read alignment. Read lengths
         are taken from the file. By default, 20% are assumed to be lost at downstream 
         quality control stages (e.g. quality score based trimming). The percent loss is 
-        used in coverage depth estimation.
+        used in coverage depth estimation. cov_closeness, which defaults to 5, will prevent
+        subsampling if within 5x coverage: avoids time consuming subsampling that will only 
+        make a small difference.
         '''
 
         subsampled_read_files = {}
@@ -144,6 +150,19 @@ class Reads:
                 
                 if numreads2keep >= totalreads:
                     print('This pair of read files is estimated to provide only {:.1f}x coverage, but {}x requested.'.format(full_depth_coverage, read_cov_depth))
+                    print('No sampling performed. Original files will be used')
+                    # pass original files over with subsampled
+                    subsampled_read_files[run_acc] = {}
+                    subsampled_read_files[run_acc][1] = files[1]
+                    subsampled_read_files[run_acc][2] = files[2]
+                    fh1.close()
+                    if len(self.read_files) > 1:
+                        # report durations, time left etc
+                        _report_time(start_time, cnum, len(self.read_files))
+                    
+                    continue
+                elif full_depth_coverage < read_cov_depth + cov_closeness:
+                    print('This pair of read files is estimated to provide {:.1f}x coverage which is within {}x of {}x requested.'.format(full_depth_coverage, cov_closeness, read_cov_depth))
                     print('No sampling performed. Original files will be used')
                     # pass original files over with subsampled
                     subsampled_read_files[run_acc] = {}
