@@ -70,11 +70,15 @@ class SAMs:
             try:
                 self.read_files = reads.trimmed_read_files
             except AttributeError:
-                print('''
-        baga.AlignReads.Reads needs a baga.PrepareReads.Reads object 
-        with a "trimmed_read_files" attribute. This can be obtained with the 
-        "trim()" method of the PrepareReads module.
-        ''')
+                text = 'WARNING: baga was not used to quality-score trim these reads. Read trimming is recommended for most types of analysis. This can be achieved with the "trim()" method of the Reads class in the PrepareReads module.'
+                print(text)
+                try:
+                    self.read_files = reads.adaptorcut_read_files
+                except AttributeError:
+                    text = 'WARNING: baga was not used to remove library preparation adaptor sequences from these reads. Adaptor removal is highly recommended so hopefully you already removed adaptor sequences! This can be achieved with the "cutAdaptors()" method of the Reads class in the PrepareReads module.'
+                    self.read_files = reads.read_files
+                    print(text)
+                    print('continuing with these reads . . .')
             
             self.genome_sequence = genome.sequence
             self.genome_id = genome.id
@@ -168,14 +172,11 @@ class SAMs:
         max_processes = _decide_max_processes( max_cpus )
 
 
-        e1 = 'Could not find "read_files" attribute. \
-        Before aligning to genome, reads must be quality score \
-        trimmed. Please run trim() method on this Reads instance.'
+        e1 = 'Could not find "read_files" attribute. Before aligning to genome, reads must be quality score trimmed. Please run trim() method on this Reads instance.'
 
         assert hasattr(self, 'read_files'), e1
 
-        e2 = 'Could not find %s. Either run trim() again \
-        or ensure file exists'
+        e2 = 'Could not find %s. Either run trim() again or ensure file exists'
 
         for run_acc, files in self.read_files.items():
             assert _os.path.exists(files[1]), e2 % files[1]
