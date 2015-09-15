@@ -200,7 +200,7 @@ download short reads for analysis by {}'.format(title),
 files with user provided paths or downloaded from the National Center for \
 Biotechnology Information (NCBI) with user provided accession numbers. Short \
 reads can be downloaded from the European Nucleotide Archive with user provided \
-Run Accession numbers\n\nExample usage: "%(prog)s CollectData -r \
+Run Accession numbers\n\nExample usage: "%(prog)s -r \
 ERR953490,ERR953494,ERR953501,ERR953509,ERR953491,ERR953513"\n'\
 .format(title), text_width, replace_whitespace = False))
 
@@ -240,7 +240,7 @@ quality scores. Align reads to a reference genome sequence.',
                                             replace_whitespace = False),
                 epilog = textwrap.fill('Groups of read data sets from the \
 CollectData option are loaded by providing the file name.\n\n\
-Example usage: "%(prog)s PrepareReads --reads_name ERR953490plus5others --adaptors --trim --align FM209186"\n', 
+Example usage: "%(prog)s --reads_name ERR953490plus5others --adaptors --trim --align FM209186"\n', 
 text_width, replace_whitespace = False))
 
 
@@ -296,7 +296,7 @@ parser_AlignReads = subparser_adder.add_parser('AlignReads',
                                             replace_whitespace = False),
                 epilog = textwrap.fill('Reads prepared by the PrepareReads module are loaded. \
 A genome prepared by the CollectData option are loaded by providing the file name.\n\n\
-Example usage: "%(prog)s AlignReads --reads_name ERR953490plus5others --genome_name FM209186 --align"\n', 
+Example usage: "%(prog)s --reads_name ERR953490plus5others --genome_name FM209186 --align"\n', 
 text_width, replace_whitespace = False))
 
 parser_AlignReads.add_argument('-n', "--reads_name", 
@@ -357,7 +357,7 @@ variation at orthologous regions.',
                                             replace_whitespace = False),
                 epilog = textwrap.fill('The Repeats finder is expected to \
 operate on a genome obtained via the CollectData option.\n\n\
-Example usage: %(prog)s Repeats --genome_name FM209186.1 --find\n', 
+Example usage: %(prog)s --genome_name FM209186.1 --find\n', 
 text_width, replace_whitespace = False))
 
 parser_Repeats.add_argument('-g', "--genome_name", 
@@ -406,8 +406,8 @@ operate on a genome obtained via the CollectData option; and either a set of BAM
 files in a user provided path or a reads group processed with the AlignReads option. \
 \n\n\
 Example usages:\n\
-%(prog)s Structure --genome_name FM209186.1 --reads_name Liverpool --check\n\
-%(prog)s Structure --genome_name FM209186.1 --alignments_path path/to/my/bams --check\n', 
+%(prog)s --genome_name FM209186.1 --reads_name Liverpool --check\n\
+%(prog)s --genome_name FM209186.1 --alignments_path path/to/my/bams --check\n', 
 text_width, replace_whitespace = False))
 
 mutually_exclusive_group = parser_Structure.add_mutually_exclusive_group(required=True)
@@ -454,7 +454,7 @@ genome via the PrepareReads option.',
                                             replace_whitespace = False),
                 epilog = textwrap.fill('Groups of read sets from the \
 AlignReads option are loaded by providing the name supplied previously.\n\n\
-Example usage: %(prog)s CallVariants --reads_name ERR953490plus5others \
+Example usage: %(prog)s --reads_name ERR953490plus5others \
 --calleach --calljoint --hardfilter\n', 
 text_width, replace_whitespace = False))
 
@@ -528,7 +528,7 @@ Vaiants can be inferred using the CallVariants option.',
                                             replace_whitespace = False),
                 epilog = textwrap.fill('Filter regions and VCF files are \
 loaded by providing the read set names (or VCF filenames, to be implemented).\n\n\
-Example usage: %(prog)s ApplyFilters --reads_name ERR953490plus5others \
+Example usage: %(prog)s --reads_name ERR953490plus5others \
 --genome FM209186 --filters genome_repeats rearrangements\n', 
 text_width, replace_whitespace = False))
 
@@ -576,8 +576,8 @@ from SNPs in VCFs with a reference genome, infer phylogenies and homologous \
 recombination events.',
                                             text_width,
                                             replace_whitespace = False),
-                epilog = textwrap.fill('Example usage: %(prog)s ComparativeAnalysis \
---buildMSA --reads_name Liverpool --genome FM209186.1  --include_invariants\n', 
+                epilog = textwrap.fill('Example usage: %(prog)s --buildMSA \
+--reads_name Liverpool --genome FM209186.1  --include_invariants\n', 
 text_width, replace_whitespace = False))
 
 mutually_exclusive_group = parser_ComparativeAnalysis.add_mutually_exclusive_group(required=True)
