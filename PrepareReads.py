@@ -29,6 +29,7 @@ from baga import _multiprocessing
 from baga import _cPickle
 from baga import _gzip
 from baga import _time
+from baga import _re
 from cStringIO import StringIO as _StringIO
 from random import sample as _sample
 
@@ -64,6 +65,17 @@ def cpu_count():
             return res
     except (KeyError, ValueError):
         pass
+def insert_suffix(path, insert_suffix, known_suffixes = ['.fastq.gz','.fq.gz','.fastq','.fq']):
+    this_suffix = False
+    for known_suffix in known_suffixes:
+        thismatch = _re.findall('('+known_suffix+')$', path)
+        if thismatch:
+            this_suffix = thismatch[0]
+            break
+    
+    assert this_suffix, 'Could not find any known suffixes in {} . . . please report this as a bug.'.format(path)
+    processed_path = _re.sub(this_suffix+'$', insert_suffix+this_suffix, path)
+    return(processed_path)
 class Reads:
     '''
     Prepare reads for alignment to genome sequence by removing adaptor sequences 
@@ -106,17 +118,10 @@ class Reads:
 
         subsampled_read_files = {}
         start_time = _time.time()
-        for cnum,(run_acc,files) in enumerate(self.read_files.items()):
-            #files = {1: 'reads/ERR_______1.fastq.gz', 2: 'reads/ERR_______2.fastq.gz'}
-            #for run_acc,files in read_files.items(): #break
-            original_name_1 = files[1].split(_os.path.sep)[-1].split(_os.path.extsep)[0]
-            original_name_2 = files[2].split(_os.path.sep)[-1].split(_os.path.extsep)[0]
-            #extensions = _os.path.extsep.join(files[1].split(_os.path.sep)[-1].split(_os.path.extsep)[1:])
-            path = files[1].split(_os.path.sep)[:-1]
-            processed_name_1 = original_name_1+'_subsmp.fastq.gz'
-            processed_name_2 = original_name_2+'_subsmp.fastq.gz'
-            processed_path_1 = _os.path.sep.join(path + [processed_name_1])
-            processed_path_2 = _os.path.sep.join(path + [processed_name_2])
+        for cnum,(pairname,files) in enumerate(self.read_files.items()):
+            
+            processed_path_1 = insert_suffix(files[1], '_subsmp')
+            processed_path_2 = insert_suffix(files[2], '_subsmp')
             
             if not all([_os.path.exists(processed_path_1), 
                         _os.path.exists(processed_path_2)]) \
@@ -130,7 +135,7 @@ class Reads:
                 aread = _SeqIO.parse(fh1, 'fastq').next()
                 read_len = len(aread.seq)
                 
-                print('Counting reads in %s' % original_name_1)
+                print('Counting reads in %s' % files[1])
                 fh1.seek(0)
                 lines = 0
                 # report per half million reads
@@ -152,9 +157,9 @@ class Reads:
                     print('This pair of read files is estimated to provide only {:.1f}x coverage, but {}x requested.'.format(full_depth_coverage, read_cov_depth))
                     print('No sampling performed. Original files will be used')
                     # pass original files over with subsampled
-                    subsampled_read_files[run_acc] = {}
-                    subsampled_read_files[run_acc][1] = files[1]
-                    subsampled_read_files[run_acc][2] = files[2]
+                    subsampled_read_files[pairname] = {}
+                    subsampled_read_files[pairname][1] = files[1]
+                    subsampled_read_files[pairname][2] = files[2]
                     fh1.close()
                     if len(self.read_files) > 1:
                         # report durations, time left etc
@@ -165,9 +170,9 @@ class Reads:
                     print('This pair of read files is estimated to provide {:.1f}x coverage which is within {}x of {}x requested.'.format(full_depth_coverage, cov_closeness, read_cov_depth))
                     print('No sampling performed. Original files will be used')
                     # pass original files over with subsampled
-                    subsampled_read_files[run_acc] = {}
-                    subsampled_read_files[run_acc][1] = files[1]
-                    subsampled_read_files[run_acc][2] = files[2]
+                    subsampled_read_files[pairname] = {}
+                    subsampled_read_files[pairname][1] = files[1]
+                    subsampled_read_files[pairname][2] = files[2]
                     fh1.close()
                     if len(self.read_files) > 1:
                         # report durations, time left etc
@@ -333,73 +338,14 @@ class Reads:
                 # report durations, time left etc
                 _report_time(start_time, cnum, len(self.read_files))
             
-            subsampled_read_files[run_acc] = {}
-            subsampled_read_files[run_acc][1] = processed_path_1
-            subsampled_read_files[run_acc][2] = processed_path_2
+            subsampled_read_files[pairname] = {}
+            subsampled_read_files[pairname][1] = processed_path_1
+            subsampled_read_files[pairname][2] = processed_path_2
 
         # replace here as this step is optional
         self.fullsized_read_files = list(self.read_files)
         self.read_files = subsampled_read_files
 
-    def cutAdaptors_old(self, path_to_exe = False, force = False, max_cpus = -1):
-
-        if not path_to_exe:
-            path_to_exe = _get_exe_path('cutadapt')
-
-        adaptorcut_read_files = {}
-        adaptor_seqs = [
-            'AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC',
-            'AGATCGGAAGAGCACACGTCT',
-            'AGATCGGAAGAGC',
-            'GATCGGAAGAGCGGTTCAGCAGGAATGCCGAG',
-            'ACACTCTTTCCCTACACGACGCTCTTCCGATCT',
-        ]
-
-        start_time = _time.time()
-
-        for cnum,(run_acc,files) in enumerate(self.read_files.items()):
-            original_name_1 = files[1].split(_os.path.sep)[-1].split(_os.path.extsep)[0]
-            original_name_2 = files[2].split(_os.path.sep)[-1].split(_os.path.extsep)[0]
-            path = files[1].split(_os.path.sep)[:-1]
-            # add a suffix for this analysis step
-            extensions = _os.path.extsep.join([''] + files[1].split(_os.path.sep)[-1].split(_os.path.extsep)[1:])
-            processed_name_1 = original_name_1 + '_adpt' + extensions
-            processed_name_2 = original_name_2 + '_adpt' + extensions
-            processed_path_1 = _os.path.sep.join(path + [processed_name_1])
-            processed_path_2 = _os.path.sep.join(path + [processed_name_2])
-            # single end
-            cmd = [path_to_exe] + \
-                  [a for b in [('-a', a) for a in adaptor_seqs] for a in b] + \
-                  ['-o', processed_path_1, files[1]]
-            # paired end
-            cmd = [path_to_exe] + \
-                  [a for b in [('-a', a) for a in adaptor_seqs] for a in b] + \
-                  [a for b in [('-A', a) for a in adaptor_seqs] for a in b] + \
-                  ['-o', processed_path_1, '-p', processed_path_2] + \
-                  [files[1], files[2]]
-            
-            if not all([_os.path.exists(processed_path_1), 
-                        _os.path.exists(processed_path_2)]) \
-                    or force:
-                
-                print('Called: "%s"' % ' '.join(cmd))
-                with open(_os.path.sep.join(path + [run_acc+'_cutadapt.log']),"w") as out:
-                    _subprocess.call(cmd, stdout = out)
-            else:
-                print('Found:')
-                print(processed_path_1)
-                print(processed_path_2)
-                print('use "force = True" to overwrite')
-            
-            if len(self.read_files) > 1:
-                # report durations, time left etc
-                _report_time(start_time, cnum, len(self.read_files))
-            
-            adaptorcut_read_files[run_acc] = {}
-            adaptorcut_read_files[run_acc][1] = processed_path_1
-            adaptorcut_read_files[run_acc][2] = processed_path_2
-
-        self.adaptorcut_read_files = adaptorcut_read_files
     def cutAdaptors(self, path_to_exe = False, force = False, max_cpus = -1):
 
         if not path_to_exe:
@@ -414,18 +360,17 @@ class Reads:
             'ACACTCTTTCCCTACACGACGCTCTTCCGATCT',
         ]
 
+
         cmds = []
         processed_paths_to_do = []
-        for cnum,(run_acc,files) in enumerate(self.read_files.items()):
-            original_name_1 = files[1].split(_os.path.sep)[-1].split(_os.path.extsep)[0]
-            original_name_2 = files[2].split(_os.path.sep)[-1].split(_os.path.extsep)[0]
-            path = files[1].split(_os.path.sep)[:-1]
-            # add a suffix for this analysis step
-            extensions = _os.path.extsep.join([''] + files[1].split(_os.path.sep)[-1].split(_os.path.extsep)[1:])
-            processed_name_1 = original_name_1 + '_adpt' + extensions
-            processed_name_2 = original_name_2 + '_adpt' + extensions
-            processed_path_1 = _os.path.sep.join(path + [processed_name_1])
-            processed_path_2 = _os.path.sep.join(path + [processed_name_2])
+        for cnum,(pairname,files) in enumerate(self.read_files.items()):
+            
+            processed_path_1 = insert_suffix(files[1], '_adpt')
+            processed_path_2 = insert_suffix(files[2], '_adpt')
+            
+            print(files[1], processed_path_1)
+            print(files[2], processed_path_2)
+            
             # single end
             cmd = [path_to_exe] + \
                   [a for b in [('-a', a) for a in adaptor_seqs] for a in b] + \
@@ -444,7 +389,7 @@ class Reads:
                 # collect expected outputs
                 processed_paths_to_do += [(processed_path_1,processed_path_2)]
                 # collect all the commands to be issued
-                cmds += [(run_acc,cmd)]
+                cmds += [(pairname,cmd)]
                 
             else:
                 print('Found:')
@@ -452,9 +397,9 @@ class Reads:
                 print(processed_path_2)
                 print('use "force = True" to overwrite')
                 
-                adaptorcut_read_files[run_acc] = {}
-                adaptorcut_read_files[run_acc][1] = processed_path_1
-                adaptorcut_read_files[run_acc][2] = processed_path_2
+                adaptorcut_read_files[pairname] = {}
+                adaptorcut_read_files[pairname][1] = processed_path_1
+                adaptorcut_read_files[pairname][2] = processed_path_2
 
 
 
@@ -464,11 +409,12 @@ class Reads:
             processes = {}
             
             ### how to combine this which hangs on _os.wait()
-            for run_acc,cmd in cmds:
+            for pairname,cmd in cmds:
                 
                 print('Called: "%s"' % ' '.join(cmd))
                 # process is key, open file being piped to is value
-                this_stdout_file = open(_os.path.sep.join(path + [run_acc+'_cutadapt.log']),"w")
+                # baga CollectReads currently includes path in pairname
+                this_stdout_file = open(pairname+'_cutadapt.log',"w")
                 thisprocess = _subprocess.Popen(cmd, shell=False, stdout = this_stdout_file)
                 processes[thisprocess] = this_stdout_file
                 
@@ -488,14 +434,14 @@ class Reads:
 
 
         fails = []
-        for (run_acc,cmd),(processed_path_1,processed_path_2) in zip(cmds,processed_paths_to_do):
+        for (pairname,cmd),(processed_path_1,processed_path_2) in zip(cmds,processed_paths_to_do):
             if _os.path.exists(processed_path_1) and _os.path.exists(processed_path_2):
                 print('Found:')
                 print(processed_path_1)
                 print(processed_path_2)
-                adaptorcut_read_files[run_acc] = {}
-                adaptorcut_read_files[run_acc][1] = processed_path_1
-                adaptorcut_read_files[run_acc][2] = processed_path_2
+                adaptorcut_read_files[pairname] = {}
+                adaptorcut_read_files[pairname][1] = processed_path_1
+                adaptorcut_read_files[pairname][2] = processed_path_2
             else:
                 print('Processing of the following pair seems to have failed')
                 print(processed_path_1)
@@ -525,26 +471,20 @@ class Reads:
         e2 = 'Could not find %s. Either run cutAdaptors() again \
         or ensure file exists'
 
-        for run_acc, files in self.adaptorcut_read_files.items():
+        for pairname, files in self.adaptorcut_read_files.items():
             assert _os.path.exists(files[1]), e2 % files[1]
             assert _os.path.exists(files[1]), e2 % files[1]
 
         trimmed_read_files = {}
 
+        print(sorted(self.adaptorcut_read_files))
+
         cmds = []
         processed_paths_to_do = []
-        for run_acc,files in self.adaptorcut_read_files.items():
-            original_name_1 = files[1].split(_os.path.sep)[-1].split(_os.path.extsep)[0]
-            original_name_2 = files[2].split(_os.path.sep)[-1].split(_os.path.extsep)[0]
-            path = files[1].split(_os.path.sep)[:-1]
-            # add a suffix for this analysis step
-            extensions = _os.path.extsep.join([''] + files[1].split(_os.path.sep)[-1].split(_os.path.extsep)[1:])
-            processed_name_1 = original_name_1 + '_qual' + extensions
-            processed_name_2 = original_name_2 + '_qual' + extensions
-            processed_name_s = original_name_1 + '_singletons_qual' + extensions
-            processed_path_1 = _os.path.sep.join(path + [processed_name_1])
-            processed_path_2 = _os.path.sep.join(path + [processed_name_2])
-            processed_path_s = _os.path.sep.join(path + [processed_name_s])
+        for pairname,files in self.adaptorcut_read_files.items():
+            processed_path_1 = insert_suffix(files[1], '_qual')
+            processed_path_2 = insert_suffix(files[2], '_qual')
+            processed_path_s = insert_suffix(files[2], '_singletons_qual')
             # Illumina quality using CASAVA >= 1.8 is Sanger encoded
             QSscore_scale = 'sanger'
             cmd = [exe_sickle, 'pe',
@@ -563,7 +503,7 @@ class Reads:
                 # collect expected outputs
                 processed_paths_to_do += [(processed_path_1,processed_path_2,processed_path_s)]
                 # collect all the commands to be issued
-                cmds += [(run_acc,cmd)]
+                cmds += [(pairname,cmd)]
                 
             else:
                 print('Found:')
@@ -572,9 +512,9 @@ class Reads:
                 print(processed_path_s)
                 print('use "force = True" to overwrite')
                 
-                trimmed_read_files[run_acc] = {}
-                trimmed_read_files[run_acc][1] = processed_path_1
-                trimmed_read_files[run_acc][2] = processed_path_2
+                trimmed_read_files[pairname] = {}
+                trimmed_read_files[pairname][1] = processed_path_1
+                trimmed_read_files[pairname][2] = processed_path_2
 
 
 
@@ -584,11 +524,12 @@ class Reads:
             processes = {}
             
             ### how to combine this which hangs on _os.wait()
-            for run_acc,cmd in cmds:
+            for pairname,cmd in cmds:
                 
                 print('Called: "%s"' % ' '.join(cmd))
                 # process is key, open file being piped to is value
-                this_stdout_file = open(_os.path.sep.join(path + [run_acc+'_sickle.log']),"w")
+                # baga CollectReads currently includes path in pairname
+                this_stdout_file = open(pairname+'_sickle.log',"w")
                 thisprocess = _subprocess.Popen(cmd, shell = False, stdout = this_stdout_file)
                 processes[thisprocess] = this_stdout_file
                 
@@ -608,14 +549,14 @@ class Reads:
 
 
         fails = []
-        for (run_acc,cmd),(processed_path_1,processed_path_2,processed_path_s) in zip(cmds,processed_paths_to_do):
+        for (pairname,cmd),(processed_path_1,processed_path_2,processed_path_s) in zip(cmds,processed_paths_to_do):
             if _os.path.exists(processed_path_1) and _os.path.exists(processed_path_2):
                 print('Found:')
                 print(processed_path_1)
                 print(processed_path_2)
-                trimmed_read_files[run_acc] = {}
-                trimmed_read_files[run_acc][1] = processed_path_1
-                trimmed_read_files[run_acc][2] = processed_path_2
+                trimmed_read_files[pairname] = {}
+                trimmed_read_files[pairname][1] = processed_path_1
+                trimmed_read_files[pairname][2] = processed_path_2
             else:
                 print('Processing of the following pair seems to have failed')
                 print(processed_path_1)

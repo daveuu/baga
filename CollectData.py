@@ -389,79 +389,111 @@ class Reads:
         with the Bacteria and Archaea Genome (BAG) Analyser.
         '''    
 
-        if len(path_to_fastq) == 1:
-            # supplied with path to folder - need to check contents
-            file_list = _glob(_os.path.sep.join([path_to_fastq[0], '*.fastq']))
-            file_list += _glob(_os.path.sep.join([path_to_fastq[0], '*.fq']))
-            file_list.sort()
-            
-            file_list_gz = _glob(_os.path.sep.join([path_to_fastq[0], '*.fastq.gz']))
-            file_list_gz += _glob(_os.path.sep.join([path_to_fastq[0], '*.fq.gz']))
-            file_list_gz.sort()
-            
-            if len(file_list) == 0 and len(file_list_gz) == 0:
-                print('Error: did not find any files at {} nor {}'.format(file_list, file_list_gz))
-                print('Please check paths and try again . . .')
-                _sys.exit(1)
+        use_files = []
+        for path in path_to_fastq:
+            if _os.path.isdir(path):
+                print('Checking in {}'.format(path))
+                # supplied with path to folder - need to check contents
+                path1 = _os.path.sep.join([path_to_fastq[0], '*.fastq'])
+                file_list = _glob(path1)
+                path2 = _os.path.sep.join([path_to_fastq[0], '*.fq'])
+                file_list += _glob(path2)
+                file_list.sort()
                 
-            elif len(file_list) == 0 and len(file_list_gz) > 0:
-                print('Found {} total gzipped fastq files'.format(len(file_list_gz)))
-                use_files = file_list_gz
+                path3 = _os.path.sep.join([path_to_fastq[0], '*.fastq.gz'])
+                file_list_gz = _glob(path3)
+                path4 = _os.path.sep.join([path_to_fastq[0], '*.fq.gz'])
+                file_list_gz += _glob(path4)
+                file_list_gz.sort()
                 
-            elif len(file_list) > 0 and len(file_list_gz) == 0:
-                print('Found {} total uncompressed fastq files'.format(len(file_list)))
-                use_files = file_list
-                
+                if len(file_list) == 0 and len(file_list_gz) == 0:
+                    print('WARNING: did not find any files at {}, {}, {}, nor {}'.format(path1, path2, path3, path4))
+                    
+                elif len(file_list) == 0 and len(file_list_gz) > 0:
+                    print('Found {} total gzipped fastq files'.format(len(file_list_gz)))
+                    use_files += file_list_gz
+                    
+                elif len(file_list) > 0 and len(file_list_gz) == 0:
+                    print('Found {} total uncompressed fastq files'.format(len(file_list)))
+                    use_files += file_list
+                    
+                else:
+                    print('Found compressed and uncompressed fastq files.\n\
+                Using {} gzipped files'.format(len(file_list_gz)))
+                    # could select from a combination without doubling up . . .
+                    # preference for uncompressed:
+                    # use_files = sorted(list(set(file_list_gz) - set([f+'.gz' for f in file_list])) + file_list)
+                    use_files += file_list_gz
             else:
-                print('Found compressed and uncompressed fastq files.\n\
-            Using {} gzipped files'.format(len(file_list_gz)))
-                # could select from a combination without doubling up . . .
-                # preference for uncompressed:
-                # use_files = sorted(list(set(file_list_gz) - set([f+'.gz' for f in file_list])) + file_list)
-                use_files = file_list_gz
-        else:
-            # supplied with list of reads or shell expansion
-            use_files = sorted(path_to_fastq)
+                try:
+                    test = open(path, 'r')
+                    test.close()
+                    # part of a list of reads or shell expansion
+                    use_files += [path]
+                except IOError:
+                    print('WARNING: did not find any files at {}'.format(path))
 
-        if len(use_files) % 2 != 0:
-            print('Please supply an even number of paired files')
+        use_files.sort()
+
+        if len(use_files) == 0:
+            print('Error: could not find any files at {}'.format(', '.join(path_to_fastq)))
+            print('Please check paths and try again . . .')
             _sys.exit(1)
 
+        if len(use_files) % 2 != 0:
+            print('Please supply an even number of paired files. Found {}:\n{}'.format(len(use_files), '\n'.join(use_files)))
+            _sys.exit(1)
+
+
         # match pairs
-        checked_read_files = {}
-        for n,f in enumerate(use_files[::2]):
-            #print(f,use_files[n*2 + 1])
-            p1, p2 = f,use_files[n*2 + 1]
-            try:
-                if _os.path.getsize(p1) == 0:
-                    print('File access fail: {}'.format(p1))
-                    sys.exit(1)
-            except OSError:
-                print('File access fail: {}'.format(p1))
-                sys.exit(1)
+        filepairs = {}
+        for f in use_files:
+            if 'singletons' in f:
+                print('Assuming {} is not part of a pair: ignoring'.format(f))
+                continue
+            
+            bits = _re.split('([^0-9][12][^0-9])', f)
+            assert len(bits) == 3, 'Problem parsing read files: ensure pairs are numbered 1 and 2 . . else please report as bug. Problem filename: {}'.format(f)
+            known_suffixes = ['.fastq.gz','.fq.gz','.fastq','.fq']
+            # make name for each pair that is consistant parts of file name
+            pairname = ' '.join([bits[0],bits[2]])
+            for known_suffix in known_suffixes:
+                thismatch = _re.findall('('+known_suffix+')$', pairname)
+                if thismatch:
+                    pairnamenew = _re.sub('('+thismatch[0]+')$', '', pairname)
+                    #print('Removed {} from {} == {}'.format(thismatch, pairname, pairnamenew))
+                    pairname = pairnamenew.rstrip(' ')
+                    continue
             
             try:
-                if _os.path.getsize(p2) == 0:
-                    print('File access fail: {}'.format(p2))
+                filepairs[pairname][int(bits[1][1])] = f
+            except KeyError:
+                filepairs[pairname] = {int(bits[1][1]): f}
+
+        # check pairs are accessible
+        checked_read_files = {}
+        for pairname,files in filepairs.items():
+            #print('Pair name: {}'.format(pairname))
+            print('Collected pair: {} and {}'.format(files[1], files[2]))
+            
+            try:
+                if _os.path.getsize(files[1]) == 0:
+                    print('File access fail: {}'.format(files[1]))
                     _sys.exit(1)
             except OSError:
-                print('File access fail: {}'.format(p2))
+                print('File access fail: {}'.format(files[1]))
                 _sys.exit(1)
             
-            p1_f = p1.split(_os.path.sep)[-1]
-            p2_f = p2.split(_os.path.sep)[-1]
-            for a in range(len(p1)):
-                if p1_f[a] != p2_f[a]:
-                    break
+            try:
+                if _os.path.getsize(files[2]) == 0:
+                    print('File access fail: {}'.format(files[2]))
+                    _sys.exit(1)
+            except OSError:
+                print('File access fail: {}'.format(files[2]))
+                _sys.exit(1)
             
-            pairname = p1_f[:a]
-            print('Collected pair: {} and {}'.format(p1_f, p2_f))
-            checked_read_files[pairname] = {1: p1, 2: p2}
+            checked_read_files[pairname] = files
 
-        # no check on fails currently
-        # if len(failed) > 0:
-            # print('These failed:')
-            # print(', '.join(failed))
 
         self.read_files = checked_read_files
 

@@ -62,7 +62,7 @@ class SAMs:
         
         OR
         
-        a baga.AlignReads.SAMs (like this one) object that 
+        a path to baga.AlignReads.SAMs (like this one) object that 
         was previously saved.
         '''
         
@@ -79,6 +79,13 @@ class SAMs:
                     self.read_files = reads.read_files
                     print(text)
                     print('continuing with these reads . . .')
+            
+            # currently baga CollectData includes path to reads in pairname keys to read file pair values
+            # check and remove here
+            for pairname, files in self.read_files.items():
+                if _os.path.sep in pairname:
+                    self.read_files[pairname.split(_os.path.sep)[-1]] = files
+                    del self.read_files[pairname]
             
             self.genome_sequence = genome.sequence
             self.genome_id = genome.id
@@ -98,7 +105,7 @@ class SAMs:
                     setattr(self, member.name, contents)
             
         else:
-            raise NameError('instantiate baga.AlignReads.SAMs with either genome and reads or previous saved alignments (baga.AlignReads.SAMs-*.baga)')
+            raise NameError('instantiate baga.AlignReads.SAMs with either loaded baga.PrepareReads.Reads-*.baga and baga.CollectData.Genome-*.baga objects or previous saved alignments (baga.AlignReads.SAMs-*.baga)')
 
 
     def saveLocal(self, name):
@@ -178,7 +185,7 @@ class SAMs:
 
         e2 = 'Could not find %s. Either run trim() again or ensure file exists'
 
-        for run_acc, files in self.read_files.items():
+        for pairname, files in self.read_files.items():
             assert _os.path.exists(files[1]), e2 % files[1]
             assert _os.path.exists(files[1]), e2 % files[1]
 
@@ -189,15 +196,15 @@ class SAMs:
             _subprocess.call([path_to_exe, 'index', genome_fna])
 
         aligned_read_files = {}
-        for run_acc,files in self.read_files.items():
-            RGinfo = r"@RG\tID:%s\tSM:%s\tPL:ILLUMINA" % (run_acc,run_acc)
+        for pairname,files in self.read_files.items():
+            RGinfo = r"@RG\tID:%s\tSM:%s\tPL:ILLUMINA" % (pairname,pairname)
             if insert_size:
                 cmd = [path_to_exe, 'mem', '-t', str(max_processes), '-M', '-a', '-I', insert_size, '-R', RGinfo, genome_fna, files[1], files[2]]
             else:
                 # BWA can estimate on-the-fly
                 cmd = [path_to_exe, 'mem', '-t', str(max_processes), '-M', '-a', '-R', RGinfo, genome_fna, files[1], files[2]]
             
-            out_sam = _os.path.sep.join([local_alns_path_genome, '%s__%s.sam' % (run_acc, self.genome_id)])
+            out_sam = _os.path.sep.join([local_alns_path_genome, '%s__%s.sam' % (pairname, self.genome_id)])
             
             if not _os.path.exists(out_sam) or force:
                 print('Called: "%s"' % ' '.join(cmd))
@@ -211,7 +218,7 @@ class SAMs:
             
             print(' '.join(cmd))
             
-            aligned_read_files[run_acc] = out_sam
+            aligned_read_files[pairname] = out_sam
 
         self.aligned_read_files = aligned_read_files
 
@@ -224,7 +231,7 @@ class SAMs:
 
         paths_to_BAMs = []
 
-        for run_acc,SAM in self.aligned_read_files.items():
+        for pairname,SAM in self.aligned_read_files.items():
             BAM_out = SAM[:-4] + '.bam'
             if not _os.path.exists(BAM_out) or force:
                 cmd = '{0} view -buh {1} | {0} sort - {2}; {0} index {2}.bam'.format(path_to_exe, SAM, SAM[:-4])
