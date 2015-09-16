@@ -263,12 +263,14 @@ resuming an interrupted analysis in which only some read sets were processed.",
     default = False)
 
 parser_PrepareReads.add_argument('-s', "--subsample_to_cov", 
-    help = "subsample reads to a requested coverage of a given genome size. This \
-provides smaller files of a consistent size saving storage space and processing \
-time later and benefitting some analyses like de novo assembly. E.g.\n\
+    help = "subsample reads to a requested average coverage depth of a given \
+genome size. This provides smaller files of a consistent size saving storage \
+space and processing time later and benefitting some analyses like de novo \
+assembly. E.g.\n\
 '--subsample_to_cov 80 5000000' for 80x coverage of a 5 Mb genome.",
     type = int,
-    nargs = 2)
+    nargs = 2,
+    metavar = ('COVERAGE_DEPTH','GENOME_LENGTH'))
 
 parser_PrepareReads.add_argument('-a', "--adaptors", 
     help = "cut residual adaptor sequences from reads using CutAdapt. Defaults to \
