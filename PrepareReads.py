@@ -15,7 +15,7 @@
 # Dr Michael A Brockhurst (University of York, UK)
 #
 '''
-PrepareReads module from the Bacterial and Archaeal Genome (BAG) Analyzer.
+PrepareReads module from the Bacterial and Archaeal Genome Analyzer (BAGA).
 
 This module contains functions to subsample large read sets, and wrappers 
 around tools remove adaptor sequences and trim low quality positions.
@@ -563,7 +563,7 @@ class Reads:
                 print(processed_path_2)
                 fails += [(processed_path_1,processed_path_2)]
 
-        assert len(fails) == 0, 'There was a problem finding all of the output from sickle. Try repeating this or an eralier step with the --force option to overwite previous, possibly incomplete, files'
+        assert len(fails) == 0, 'There was a problem finding all of the output from sickle. Try repeating this or an earlier step with the --force option to overwite previous, possibly incomplete, files'
 
 
         self.trimmed_read_files = trimmed_read_files

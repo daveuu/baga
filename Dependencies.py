@@ -15,7 +15,7 @@
 # Dr Michael A Brockhurst (University of York, UK)
 #
 '''
-Dependencies module from the Bacterial and Archaeal Genome (BAG) Analyzer.
+Dependencies module from the Bacterial and Archaeal Genome Analyzer (BAGA).
 
 This module contains functions to check whether required progams are available.
 It also contains functions to get some of the dependencies.

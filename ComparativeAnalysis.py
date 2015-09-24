@@ -15,7 +15,10 @@
 # Dr Michael A Brockhurst (University of York, UK)
 #
 '''
-Comparative sequence analyses such as phylogenetic reconstruction and homologous recombination from multiple sequence analysis.
+ComparativeAnalysis module from the Bacterial and Archaeal Genome Analyzer (BAGA).
+
+This module contains functions for phylogenetic reconstruction and inference 
+of homologous recombination from multiple sequence analysis.
 '''
 # stdlib
 from baga import _os

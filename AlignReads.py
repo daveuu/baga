@@ -15,7 +15,7 @@
 # Dr Michael A Brockhurst (University of York, UK)
 #
 '''
-AlignReads module from the Bacterial and Archaeal Genome (BAG) Analyzer.
+AlignReads module from the Bacterial and Archaeal Genome Analyzer (BAGA).
 
 This module contains wrappers around tools to align reads to a reference 
 genome, including realignment around possible insertions and deletions.

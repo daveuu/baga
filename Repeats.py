@@ -15,7 +15,7 @@
 # Dr Michael A Brockhurst (University of York, UK)
 #
 '''
-Repeats module from the Bacterial and Archaeal Genome (BAG) Analyzer.
+Repeats module from the Bacterial and Archaeal Genome Analyzer (BAGA).
 
 This module contains functions to detect repetitive regions in a genome 
 sequence and plot them. The intended use is to mark the repetitive regions for 

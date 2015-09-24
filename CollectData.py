@@ -15,7 +15,7 @@
 # Dr Michael A Brockhurst (University of York, UK)
 #
 '''
-CollectData module from the Bacterial and Archaeal Genome (BAG) Analyser.
+CollectData module from the Bacterial and Archaeal Genome Analyzer (BAGA).
 
 This module contains functions to collect reference genomes and query read sets 
 from a the Internet via a URL or from a local path.

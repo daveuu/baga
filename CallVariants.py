@@ -15,7 +15,7 @@
 # Dr Michael A Brockhurst (University of York, UK)
 #
 '''
-CallVariants module from the Bacterial and Archaeal Genome (BAG) Analyzer.
+CallVariants module from the Bacterial and Archaeal Genome Analyzer (BAGA).
 
 This module contains functions to infer single nucleotide polymorphisms, 
 insertions and deletions from short reads mapped to a reference genome using 

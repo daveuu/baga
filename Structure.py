@@ -15,7 +15,7 @@
 # Dr Michael A Brockhurst (University of York, UK)
 #
 '''
-Structure module from the Bacterial and Archaeal Genome (BAG) Analyzer.
+Structure module from the Bacterial and Archaeal Genome Analyzer (BAGA).
 
 This module contains functions to detect structural rearrangements between a 
 reference genome sequence and a query genome for which paired end reads for 
