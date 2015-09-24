@@ -462,7 +462,8 @@ class Reads:
             known_suffixes = ['.fastq.gz','.fq.gz','.fastq','.fq']
             # make name for each pair that is consistant parts of file name
             # joining with space caused problems when incorporating into a filename downstream
-            pairname = '_'.join([bits[0],bits[2]])
+            # and joining with underscore risks introducing double underscore which would cause splitting on __ later to fail
+            pairname = '-'.join([bits[0],bits[2]])
             for known_suffix in known_suffixes:
                 thismatch = _re.findall('('+known_suffix+')$', pairname)
                 if thismatch:
