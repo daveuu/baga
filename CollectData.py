@@ -390,19 +390,24 @@ class Reads:
         '''    
 
         use_files = []
-        for path in path_to_fastq:
+        if isinstance(path_to_fastq, str):
+            use_paths = [path_to_fastq]
+        else:
+            use_paths = path_to_fastq
+
+        for path in use_paths:
             if _os.path.isdir(path):
                 print('Checking in {}'.format(path))
                 # supplied with path to folder - need to check contents
-                path1 = _os.path.sep.join([path_to_fastq[0], '*.fastq'])
+                path1 = _os.path.sep.join([path, '*.fastq'])
                 file_list = _glob(path1)
-                path2 = _os.path.sep.join([path_to_fastq[0], '*.fq'])
+                path2 = _os.path.sep.join([path, '*.fq'])
                 file_list += _glob(path2)
                 file_list.sort()
                 
-                path3 = _os.path.sep.join([path_to_fastq[0], '*.fastq.gz'])
+                path3 = _os.path.sep.join([path, '*.fastq.gz'])
                 file_list_gz = _glob(path3)
-                path4 = _os.path.sep.join([path_to_fastq[0], '*.fq.gz'])
+                path4 = _os.path.sep.join([path, '*.fq.gz'])
                 file_list_gz += _glob(path4)
                 file_list_gz.sort()
                 
@@ -456,7 +461,8 @@ class Reads:
             assert len(bits) == 3, 'Problem parsing read files: ensure pairs are numbered 1 and 2 . . else please report as bug. Problem filename: {}'.format(f)
             known_suffixes = ['.fastq.gz','.fq.gz','.fastq','.fq']
             # make name for each pair that is consistant parts of file name
-            pairname = ' '.join([bits[0],bits[2]])
+            # joining with space caused problems when incorporating into a filename downstream
+            pairname = '_'.join([bits[0],bits[2]])
             for known_suffix in known_suffixes:
                 thismatch = _re.findall('('+known_suffix+')$', pairname)
                 if thismatch:
