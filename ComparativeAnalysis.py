@@ -1392,31 +1392,47 @@ class Plotter:
 
     def reroot_to_outgroup(self, label_list):
         '''Given a list of outgroup labels for rooting (often list of one)'''
-        out_group = set(self.tree.taxon_namespace.get_taxa(label_list, first_match_only = True))
-        in_group = set(self.tree.taxon_namespace) - out_group
-        in_group_member = self.tree.find_node_with_taxon(lambda t: t == list(in_group)[0])
 
-        # this creates a root node which remains with length zero
-        # even after .reroot_at_edge() below which should "suppress_unifurcations=True"
-        # DendroPy 4 bug?
-        # self.tree.reroot_at_edge(   in_group_member.edge, 
-                                    # update_bipartitions=False)
+        # first, test rooting
+        already_rooted_as_requested = False
+        root_node = self.tree.mrca(taxa = [n.taxon for n in self.tree.leaf_nodes()])
+        basal_groups = root_node.child_nodes()
+        for basal_group in basal_groups:
+            if set([n.taxon.label for n in basal_group.leaf_nodes()]) == set(label_list):
+                already_rooted_as_requested = True
+                break
 
-        # side effect of rerooting at a node with a taxon is to drop that taxon from tree
-
-        # finding some MRCAs make the code below fail . . . bug?
-        #if not (self.tree.mrca(taxa = in_group).parent_node == self.tree.mrca(taxa = out_group).parent_node == self.tree.mrca(taxa = set(self.tree.taxon_namespace))):
-            # else already rooted as requested
+        if already_rooted_as_requested and len(basal_groups) == 2:
+            if not self.tree.is_rooted:
+                self.tree.is_rooted = True
+                self.tree.update_bipartitions()
+        else:
+            # although outgroup is basal, there is a multi-furcation: reroot
+            out_group = set(self.tree.taxon_namespace.get_taxa(label_list, first_match_only = True))
+            in_group = set(self.tree.taxon_namespace) - out_group
+            in_group_member = self.tree.find_node_with_taxon(lambda t: t == list(in_group)[0])
             
-        self.tree.reroot_at_node(   in_group_member.parent_node, 
-                                    update_bipartitions=False)
-
-        root_node = self.tree.mrca(taxa = out_group)
-
-        self.tree.reroot_at_edge(   root_node.edge, 
-                                    length1 = root_node.edge_length / 4, 
-                                    length2 = root_node.edge_length / 4 * 3, 
-                                    update_bipartitions=True)
+            # this creates a root node which remains with length zero
+            # even after .reroot_at_edge() below which should "suppress_unifurcations=True"
+            # DendroPy 4 bug?
+            # self.tree.reroot_at_edge(   in_group_member.edge, 
+                                        # update_bipartitions=False)
+            
+            # side effect of rerooting at a node with a taxon is to drop that taxon from tree
+            
+            # finding some MRCAs make the code below fail . . . bug?
+            #if not (self.tree.mrca(taxa = in_group).parent_node == self.tree.mrca(taxa = out_group).parent_node == self.tree.mrca(taxa = set(self.tree.taxon_namespace))):
+                # else already rooted as requested
+                
+            self.tree.reroot_at_node(   in_group_member.parent_node, 
+                                        update_bipartitions=True)
+            
+            root_node = self.tree.mrca(taxa = out_group)
+            
+            self.tree.reroot_at_edge(   root_node.edge, 
+                                        length1 = root_node.edge_length / 4, 
+                                        length2 = root_node.edge_length / 4 * 3, 
+                                        update_bipartitions=True)
 
     def getTipOrder(self, ladderize = True):
         '''Use DendroPy to get a compatible tip order . . defaults to ladderised'''
