@@ -101,8 +101,32 @@ def exe_fail(program_name):
     print('{} Dependencies --get {}'.format(sys.argv[0], program_name))
     sys.exit(1)
 
-
+def check_baga_path(baga_prefix, supplied_name):
+    '''
+    to allow for either path and filename or just name of baga objects, 
+    do some checks to see what was supplied at commandline. Return both
+    the name and the path to the baga file
+    '''
+    # try as path
+    try:
+        use_path = os.path.expanduser(supplied_name)
+        use_name = use_path.split(os.path.sep)[-1].replace(baga_prefix,'').replace('.baga','')
+        with open(use_path,'rb') as f:
+            return(use_path,use_name)
+    except IOError:
+        pass
     
+    # try as baga name
+    try:
+        use_path = '{}-{}.baga'.format(baga_prefix, supplied_name)
+        print(use_path)
+        with open(use_path,'rb') as f:
+            return(use_path,supplied_name)
+    except IOError:
+        pass
+    
+    return(False,False)
+
 text_width = 70
 
 title = 'Bacterial and Archaeal Genome Analyser'
