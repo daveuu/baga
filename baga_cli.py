@@ -447,6 +447,11 @@ mutually_exclusive_group.add_argument('-a', "--alignments_path",
     type = str,
     nargs = '+')
 
+mutually_exclusive_group.add_argument('-b', "--checkinfos_path", 
+    help = "path to baga.Structure.CheckerInfo-<sample_name>__<genome_name>.baga files for summarising regions indicated by rearrangements filter with --summarise. Alternatively use --summarise with --reads_name and --genome_name if available (typically as part of a baga short read analysis pipeline). If a directory path(s) is provided, all baga.Structure.CheckerInfo-*__*.baga files will be included. A list of filenames with full path or with *, ? or [] characters can also be provided (with unix-style pathname pattern expansion for the latter)",
+    type = str,
+    nargs = '+')
+
 parser_Structure.add_argument('-g', "--genome_name", 
     help = "required with --reads_name option. Name of genome obtained by the CollectData option and used with AlignReads option",
     type = str)
@@ -465,11 +470,15 @@ parser_Structure.add_argument('-r', "--plot_range",
     nargs = 2,
     metavar = 'CHROMOSOME_POSITION')
 
-parser_Structure.add_argument('-s', "--include_samples", 
-    help = "restrict plotting to these samples. Applies to --plot and --plot_range. If omitted, plots for all samples are produced.",
+parser_Structure.add_argument('-S', "--include_samples", 
+    help = "With --plot or --plot_range, restrict plotting to these samples else if omitted, plots for all samples are produced. With --summarise, either restrict summaries to these ",
     type = str,
-    nargs = '+')
+    nargs = '+',
+    metavar = 'SAMPLE_NAME')
 
+parser_Structure.add_argument('-s', "--summarise", 
+    help = "summarise regions of putative rearrangements found using '--find' as a .csv file and printed to screen. Requires --genome and --reads_name, optionally with --include_samples. Or just --genome and --include_samples to specify samples with corresponding 'baga.Structure.CheckerInfo-<sample_name>__<genome_name>.baga' available in current folder.",
+    action = 'store_true')
 
 parser_CallVariants = subparser_adder.add_parser('CallVariants',
                 formatter_class = argparse.RawDescriptionHelpFormatter,
@@ -1282,8 +1291,8 @@ if args.subparser == 'Structure':
     from baga import Structure
     from baga import CollectData
     
-    if not(args.check or args.plot or args.plot_range):
-        parser_Structure.error('Need at least one of --check/-c, --plot/-p or --plot_range/-r')
+    if not(args.check or args.plot or args.plot_range or args.summarise):
+        parser_Structure.error('Need at least one of --check/-c, --plot/-p or --plot_range/-r or --summarise/-s')
     
     if args.check or args.plot or args.plot_range:
         # collect BAMs
@@ -1292,8 +1301,13 @@ if args.subparser == 'Structure':
             if not args.genome_name:
                 parser.error('--genome_name/-g is required with --reads_name/-n. (The baga CollectData-processed genome used with the AlignReads option)')
             
+            #use_name_genome = args.genome_name.replace('baga.CollectData.Genome-', '' , 1).replace('.baga', '')
+            use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
+            e = 'Could not locate genome given: {}'.format(args.genome_name)
+            assert all([use_path_genome,use_name_genome]), e
+            
             use_name_group = args.reads_name.replace('baga.AlignReads.SAMs-', '' , 1).replace('.p.gz', '')
-            use_name_genome = args.genome_name.replace('baga.CollectData.Genome-', '' , 1).replace('.baga', '')
+            
             print('Loading alignments information for: {}__{} from AlignReads output'.format(use_name_group, use_name_genome))
             from baga import AlignReads
             alignments = AlignReads.SAMs(baga = 'baga.AlignReads.SAMs-{}__{}.baga'.format(use_name_group, use_name_genome))
@@ -1313,132 +1327,237 @@ if args.subparser == 'Structure':
                 else:
                     # add file
                     BAMs += [path]
-    
-    # check on requested samples: crop BAMs accordingly
-    if args.include_samples:
-        if not args.reads_name:
-            # need sample names so will parse BAMs
-            import pysam
-            sample_names = {}
-            for BAM in BAMs:
-                sample_names[pysam.Samfile(BAM, 'rb').header['RG'][0]['ID']] = BAM
         
-        missing_labels = sorted(set(args.include_samples) - set(sample_names))
-        found_labels = sorted(set(args.include_samples) & set(sample_names))
-        e = ['None of the requested sample labels were found among the previously checked reads.']
-        e += ['Requested: {}'.format(', '.join(args.include_samples))]
-        e += ['Available: {}'.format(', '.join(sorted(sample_names)))]
-        assert len(found_labels), '\n'.join(e)
-        
-        if len(missing_labels):
-            print('WARNING: could not find the following requested samples among previously checked reads.')
-            print(', '.join(missing_labels))
-        
-        # update BAMs for args.check
-        print(BAMs)
-        if not args.reads_name:
-            BAMs = [sample_names[sample] for sample in found_labels]
-        else:
-            BAMs = [BAM for BAM in BAMs if BAM.split(os.path.sep)[-1].split('__')[0] in found_labels]
-        
-        print(BAMs)
-        # update sample_names for arg.plot
-        sample_names = sorted(found_labels)
-    
-    if args.check:
-        # check these genome-aligned read sets
-        checkers = Structure.checkStructure(BAMs, mean_param = 5, min_mapping_quality = 5, resolution = 10, step = 1)
-    
-    if args.plot or args.plot_range:
-        if args.plot_range:
-            if args.plot_range[0] > args.plot_range[1]:
-                sys.exit('--plot_range values must be ascending!')
-        # need genome for plotting
-        if not args.genome_name:
-            parser.error('--genome_name/-g is required for plotting. (A baga CollectData-processed genome)')
-        else:
-            use_name_genome = args.genome_name.replace('baga.CollectData.Genome-', '' , 1).replace('.baga', '')
-            print('Loading genome %s' % use_name_genome)
-            genome = CollectData.Genome(local_path = 'baga.CollectData.Genome-{}.baga'.format(use_name_genome), format = 'baga')
-        
-        if not args.include_samples and not args.reads_name:
-            # need to get sample names from BAMs because not supplied
-            # and didn't collect yet because args.include_samples not provided
-            try:
+        # check on requested samples: crop BAMs accordingly
+        if args.include_samples:
+            if not args.reads_name:
+                # need sample names so will parse BAMs
                 import pysam
-            except ImportError:
-                sys.exit('Need pysam to get sample names if not provided for plotting. Use Dependencies --get pysam to install locally')
+                sample_names = {}
+                for BAM in BAMs:
+                    sample_names[pysam.Samfile(BAM, 'rb').header['RG'][0]['ID']] = BAM
             
-            sample_names = []
-            for BAM in BAMs:
-                sample_names += [pysam.Samfile(BAM, 'rb').header['RG'][0]['ID']]
+            missing_labels = sorted(set(args.include_samples) - set(sample_names))
+            found_labels = sorted(set(args.include_samples) & set(sample_names))
+            e = ['None of the requested sample labels were found among the previously checked reads.']
+            e += ['Requested: {}'.format(', '.join(args.include_samples))]
+            e += ['Available: {}'.format(', '.join(sorted(sample_names)))]
+            assert len(found_labels), '\n'.join(e)
             
-            sample_names.sort()
-        
-        plot_folder = 'plots_structure'
-        filter_name = 'high non-proper pairs'
-        
-        for sample in sample_names:
-            # get information for plotting
-            filein = 'baga.Structure.CheckerInfo-{}__{}.baga'.format(sample, use_name_genome)
+            if len(missing_labels):
+                print('WARNING: could not find the following requested samples among previously checked reads.')
+                print(', '.join(missing_labels))
             
-            try:
-                checker_info = Structure.loadCheckerInfo(filein)
-            except IOError:
-                print('Could not find: {}'.format(filein))
-            
-            e = 'Genome name for checker {} ({}) does not match name of supplied genome ({})'.format(
-                                                                        filein, 
-                                                                        checker_info['genome_name'], 
-                                                                        genome.id)
-            assert checker_info['genome_name'] == genome.id, e
-            
-            outdir = os.path.sep.join([plot_folder, checker_info['genome_name']])
-            if not os.path.exists(outdir):
-                os.makedirs(outdir)
-            
-            print('Plotting filter regions for {} reads aligned to {}'.format(sample, genome.id))
-            
-            if args.plot:
-                # all ranges for filtering for this sample
-                
-                # currently range selection is rearrangements filter, not including the extensions
-                # do_ranges = checker_info['suspect_region']['rearrangements_extended']
-                
-                do_ranges = []
-                for s,e in checker_info['suspect_regions']['rearrangements']:
-                    # select consistant plotting region for comparison between samples
-                    plot_chrom_start = int(round(s - 500 - 100, -3))
-                    if s + 2500 > e:
-                        plot_chrom_end = plot_chrom_start + 2500
-                    else:
-                        plot_chrom_end = int(round(e + 500 + 100, -3))
-                    
-                    do_ranges += [(plot_chrom_start,plot_chrom_end)]
-                
+            # update BAMs for args.check
+            print(BAMs)
+            if not args.reads_name:
+                BAMs = [sample_names[sample] for sample in found_labels]
             else:
-                # just the requested range
-                do_ranges = [args.plot_range]
+                BAMs = [BAM for BAM in BAMs if BAM.split(os.path.sep)[-1].split('__')[0] in found_labels]
             
-            for plot_chrom_start,plot_chrom_end in do_ranges:
+            print(BAMs)
+            # update sample_names for arg.plot
+            sample_names = sorted(found_labels)
+        
+        if args.check:
+            # check these genome-aligned read sets
+            checkers = Structure.checkStructure(BAMs, mean_param = 5, min_mapping_quality = 5, resolution = 10, step = 1)
+        
+        if args.plot or args.plot_range:
+            if args.plot_range:
+                if args.plot_range[0] > args.plot_range[1]:
+                    sys.exit('--plot_range values must be ascending!')
+            # need genome for plotting
+            if not args.genome_name:
+                parser.error('--genome_name/-g is required for plotting. (A baga CollectData-processed genome)')
+            else:
+                use_name_genome = args.genome_name.replace('baga.CollectData.Genome-', '' , 1).replace('.baga', '')
+                print('Loading genome %s' % use_name_genome)
+                genome = CollectData.Genome(local_path = 'baga.CollectData.Genome-{}.baga'.format(use_name_genome), format = 'baga')
+            
+            if not args.include_samples and not args.reads_name:
+                # need to get sample names from BAMs because not supplied
+                # and didn't collect yet because args.include_samples not provided
+                try:
+                    import pysam
+                except ImportError:
+                    sys.exit('Need pysam to get sample names if not provided for plotting. Use Dependencies --get pysam to install locally')
                 
-                if args.reads_name:
-                    plot_filename = '{:07d}_{:07d}_{}__{}__{}.svg'.format(  plot_chrom_start, 
-                                                                            plot_chrom_end, 
+                sample_names = []
+                for BAM in BAMs:
+                    sample_names += [pysam.Samfile(BAM, 'rb').header['RG'][0]['ID']]
+                
+                sample_names.sort()
+            
+            plot_folder = 'plots_structure'
+            filter_name = 'high non-proper pairs'
+            
+            for sample in sample_names:
+                # get information for plotting
+                filein = 'baga.Structure.CheckerInfo-{}__{}.baga'.format(sample, use_name_genome)
+                
+                try:
+                    checker_info = Structure.loadCheckerInfo(filein)
+                except IOError:
+                    print('Could not find: {}'.format(filein))
+                
+                e = 'Genome name for checker {} ({}) does not match name of supplied genome ({})'.format(
+                                                                            filein, 
                                                                             checker_info['genome_name'], 
-                                                                            use_name_group, 
-                                                                            sample)
-                else:
-                    plot_filename = '{:07d}_{:07d}_{}__{}.svg'.format(      plot_chrom_start, 
-                                                                            plot_chrom_end, 
-                                                                            checker_info['genome_name'],
-                                                                            sample)
+                                                                            genome.id)
+                assert checker_info['genome_name'] == genome.id, e
                 
-                plot_output_path = [outdir, plot_filename]
-                plot_output_path = os.path.sep.join(plot_output_path)
-                print(plot_output_path)
-                plotter = Structure.Plotter(checker_info, genome, plot_output_path)
-                plotter.doPlot(plot_chrom_start, plot_chrom_end, panel = ((1,1),(1,1)), label = sample)
+                outdir = os.path.sep.join([plot_folder, checker_info['genome_name']])
+                if not os.path.exists(outdir):
+                    os.makedirs(outdir)
+                
+                print('Plotting filter regions for {} reads aligned to {}'.format(sample, genome.id))
+                
+                if args.plot:
+                    # all ranges for filtering for this sample
+                    
+                    # currently range selection is rearrangements filter, not including the extensions
+                    # do_ranges = checker_info['suspect_region']['rearrangements_extended']
+                    
+                    do_ranges = []
+                    for s,e in checker_info['suspect_regions']['rearrangements']:
+                        # select consistant plotting region for comparison between samples
+                        plot_chrom_start = int(round(s - 500 - 100, -3))
+                        if s + 2500 > e:
+                            plot_chrom_end = plot_chrom_start + 2500
+                        else:
+                            plot_chrom_end = int(round(e + 500 + 100, -3))
+                        
+                        do_ranges += [(plot_chrom_start,plot_chrom_end)]
+                    
+                else:
+                    # just the requested range
+                    do_ranges = [args.plot_range]
+                
+                for plot_chrom_start,plot_chrom_end in do_ranges:
+                    
+                    if args.reads_name:
+                        plot_filename = '{:07d}_{:07d}_{}__{}__{}.svg'.format(  plot_chrom_start, 
+                                                                                plot_chrom_end, 
+                                                                                checker_info['genome_name'], 
+                                                                                use_name_group, 
+                                                                                sample)
+                    else:
+                        plot_filename = '{:07d}_{:07d}_{}__{}.svg'.format(      plot_chrom_start, 
+                                                                                plot_chrom_end, 
+                                                                                checker_info['genome_name'],
+                                                                                sample)
+                    
+                    plot_output_path = [outdir, plot_filename]
+                    plot_output_path = os.path.sep.join(plot_output_path)
+                    print(plot_output_path)
+                    plotter = Structure.Plotter(checker_info, genome, plot_output_path)
+                    plotter.doPlot(plot_chrom_start, plot_chrom_end, panel = ((1,1),(1,1)), label = sample)
+    
+    ## check for allowed combinations for --summarise
+    if args.checkinfos_path:
+        if not args.summarise:
+            parser.error('--summarise/-s is required with --checkinfos_path/-b.')
+        if args.genome_name or args.reads_name:
+            parser.error('--genome_name/-g and --reads_name/-n cannot be used with --checkinfos_path/-b.')
+    elif args.reads_name and not args.genome_name:
+        parser.error('--genome_name/-g is required with --reads_name/-n. (The baga CollectData-processed genome used with the AlignReads option)')
+    
+    if args.summarise:
+        
+        if args.reads_name:
+            # baga pipeline information provided
+            if not args.genome_name:
+                parser.error('--genome_name/-g is required with --reads_name/-n. (The baga CollectData-processed genome used with the AlignReads option)')
+            
+            use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
+            assert all([use_path_genome,use_name_genome]), 'Could not locate genome given: {}'.format(args.genome_name)
+            
+            use_name_group = args.reads_name.replace('baga.AlignReads.SAMs-', '' , 1).replace('.p.gz', '')
+            
+            baga_file = 'baga.AlignReads.SAMs-{}__{}.baga'.format(use_name_group, use_name_genome)
+            print('Loading alignments information for: {} aligned to {} from {} output'.format(use_name_group, use_name_genome, baga_file))
+            from baga import AlignReads
+            alignments = AlignReads.SAMs(baga = baga_file)
+            sample_names = sorted(alignments.read_files)
+        
+        if args.include_samples and args.reads_name:
+            missing_labels = sorted(set(args.include_samples) - set(sample_names))
+            found_labels = sorted(set(args.include_samples) & set(sample_names))
+            e = ['None of the requested sample labels were found among the rearrangements filter-checked reads.']
+            e += ['Requested: {}'.format(', '.join(args.include_samples))]
+            e += ['Available: {}'.format(', '.join(sorted(sample_names)))]
+            assert len(found_labels), '\n'.join(e)
+            
+            if len(missing_labels):
+                print('WARNING: could not find the following requested samples among previously checked reads.')
+                print(', '.join(missing_labels))
+            
+            # update sample_names
+            sample_names = sorted(found_labels)
+        
+        if args.checkinfos_path:
+            # treat include_samples as list of files to deal with
+            # list of folders or files provided
+            print(args.checkinfos_path)
+            baga_filenames = {}
+            for path in args.checkinfos_path:
+                if os.path.isdir(path):
+                    path_contents = os.listdir(path)
+                    for f in path_contents:
+                        if f[-5:] == '.baga' and f[:27] == 'baga.Structure.CheckerInfo-' and '__' in f[27:-5]:
+                            baga_filenames[tuple(f[27:-5].split('__'))] = f
+                    
+                    e = 'No baga.Structure.CheckerInfo-*__*.baga files found in:\n{}'.format(args.checkinfos_path)
+                    assert len(baga_filenames), e
+                else:
+                    # add file
+                    f = path.split(os.path.sep)[-1]
+                    if f[-5:] == '.baga' and f[:27] == 'baga.Structure.CheckerInfo-' and '__' in f[27:-5]:
+                        baga_filenames[tuple(f[27:-5].split('__'))] = f
+            
+            e = 'Could not find valid baga.Structure.CheckerInfo files at {}'.format(', '.join(args.checkinfos_path))
+            assert len(baga_filenames) > 0, e
+            
+        else:
+            baga_filenames = dict([(tuple([sample, use_name_genome]),'baga.Structure.CheckerInfo-{}__{}.baga'.format(sample, use_name_genome)) for sample in sample_names])
+        
+        checker_info = {}
+        for (sample, genome_name), filein in sorted(baga_filenames.items()):
+            try:
+                print('Loading from {}'.format(filein))
+                filein.replace('baga.Structure.CheckerInfo-','')
+                this_checker_info = Structure.loadCheckerInfo(filein)
+            except IOError:
+                print('Cannot access provided baga.Structure.CheckerInfo file: {}'.format(f))
+            
+            e = 'Genome name for checker {} ({}) does not match supplied genome name ({})'.format(
+                                                                        filein, 
+                                                                        this_checker_info['genome_name'], 
+                                                                        genome_name)
+            assert this_checker_info['genome_name'] == genome_name, e
+            # else proceed
+            checker_info[sample, genome_name] = this_checker_info
+        
+        if args.reads_name:
+            if args.genome_name:
+                foutname = 'rearrangements_regions_{}__{}.csv'.format(use_name_group,use_name_genome)
+            else:
+                foutname = 'rearrangements_regions_{}.csv'.format(use_name_group)
+        else:
+            foutname = 'rearrangements_regions.csv'
+        
+        print('Writing to {}'.format(foutname))
+        with open(foutname, 'w') as fout:
+            fout.write('"chromosome","sample","filter","start","end"\n')
+            for (sample, genome_name), info in sorted(checker_info.items()):
+                print('Writing out {} regions'.format(sample))
+                for start, end in info['suspect_regions']['rearrangements']:
+                    fout.write('"{}","{}","rearrangements1",{},{}\n'.format(genome_name, sample, start, end))
+                for start, end in info['suspect_regions']['rearrangements_extended']:
+                    fout.write('"{}","{}","rearrangements2",{},{}\n'.format(genome_name, sample, start, end))
+
+
 
 ### Call Variants ###
 
