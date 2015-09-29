@@ -440,6 +440,34 @@ class Reads:
 
         use_files.sort()
 
+
+        # check potential non-pair files
+        keep_use_files = []
+        for f in use_files:
+            if 'singletons' in f:
+                print('Assuming {} is not part of a pair: ignoring'.format(f))
+                continue
+            
+            keep_use_files += [f]
+
+        use_files = keep_use_files
+
+        # check filenames for inclusion of known baga downstream files
+        keep_use_files = []
+        for f in use_files:
+            this_suffix = ''
+            for suffix in ('_subsmp','_adpt','_qual')[::-1]:
+                this_suffix = suffix + this_suffix
+                for f2 in use_files:
+                    if f2 != f:
+                        if this_suffix in f2 and f2.replace(this_suffix,'') == f:
+                            error = 'ERROR: {} appears to be a file from a previous baga run that included {}. Try being more specific with the supplied path expansion to read VCFs (i.e., without baga suffixes allowed, e.g. "reads/*_[12].*"), or remove files generated in previous analyses'.format(f2, f)
+                            _sys.exit(error)
+            
+            keep_use_files += [f]
+
+        use_files = keep_use_files
+
         if len(use_files) == 0:
             print('Error: could not find any files at {}'.format(', '.join(path_to_fastq)))
             print('Please check paths and try again . . .')
@@ -453,9 +481,6 @@ class Reads:
         # match pairs
         filepairs = {}
         for f in use_files:
-            if 'singletons' in f:
-                print('Assuming {} is not part of a pair: ignoring'.format(f))
-                continue
             
             bits = _re.split('([^0-9][12][^0-9])', f)
             assert len(bits) == 3, 'Problem parsing read files: ensure pairs are numbered 1 and 2 . . else please report as bug. Problem filename: {}'.format(f)
