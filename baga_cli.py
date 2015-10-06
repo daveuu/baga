@@ -480,6 +480,12 @@ parser_Structure.add_argument('-s', "--summarise",
     help = "summarise regions of putative rearrangements found using '--find' as a .csv file and printed to screen. Requires --genome and --reads_name, optionally with --include_samples. Or just --genome and --include_samples to specify samples with corresponding 'baga.Structure.CheckerInfo-<sample_name>__<genome_name>.baga' available in current folder.",
     action = 'store_true')
 
+parser_Structure.add_argument('-C', "--collect", 
+    help = "extract short reads aligned to regions of putative rearrangements found using '--find' and write to a .fastq file. Requires --reads_name, optionally with --include_samples to limit to specific samples and --collect_range to specify a range to collect reads for if not those already found by '--find'. Alternatively use --checkinfos_path to specify samples with corresponding 'baga.Structure.CheckerInfo-<sample_name>__<genome_name>.baga'.",
+    action = 'store_true')
+
+
+
 parser_CallVariants = subparser_adder.add_parser('CallVariants',
                 formatter_class = argparse.RawDescriptionHelpFormatter,
                 description = textwrap.fill('Call variants with Genome Analysis \
@@ -757,7 +763,6 @@ if hasattr(args, 'GATK_jar_path') and args.GATK_jar_path:
             sys.exit('There was a problem checking your --GATK_jar_path argument. Please report this as a baga bug.')
 
 ### Check Dependencies ###
-
 
 if args.subparser == 'Dependencies':
     print('\n-- Dependencies check/get module --')
@@ -1291,10 +1296,10 @@ if args.subparser == 'Structure':
     from baga import Structure
     from baga import CollectData
     
-    if not(args.check or args.plot or args.plot_range or args.summarise):
-        parser_Structure.error('Need at least one of --check/-c, --plot/-p or --plot_range/-r or --summarise/-s')
+    if not(args.check or args.plot or args.plot_range or args.summarise or args.collect):
+        parser_Structure.error('Need at least one of --check/-c, --plot/-p or --plot_range/-r or --summarise/-s or --collect/-C')
     
-    if args.check or args.plot or args.plot_range:
+    if args.check or args.plot or args.plot_range or args.collect:
         # collect BAMs
         if args.reads_name:
             # baga pipeline information provided
@@ -1311,8 +1316,12 @@ if args.subparser == 'Structure':
             print('Loading alignments information for: {}__{} from AlignReads output'.format(use_name_group, use_name_genome))
             from baga import AlignReads
             alignments = AlignReads.SAMs(baga = 'baga.AlignReads.SAMs-{}__{}.baga'.format(use_name_group, use_name_genome))
-            sample_names = sorted(alignments.read_files)
+            
+            e = 'the reads for "--reads_name/-n {}" seem to not have been fully processed by the AlignReads module: they are missing the "ready_BAMs" attribute. Please ensure the AlignReads commands "--align --deduplicate --indelrealign" have been performed.'.format(args.reads_name)
+            assert hasattr(alignments, 'ready_BAMs'), e
+            ### shouldn't all BAMs have headers parsed and stored in dict with (sample,genome) from the start?
             BAMs = alignments.ready_BAMs[-1]
+            sample_names = sorted(alignments.read_files)
             
         elif args.alignments_path:
             # list of folders or files provided
@@ -1463,7 +1472,8 @@ if args.subparser == 'Structure':
     elif args.reads_name and not args.genome_name:
         parser.error('--genome_name/-g is required with --reads_name/-n. (The baga CollectData-processed genome used with the AlignReads option)')
     
-    if args.summarise:
+    if args.summarise or args.collect:
+        # both tasks share some requirements: deal with these first
         
         if args.reads_name:
             # baga pipeline information provided
@@ -1539,24 +1549,67 @@ if args.subparser == 'Structure':
             # else proceed
             checker_info[sample, genome_name] = this_checker_info
         
-        if args.reads_name:
-            if args.genome_name:
-                foutname = 'rearrangements_regions_{}__{}.csv'.format(use_name_group,use_name_genome)
+        if args.summarise:
+            #### summarise only
+            if args.reads_name:
+                if args.genome_name:
+                    foutname = 'rearrangements_regions_{}__{}.csv'.format(use_name_group,use_name_genome)
+                else:
+                    foutname = 'rearrangements_regions_{}.csv'.format(use_name_group)
             else:
-                foutname = 'rearrangements_regions_{}.csv'.format(use_name_group)
-        else:
-            foutname = 'rearrangements_regions.csv'
+                foutname = 'rearrangements_regions.csv'
+            
+            print('Writing to {}'.format(foutname))
+            with open(foutname, 'w') as fout:
+                fout.write('"chromosome","sample","filter","start","end"\n')
+                for (sample, genome_name), info in sorted(checker_info.items()):
+                    print('Writing out {} regions'.format(sample))
+                    for start, end in info['suspect_regions']['rearrangements']:
+                        fout.write('"{}","{}","rearrangements1",{},{}\n'.format(genome_name, sample, start, end))
+                    for start, end in info['suspect_regions']['rearrangements_extended']:
+                        fout.write('"{}","{}","rearrangements2",{},{}\n'.format(genome_name, sample, start, end))
         
-        print('Writing to {}'.format(foutname))
-        with open(foutname, 'w') as fout:
-            fout.write('"chromosome","sample","filter","start","end"\n')
+        if args.collect:
+            ## which BAMs?
+            ## this is a bit clunky . . probably best to parse BAM headers once, above
+            ## move into baga function from cli?
+            import pysam
+            BAMs_by_ids = {}
+            for BAM in BAMs:
+                header = pysam.Samfile(BAM, 'rb').header
+                BAMs_by_ids[(header['RG'][0]['ID'],header['SQ'][0]['SN'])] = BAM
+            
             for (sample, genome_name), info in sorted(checker_info.items()):
-                print('Writing out {} regions'.format(sample))
-                for start, end in info['suspect_regions']['rearrangements']:
-                    fout.write('"{}","{}","rearrangements1",{},{}\n'.format(genome_name, sample, start, end))
-                for start, end in info['suspect_regions']['rearrangements_extended']:
-                    fout.write('"{}","{}","rearrangements2",{},{}\n'.format(genome_name, sample, start, end))
-
+                path_to_fastq_folder = 'read_collections/{}'.format(genome_name)
+                if not os.path.exists(path_to_fastq_folder):
+                    os.makedirs(path_to_fastq_folder)
+                
+                print('Extracting reads aligned near rearrangements between {} and genome {} . . .'.format(sample, genome_name))
+                collector = Structure.Collector(BAMs_by_ids[(sample, genome_name)])
+                
+                e = 'mismatch between BAM genome ({}) and genome used by BAGA ({})'.format(
+                                        collector.reads.references[0],
+                                        genome_name)
+                assert genome_name == collector.reads.references[0], e
+                
+                # join main rearrangement zones with extended regions if found
+                all_regions = sorted(
+                              info['suspect_regions']['rearrangements'] + \
+                              info['suspect_regions']['rearrangements_extended'])
+                
+                from collections import Counter
+                use_regions = [a for b in all_regions for a in b]
+                c = Counter(use_regions)
+                use_regions = [a for a in use_regions if c[a] == 1]
+                use_regions = zip(use_regions[::2],use_regions[1::2])
+                
+                collector.getUnmapped()
+                collector.writeUnmapped(path_to_fastq_folder)
+                
+                # for (s,e) in use_regions:
+                    # print(s,e)
+                    # collector.makeCollection(s,e,500)
+                    # collector.writeCollection(path_to_fastq_folder)
 
 
 ### Call Variants ###

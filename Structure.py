@@ -39,6 +39,7 @@ from array import array as _array
 import operator as _operator
 import time as _time
 from itertools import izip as _izip
+import string as _string
 
 # external Python modules
 import pysam as _pysam
@@ -213,6 +214,7 @@ class Checker:
         assert _os.path.exists(path_to_bam), e % path_to_bam
         
         self.reads = _pysam.Samfile(path_to_bam, 'rb')
+        # to retain crucial info without needing an open Samfile
         self.reads_name = self.reads.header['RG'][0]['ID']
         self.genome_length = self.reads.lengths[0]
         self.genome_name = self.reads.references[0]
@@ -624,8 +626,8 @@ class Checker:
                     thisone = _tarfile.TarInfo(name = att_name)
                     thisone.size = length
                     tar.addfile(tarinfo = thisone, fileobj = io)
-                elif isinstance(att, dict) or isinstance(att, str) or isinstance(att, float):
-                    # ensure only dicts, strings, floats (or arrays, above) are saved
+                elif isinstance(att, dict) or isinstance(att, str) or isinstance(att, float) or isinstance(att, int):
+                    # ensure only dicts, strings, floats, ints (or arrays, above) are saved
                     io = _StringIO()
                     _json.dump(att, io)
                     io.seek(0, _os.SEEK_END)
@@ -1679,6 +1681,223 @@ class Plotter:
 
 
         self.dwg.save()
+
+
+class Collector:
+    '''
+    Collector class of the Structure module contains methods to extract aligned 
+    short reads around regions of probably rearrangements (as found by an instance 
+    of the Checker class). The reads in the resulting fastq files can be used for 
+    de novo reconstruction along with the unmapped reads to investigate sequences 
+    in regions of interest.
+    '''
+    def __init__(self, path_to_bam):
+        '''
+        Extract paired reads from a BAM file within a single range and write to 
+        a fastq file.
+        '''
+        e = 'Could not find %s.\nPlease ensure all BAM files exist'
+        assert _os.path.exists(path_to_bam), e % path_to_bam
+        
+        self.reads = _pysam.Samfile(path_to_bam, 'rb')
+        # to retain crucial info without needing an open Samfile
+        self.reads_name = self.reads.header['RG'][0]['ID']
+        self.genome_length = self.reads.lengths[0]
+        self.genome_name = self.reads.references[0]
+        self.transtable = _string.maketrans('ACGT','TGCA')
+
+
+
+    def makeCollection(self, chrom_start, 
+                             chrom_end, 
+                             num_padding_positions):
+        '''
+        Using pySAM, fetch all aligned reads in a specified region . . .
+        '''
+
+
+        # for now, only handling first chromosome
+        chromo_name = self.reads.references[0]
+        # a pos0 slice from a pos1 index should be s-1,e
+        # so this is approximate as pos1 or pos0 not specified
+        reads_iter = self.reads.fetch(chromo_name, 
+                                      chrom_start - num_padding_positions, 
+                                      chrom_end + num_padding_positions)
+
+
+        read_pairs = {}
+        for r in reads_iter:
+            if r.is_reverse:
+                # SEQ being reverse complemented
+                read_info = (r.query_sequence[::-1].translate(self.transtable), r.qual[::-1])
+            else:
+                read_info = (r.query_sequence, r.qual)
+            
+            try:
+                read_pairs[r.query_name][int(r.is_read2)+1] = read_info
+            except KeyError:
+                read_pairs[r.query_name] = {}
+                read_pairs[r.query_name][int(r.is_read2)+1] = read_info
+
+        self.read_pairs = read_pairs
+        self.chrom_start = chrom_start
+        self.chrom_end = chrom_end
+        self.num_padding_positions = num_padding_positions
+
+    def writeCollection(self, path_to_fastq_folder):
+        '''
+        Write reads to a fastq file
+        '''
+
+        prefix = '{}__{}'.format(self.reads_name, self.genome_name)
+        zeropadding = len(str(self.reads.header['SQ'][0]['LN']))
+
+        r1_fastq_filename = '{0}_{1:0{3}d}-{2:0{3}d}+{4}_R1.fastq'.format(
+                        prefix,
+                        self.chrom_start,
+                        self.chrom_end,
+                        zeropadding,
+                        self.num_padding_positions)
+
+        r2_fastq_filename = '{0}_{1:0{3}d}-{2:0{3}d}+{4}_R2.fastq'.format(
+                        prefix,
+                        self.chrom_start,
+                        self.chrom_end,
+                        zeropadding,
+                        self.num_padding_positions)
+
+        rs_fastq_filename = '{0}_{1:0{3}d}-{2:0{3}d}+{4}_S.fastq'.format(
+                        prefix,
+                        self.chrom_start,
+                        self.chrom_end,
+                        zeropadding,
+                        self.num_padding_positions)
+
+        print('Writing to:\n{}/{}\n{}/{}\n{}/{}\n'.format(
+                        path_to_fastq_folder,
+                        r1_fastq_filename,
+                        path_to_fastq_folder,
+                        r2_fastq_filename,
+                        path_to_fastq_folder,
+                        rs_fastq_filename))
+
+        r1_out = open(_os.path.sep.join([path_to_fastq_folder,r1_fastq_filename]), 'w')
+
+        r2_out = open(_os.path.sep.join([path_to_fastq_folder,r2_fastq_filename]), 'w')
+
+        rs_out = open(_os.path.sep.join([path_to_fastq_folder,rs_fastq_filename]), 'w')
+
+        for read_id,reads in self.read_pairs.items():
+            if len(reads) == 2:
+                r1seq,r1qual = reads[1]
+                r1_out.write('@{}/1\n{}\n+\n{}\n'.format(
+                            read_id,
+                            r1seq,
+                            r1qual))
+                r2seq,r2qual = reads[2]
+                r2_out.write('@{}/1\n{}\n+\n{}\n'.format(
+                            read_id,
+                            r2seq,
+                            r2qual))
+            elif len(reads) == 1:
+                n,(rseq,rqual) = reads.items()[0]
+                rs_out.write('@{}/{}\n{}\n+\n{}\n'.format(
+                            read_id,
+                            n,
+                            rseq,
+                            rqual))
+
+        r1_out.close()
+        r2_out.close()
+        rs_out.close()
+
+
+    def getUnmapped(self):
+        '''
+        Using pySAM, fetch all unmapped paired end reads
+        '''
+
+        # for now, only handling first chromosome
+        chromo_name = self.reads.references[0]
+        # a pos0 slice from a pos1 index should be s-1,e
+        # so this is approximate as pos1 or pos0 not specified
+        reads_iter = self.reads.fetch(chromo_name)
+
+        print('Searching for unmapped reads for {} against {}'.format(self.reads.header['RG'][0]['ID'], chromo_name))
+
+        read_pairs = {}
+        for r in reads_iter:
+            if r.is_unmapped:
+                if r.is_reverse:
+                    # SEQ being reverse complemented - not sure why unmapped reads would do that
+                    read_info = (r.query_sequence[::-1].translate(self.transtable), r.qual[::-1])
+                else:
+                    read_info = (r.query_sequence, r.qual)
+                try:
+                    read_pairs[r.query_name][int(r.is_read2)+1] = (r.query_sequence, r.qual)
+                except KeyError:
+                    read_pairs[r.query_name] = {}
+                    read_pairs[r.query_name][int(r.is_read2)+1] = (r.query_sequence, r.qual)
+
+        self.unmapped_read_pairs = read_pairs
+
+        print('Found {} pairs with at least one read unmapped'.format(len(self.unmapped_read_pairs)))
+
+
+
+    def writeUnmapped(self, path_to_fastq_folder):
+        '''
+        Write reads to a fastq file
+        '''
+
+        prefix = '{}__{}'.format(self.reads_name, self.genome_name)
+
+        r1_fastq_filename = '{0}_unmapped_R1.fastq'.format(
+                        prefix)
+
+        r2_fastq_filename = '{0}_unmapped_R2.fastq'.format(
+                        prefix)
+
+        rs_fastq_filename = '{0}_unmapped_S.fastq'.format(
+                        prefix)
+
+        print('Writing to:\n{}/{}\n{}/{}\n{}/{}\n'.format(
+                        path_to_fastq_folder,
+                        r1_fastq_filename,
+                        path_to_fastq_folder,
+                        r2_fastq_filename,
+                        path_to_fastq_folder,
+                        rs_fastq_filename))
+
+        r1_out = open(_os.path.sep.join([path_to_fastq_folder,r1_fastq_filename]), 'w')
+
+        r2_out = open(_os.path.sep.join([path_to_fastq_folder,r2_fastq_filename]), 'w')
+
+        rs_out = open(_os.path.sep.join([path_to_fastq_folder,rs_fastq_filename]), 'w')
+
+        for read_id,reads in self.unmapped_read_pairs.items():
+            if len(reads) == 2:
+                r1seq,r1qual = reads[1]
+                r1_out.write('@{}/1\n{}\n+\n{}\n'.format(
+                            read_id,
+                            r1seq,
+                            r1qual))
+                r2seq,r2qual = reads[2]
+                r2_out.write('@{}/1\n{}\n+\n{}\n'.format(
+                            read_id,
+                            r2seq,
+                            r2qual))
+            elif len(reads) == 1:
+                n,(rseq,rqual) = reads.items()[0]
+                rs_out.write('@{}/{}\n{}\n+\n{}\n'.format(
+                            read_id,
+                            n,
+                            rseq,
+                            rqual))
+
+        r1_out.close()
+        r2_out.close()
+        rs_out.close()
 
 
 if __name__ == '__main__':
