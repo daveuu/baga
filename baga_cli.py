@@ -214,6 +214,12 @@ group_check_or_get.add_argument('-C', "--checkget",
     choices = sorted(Dependencies.dependencies),
     nargs = '+')
 
+group_check_or_get.add_argument('-f', "--checkgetfor", 
+    help = "check a set of dependencies for a BAG Analyser task and attempt to get those that are not available",
+    type = str,
+    choices = sorted(Dependencies.dependencies_by_task),
+    nargs = '+')
+
 parser_CollectData = subparser_adder.add_parser('CollectData',
                 formatter_class = argparse.RawDescriptionHelpFormatter,
                 description = textwrap.fill('Download and parse genomes or \
@@ -789,33 +795,10 @@ if args.subparser == 'Dependencies':
                                             )
         return(result)
     
-    if args.get:
-        for name in args.get:
-            get(name)
-    
-    if args.check:
+    def checkget(checkgetthese):
         check_summary = []
         check_results = []
-        for name in args.check:
-            print('\nChecking for {}:\n'.format(name))
-            check_results += [check(name)]
-            if check_results[-1]:
-                check_summary += ['\n{}: found!'.format(name)]
-            else:
-                check_summary += ['\n{0}: not found . . . \nTry "{1} Dependencies --get {0}"'.format(name, sys.argv[0])]
-            
-            print(check_summary[-1])
-        
-        if len(check_summary) > 1:
-            print(''.join(['\n\nSummary:\n'] + sorted(check_summary))+'\n')
-        
-        if not all(check_results):
-            sys.exit('\n\nOne or more dependencies are unavailable . . . \n')
-    
-    if args.checkget:
-        check_summary = []
-        check_results = []
-        for name in args.checkget:
+        for name in checkgetthese:
             print('\nChecking for {}:\n'.format(name))
             alreadygot = check(name)
             
@@ -842,13 +825,52 @@ if args.subparser == 'Dependencies':
                     check_summary[-1] += ". . . currently python modules like dendropy cannot be checked straight after getting . . . so rerunning this command may succeed for those: try that."
                 
                 check_results += [gotnow]
+            
+        return(check_summary,check_results)
+    
+    if args.get:
+        for name in args.get:
+            get(name)
+    
+    if args.check:
+        check_summary = []
+        check_results = []
+        for name in args.check:
+            print('\nChecking for {}:\n'.format(name))
+            check_results += [check(name)]
+            if check_results[-1]:
+                check_summary += ['\n{}: found!'.format(name)]
+            else:
+                check_summary += ['\n{0}: not found . . . \nTry "{1} Dependencies --get {0}"'.format(name, sys.argv[0])]
+            
+            print(check_summary[-1])
         
-        if len(check_summary): # > 1:
+        if len(check_summary) > 1:
+            print(''.join(['\n\nSummary:\n'] + sorted(check_summary))+'\n')
+        
+        if not all(check_results):
+            sys.exit('\n\nOne or more dependencies are unavailable . . . \n')
+    
+    if args.checkget:
+        check_summary,check_results = checkget(args.checkget)
+        
+        if len(check_summary):
             print(''.join(['\n\nSummary:\n'] + sorted(check_summary))+'\n')
         
         if not all(check_results):
             sys.exit('\n\nOne or more baga dependencies are unavailable and could not be installed . . . \n')
-        
+    
+    if args.checkgetfor:
+        for task in args.checkgetfor: 
+            checkthese = sorted(Dependencies.dependencies_by_task[task])
+            print('Checking on dependencies for {} ({})'.format(task, ', '.join(checkthese)))
+            check_summary,check_results = checkget(checkthese)
+            
+            if len(check_summary):
+                print(''.join(['\n\nSummary for {}:\n'.format(task)] + sorted(check_summary))+'\n')
+            
+            if not all(check_results):
+                sys.exit('\n\nOne or more baga dependencies are unavailable and could not be installed . . . \n')
 
 ### Download Genomes ###
 

@@ -680,25 +680,25 @@ dependencies_notes['phyml'] = {
 'Compilation from Git repository (i.e., from github.com) requires libtool among other things. Sometimes compute clusters are lacking a few essentials . . . Pre-compiled executables are available from http://www.atgc-montpellier.fr/phyml/binaries.php but require registration. After downloading, place binary in '
     }
 
-dependencies_by_module = {}
-dependencies_by_module['CollectData'] = [
+dependencies_by_task = {}
+dependencies_by_task['CollectData'] = [
 'biopython',
 ]
 
-dependencies_by_module['PrepareReads'] = [
+dependencies_by_task['PrepareReads'] = [
 'sickle',
 'cutadapt',
 'biopython',
 ]
 
-dependencies_by_module['AlignReads'] = [
+dependencies_by_task['AlignReads'] = [
 'bwa',
 'samtools',
 'picard',
 'GATK'
 ]
 
-dependencies_by_module['Repeats'] = [
+dependencies_by_task['Repeats'] = [
 'bwa',
 'samtools',
 'biopython',
@@ -706,17 +706,21 @@ dependencies_by_module['Repeats'] = [
 'svgwrite',
 ]
 
-dependencies_by_module['Structure'] = [
+dependencies_by_task['Structure'] = [
 'biopython',
 'pysam',
 'svgwrite',
 ]
 
-dependencies_by_module['CallVariants'] = [
+dependencies_by_task['CallVariants'] = [
 'GATK'
 ]
 
-dependencies_by_module['ComparativeAnalysis'] = [
+dependencies_by_task['ApplyFilters'] = [
+
+]
+
+dependencies_by_task['ComparativeAnalysis'] = [
 'phyml',
 'clonalframeml',
 'dendropy',
@@ -724,23 +728,6 @@ dependencies_by_module['ComparativeAnalysis'] = [
 'svgwrite',
 ]
 
-
-## git, make (gcc?), java
-
-deps = [
-'sickle',
-'cutadapt',
-'svgwrite',
-'dendropy',
-'bwa',
-'htslib',
-'samtools',
-'biopython',
-'picard',
-'seq-align',
-'pysam',
-'clonalframeml',
-'phyml']
 
 if __name__ == '__main__':
     main()
