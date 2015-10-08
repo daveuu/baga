@@ -695,7 +695,7 @@ dependencies_by_task['AlignReads'] = [
 'bwa',
 'samtools',
 'picard',
-'GATK'
+# 'GATK' checked separately when path specified to GATK
 ]
 
 dependencies_by_task['Repeats'] = [
@@ -713,7 +713,7 @@ dependencies_by_task['Structure'] = [
 ]
 
 dependencies_by_task['CallVariants'] = [
-'GATK'
+# 'GATK' checked separately when path specified to GATK
 ]
 
 dependencies_by_task['ApplyFilters'] = [
