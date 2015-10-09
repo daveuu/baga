@@ -368,7 +368,11 @@ parser_AlignReads.add_argument('-r', "--indelrealign",
     action = 'store_true')
 
 parser_AlignReads.add_argument('-P', "--GATK_jar_path", 
-    help = "path to Genome Analysis Toolkit (GATK) jar file",
+    help = "path to Genome Analysis Toolkit (GATK) jar file. See also --JRE_1_7_path if system JAVA is version 1.8",
+    type = str)
+
+parser_AlignReads.add_argument('-J', "--JRE_1_7_path", 
+    help = "path to JAVA runtime environment version 1.7 binary file for use with GATK versions 3.3 or 3.4 (not compatible with JRE 1.8!)",
     type = str)
 
 parser_AlignReads.add_argument('-D', "--delete_intermediates", 
@@ -560,7 +564,11 @@ parser_CallVariants.add_argument('-R', "--recalibrate",
     action = 'store_true')
 
 parser_CallVariants.add_argument('-P', "--GATK_jar_path", 
-    help = "path to Genome Analysis Toolkit (GATK) jar file",
+    help = "path to Genome Analysis Toolkit (GATK) jar file. See also --JRE_1_7_path if system JAVA is version 1.8",
+    type = str)
+
+parser_CallVariants.add_argument('-J', "--JRE_1_7_path", 
+    help = "path to JAVA runtime environment version 1.7 binary file for use with GATK versions 3.3 or 3.4 (not compatible with JRE 1.8!)",
     type = str)
 
 
@@ -730,8 +738,16 @@ args = parser.parse_args()
 
 if hasattr(args, 'GATK_jar_path') and args.GATK_jar_path:
     # check Java is installed and version
+    use_java = 'java'
+    if hasattr(args, 'JRE_1_7_path') and args.JRE_1_7_path:
+        #'-j', "--JRE_1_7_path"
+        use_java = args.JRE_1_7_path
+        print('Using provided JAVA JRE at {}'.format(use_java))
+    else:
+        print('Using system JAVA JRE')
+    
     try:
-        p = subprocess.Popen(['java', '-version'], stdout = subprocess.PIPE, stderr = subprocess.STDOUT)
+        p = subprocess.Popen([use_java, '-version'], stdout = subprocess.PIPE, stderr = subprocess.STDOUT)
     except OSError:
         sys.exit('Could not find the Java runtime environment, needed for GATK and Picard. Please ensure you have Java installed and that the "java" executable is in the system path')
     
@@ -742,13 +758,13 @@ if hasattr(args, 'GATK_jar_path') and args.GATK_jar_path:
         if maj == 1 and min1 == 7:
             print('Java 1.7: found!')
         else:
-            sys.exit('GATK v3.3 requires Java v1.7 but your version is {}.{}. Please install Java v1.7 to continue'.format(maj,min1))
+            sys.exit('GATK v3.3 requires Java v1.7 but your version is {}.{}. Please install Java v1.7 to continue or use --JRE_1_7_path to specify Java v1.7 binary to use.'.format(maj,min1))
     except IndexError:
         print(output)
-        sys.exit('There was a problem checking your Java version. Please report this as a baga bug.')
+        sys.exit('There was a problem checking your Java version. Please report this as a baga bug at https://github.com/daveuu/baga/issues.')
     
     # check GATK jar file
-    p = subprocess.Popen(['java', '-Xmx8g', '-jar', args.GATK_jar_path, '--help'], stdout = subprocess.PIPE, stderr = subprocess.STDOUT)
+    p = subprocess.Popen([use_java, '-Xmx8g', '-jar', args.GATK_jar_path, '--help'], stdout = subprocess.PIPE, stderr = subprocess.STDOUT)
     output = p.stdout.read()
     if 'Error: Unable to access jarfile' in output:
         sys.exit('Java could not find jar file for GATK at: {}\nPlease provide path to GATK v3.3 jar file with --GATK_jar_path.'.format(args.GATK_jar_path))
@@ -1206,6 +1222,7 @@ if using:
             
             alignments.IndelRealignGATK(
                         jar = args.GATK_jar_path.split(os.path.sep), 
+                        use_java = use_java,
                         force = args.force, 
                         max_cpus = args.max_cpus)
             
@@ -1694,6 +1711,7 @@ if using any of:
             caller.CallgVCFsGATK(
                         mem_num_gigs = args.max_memory,
                         jar = args.GATK_jar_path.split(os.path.sep),
+                        use_java = use_java,
                         force = args.force, 
                         max_cpus = args.max_cpus)
             
@@ -1703,6 +1721,7 @@ if using any of:
             caller.GenotypeGVCFsGATK(
                         alns_name,
                         jar = args.GATK_jar_path.split(os.path.sep), 
+                        use_java = use_java,
                         # ultimately, scale this by the number of samples involved
                         # needed >8 for a set of 40
                         mem_num_gigs = args.max_memory, 
@@ -1713,10 +1732,12 @@ if using any of:
         if args.hardfilter:
             caller.hardfilterSNPsGATK(
                         jar = args.GATK_jar_path.split(os.path.sep),
+                        use_java = use_java,
                         force = args.force)
             
             caller.hardfilterINDELsGATK(
                         jar = args.GATK_jar_path.split(os.path.sep),
+                        use_java = use_java,
                         force = args.force)
             
             caller.saveLocal(alns_name)
@@ -1725,11 +1746,15 @@ if using any of:
             # this is slow!
             caller.recalibBaseScoresGATK(
                         jar = args.GATK_jar_path.split(os.path.sep),
+                        use_java = use_java,
                         force = args.force, 
                         mem_num_gigs = args.max_memory, 
                         max_cpus = args.max_cpus)
             
             caller.saveLocal(alns_name)
+    
+
+    
 
 ### Apply Filters ###
 

@@ -394,6 +394,7 @@ class Caller:
     def CallgVCFsGATK(self, 
             jar = ['external_programs', 'GenomeAnalysisTK', 'GenomeAnalysisTK.jar'], 
             local_variants_path = ['variants'],
+            use_java = 'java',
             force = False,
             mem_num_gigs = 8, 
             max_cpus = -1):
@@ -431,7 +432,7 @@ class Caller:
             VCF_out = BAM[:-4] + '_unfiltered.gVCF'
             VCF_out = _os.path.sep.join([local_variants_path_genome, VCF_out.split(_os.path.sep)[-1]])
             if not _os.path.exists(VCF_out) or force:
-                cmd = ['java', '-Xmx%sg' % mem_num_gigs, '-jar', jar,
+                cmd = [use_java, '-Xmx%sg' % mem_num_gigs, '-jar', jar,
                 '-T', 'HaplotypeCaller', '-R', genome_fna, '-I', BAM, #'-L', '20', 
                 '--genotyping_mode', 'DISCOVERY',
                 '--sample_ploidy', '1',
@@ -466,6 +467,7 @@ class Caller:
     def GenotypeGVCFsGATK(self, data_group_name,
             jar = ['external_programs', 'GenomeAnalysisTK', 'GenomeAnalysisTK.jar'], 
             local_variants_path = ['variants'],
+            use_java = 'java',
             force = False,
             mem_num_gigs = 8):
         
@@ -499,7 +501,7 @@ class Caller:
         use_name = '{}_{}_samples_unfiltered.vcf'.format(data_group_name, len(self.paths_to_raw_gVCFs))
         VCF_out = _os.path.sep.join([local_variants_path_genome, use_name])
 
-        cmd = ['java', '-Xmx%sg' % mem_num_gigs, '-jar', jar, 
+        cmd = [use_java, '-Xmx%sg' % mem_num_gigs, '-jar', jar, 
             '-T', 'GenotypeGVCFs', '-R', genome_fna,
             '--heterozygosity', '0.0001',         # 650 total indels prior in all samples i.e., population
             '--indel_heterozygosity', '0.00001',  # 65 total indels prior in all samples i.e., population
@@ -519,6 +521,7 @@ class Caller:
 
     def hardfilterSNPsGATK(self, 
             jar = ['external_programs', 'GenomeAnalysisTK', 'GenomeAnalysisTK.jar'], 
+            use_java = 'java',
             force = False):
         
         jar = _os.path.sep.join(jar)
@@ -538,7 +541,7 @@ class Caller:
 
         # extract the SNPs
         raw_SNPs = self.path_to_unfiltered_VCF[-1][:-4] + '_SNPs.vcf'
-        cmd = ['java', '-jar', jar,
+        cmd = [use_java, '-jar', jar,
             '-T', 'SelectVariants',
             '-R', genome_fna,
             '-V', self.path_to_unfiltered_VCF[-1],
@@ -551,7 +554,7 @@ class Caller:
 
         # filter the SNPs
         hf_SNPs = (self.path_to_unfiltered_VCF[-1][:-4] + '_SNPs.vcf').replace('unfiltered','hardfiltered')
-        cmd = ['java', '-jar', jar,
+        cmd = [use_java, '-jar', jar,
             '-T', 'VariantFiltration',
             '-R', genome_fna,
             '-V', raw_SNPs,
@@ -570,6 +573,7 @@ class Caller:
 
     def hardfilterINDELsGATK(self, 
             jar = ['external_programs', 'GenomeAnalysisTK', 'GenomeAnalysisTK.jar'], 
+            use_java = 'java',
             force = False):
         jar = _os.path.sep.join(jar)
         genome_fna = 'genome_sequences/%s.fna' % self.genome_id
@@ -588,7 +592,7 @@ class Caller:
 
         # extract the INDELs
         raw_INDELs = self.path_to_unfiltered_VCF[-1][:-4] + '_INDELs.vcf'
-        cmd = ['java', '-jar', jar,
+        cmd = [use_java, '-jar', jar,
             '-T', 'SelectVariants',
             '-R', genome_fna,
             '-V', self.path_to_unfiltered_VCF[-1],
@@ -601,7 +605,7 @@ class Caller:
 
         # filter the INDELs
         hf_INDELs = (self.path_to_unfiltered_VCF[-1][:-4] + '_INDELs.vcf').replace('unfiltered','hardfiltered')
-        cmd = ['java', '-jar', jar,
+        cmd = [use_java, '-jar', jar,
             '-T', 'VariantFiltration',
             '-R', genome_fna,
             '-V', raw_INDELs,
@@ -622,6 +626,7 @@ class Caller:
             jar = ['external_programs', 'GenomeAnalysisTK', 'GenomeAnalysisTK.jar'], 
             samtools_exe = ['external_programs', 'samtools', 'samtools'],
             local_variants_path = ['variants'],
+            use_java = 'java',
             force = False,
             mem_num_gigs = 8, 
             max_cpus = -1):
@@ -657,7 +662,7 @@ class Caller:
         for cnum,BAM in enumerate(self.ready_BAMs[-1]):
             table_out_pre = BAM[:-4] + '_baserecal_pre.table'
             if not _os.path.exists(table_out_pre) or force:
-                cmd = ['java', '-Xmx%sg' % mem_num_gigs, '-jar', jar,
+                cmd = [use_java, '-Xmx%sg' % mem_num_gigs, '-jar', jar,
                     '-T', 'BaseRecalibrator',
                     '-R', genome_fna,
                     '-I', BAM,
@@ -676,7 +681,7 @@ class Caller:
             
             table_out_post = BAM[:-4] + '_baserecal_post.table'
             if not _os.path.exists(table_out_post) or force:
-                cmd = ['java', '-Xmx%sg' % mem_num_gigs, '-jar', jar,
+                cmd = [use_java, '-Xmx%sg' % mem_num_gigs, '-jar', jar,
                     '-T', 'BaseRecalibrator',
                     '-R', genome_fna,
                     '-I', BAM,
@@ -696,7 +701,7 @@ class Caller:
             
             BAM_out = BAM[:-4] + '_baserecal.bam'
             if not _os.path.exists(BAM_out) or force:
-                cmd = ['java', '-Xmx%sg' % mem_num_gigs, '-jar', jar,
+                cmd = [use_java, '-Xmx%sg' % mem_num_gigs, '-jar', jar,
                     '-T', 'PrintReads',
                     '-R', genome_fna,
                     '-I', BAM,

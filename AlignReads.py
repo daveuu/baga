@@ -337,6 +337,7 @@ class SAMs:
             jar = ['external_programs', 'GenomeAnalysisTK', 'GenomeAnalysisTK.jar'], 
             picard_jar = False, 
             samtools_exe = False,
+            use_java = 'java',
             force = False,
             mem_num_gigs = 2,
             max_cpus = -1):
@@ -352,13 +353,7 @@ class SAMs:
 
         genome_fna = 'genome_sequences/{}.fna'.format(self.genome_id)
 
-        e1 = 'Could not find "paths_to_BAMs_dd_si" attribute. \
-        Before starting GATK analysis, read alignments must be \
-        duplicates removed. Please run:\n\
-        toBAMS()\n\
-        removeDuplicates()\n\
-        sortIndexBAMs()\n\
-        method on this SAMs instance.'
+        e1 = 'Could not find "paths_to_BAMs_dd_si" attribute. Before starting GATK analysis, read alignments must have duplicates removed. Please run: .toBAMS(), .removeDuplicates(), .sortIndexBAMs() methods on this SAMs instance, or --deduplicate if using baga_cli.py.'
 
         assert hasattr(self, 'paths_to_BAMs_dd_si'), e1
 
@@ -369,7 +364,7 @@ class SAMs:
 
         if not _os.path.exists(genome_fna[:-4] + '.dict'):
             print('Creating sequence dictionary for %s' % genome_fna)
-            _subprocess.call(['java', '-jar', picard_jar, 'CreateSequenceDictionary', 'R=', genome_fna, 'O=', genome_fna[:-4] + '.dict'])
+            _subprocess.call([use_java, '-jar', picard_jar, 'CreateSequenceDictionary', 'R=', genome_fna, 'O=', genome_fna[:-4] + '.dict'])
 
         #have_index_files = [_os.path.exists(genome_fna + '.' + a) for a in ('ann','pac','amb','bwt','sa','fai')]
         have_index_files = [_os.path.exists(genome_fna + '.' + a) for a in ('fai',)]
@@ -384,7 +379,7 @@ class SAMs:
         for BAM in self.paths_to_BAMs_dd_si:
             intervals = BAM[:-4] + '.intervals'
             if not _os.path.exists(intervals) or force:
-                cmd = ['java', '-Xmx%sg' % mem_num_gigs, '-jar', jar, 
+                cmd = [use_java, '-Xmx%sg' % mem_num_gigs, '-jar', jar, 
                         '-T', 'RealignerTargetCreator', 
                         '-R', genome_fna, 
                         '-I', BAM, 
@@ -411,7 +406,7 @@ class SAMs:
             intervals = BAM[:-4] + '.intervals'
             bam_out = BAM[:-4] + '_realn.bam'
             if not _os.path.exists(bam_out) or force:
-                cmd = ['java', '-Xmx4g', '-jar', jar, 
+                cmd = [use_java, '-Xmx4g', '-jar', jar, 
                         '-T', 'IndelRealigner', 
                         '-R', genome_fna, 
                         '-I', BAM, 
