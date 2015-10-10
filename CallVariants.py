@@ -75,6 +75,23 @@ def parseVCF(path_to_VCF):
     header = dict(header)
     header_section_order = list(header_section_order)
     return(header, header_section_order, colnames, variants)
+def dictify_vcf_header(header):
+    '''convert VCF header to dict using re for quotes'''
+    pattern1 = _re.compile(''',(?=(?:[^'"]|'[^']*'|"[^"]*")*$)''')
+    pattern2 = _re.compile('''=(?=(?:[^'"]|'[^']*'|"[^"]*")*$)''')
+    headerdict = {}
+    for headersection,headerrows in header.items():
+        for headerrow in headerrows:
+            if headerrow[len('##{}='.format(headersection))] == '<':
+                # split by commas ignoring quotes
+                thisheaderdict = _re.split(pattern1, headerrow[len('##{}=<'.format(headersection)):-1])
+                thisheaderdict = dict([_re.split(pattern2, i) for i in thisheaderdict])
+                try:
+                    headerdict[headersection] += [thisheaderdict]
+                except KeyError:
+                    headerdict[headersection] = [thisheaderdict]
+
+    return(headerdict)
 
 def sortVariantsKeepFilter(header, colnames, variantrows):
     '''
@@ -99,21 +116,7 @@ def sortVariantsKeepFilter(header, colnames, variantrows):
     parameter_names[0] = parameter_names[0].lstrip('#')
     sample_names = colnames[colnames.index('FORMAT')+1:]
 
-    # dict-ify VCF header
-    # re for quotes
-    pattern1 = _re.compile(''',(?=(?:[^'"]|'[^']*'|"[^"]*")*$)''')
-    pattern2 = _re.compile('''=(?=(?:[^'"]|'[^']*'|"[^"]*")*$)''')
-    headerdict = {}
-    for headersection,headerrows in header.items():
-        for headerrow in headerrows:
-            if headerrow[len('##{}='.format(headersection))] == '<':
-                # split by commas ignoring quotes
-                thisheaderdict = _re.split(pattern1, headerrow[len('##{}=<'.format(headersection)):-1])
-                thisheaderdict = dict([_re.split(pattern2, i) for i in thisheaderdict])
-                try:
-                    headerdict[headersection] += [thisheaderdict]
-                except KeyError:
-                    headerdict[headersection] = [thisheaderdict]
+    headerdict = dictify_vcf_header(header)
 
     FILTERfilters = set()
     for FILTER in headerdict['FILTER']:
