@@ -1286,11 +1286,13 @@ if args.subparser == 'Repeats':
     from baga import Repeats
     from baga import CollectData
     
-    use_name_genome = args.genome_name.replace('baga.CollectData.Genome-', '' , 1).replace('.baga', '')
+    use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome-', args.genome_name)
+    
+    assert all([use_path_genome,use_name_genome]), 'Could not locate genome given: {}'.format(args.genome_name)
     
     if args.find:
         print('Loading genome %s' % use_name_genome)
-        genome = CollectData.Genome(local_path = 'baga.CollectData.Genome-{}.baga'.format(use_name_genome), format = 'baga')
+        genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
         finder = Repeats.Finder(genome)
         # minimum_percent_identity defaults to 98%, argument takes 0.98 so *0.01
         # minimum_repeat_length defaults to 400
@@ -1769,7 +1771,9 @@ if args.subparser == 'ApplyFilters':
     
     from baga import CallVariants
     
-    use_name_genome = args.genome_name.replace('baga.CollectData.Genome-', '' , 1).replace('.baga', '')
+    use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome-', args.genome_name)
+    
+    assert all([use_path_genome,use_name_genome]), 'Could not locate genome given: {}'.format(args.genome_name)
     
     VCFs_for_report = {}
     
@@ -1859,7 +1863,7 @@ if args.subparser == 'ApplyFilters':
         # genome is only needed when generating csv summary with ORFs affected
         from baga import CollectData
         print('Loading genome %s' % use_name_genome)
-        genome = CollectData.Genome(local_path = 'baga.CollectData.Genome-{}.baga'.format(use_name_genome), format = 'baga')
+        genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
         
         print('Loading filter information . . .')
         
@@ -2009,9 +2013,9 @@ if args.subparser == 'ComparativeAnalysis':
     if args.plot_phylogeny:
         # should check either or etc here
         if args.genome_name:
-            use_name_genome = args.genome_name.replace('baga.CollectData.Genome-', '' , 1).replace('.baga', '')
+            use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome-', args.genome_name)
             print('Loading genome %s' % use_name_genome)
-            genome = CollectData.Genome(local_path = 'baga.CollectData.Genome-{}.baga'.format(use_name_genome), format = 'baga')
+            genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
             genome_length = len(genome.sequence)
         elif args.genome_length:
             genome_length = genome_length
