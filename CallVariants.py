@@ -311,6 +311,27 @@ def to_by_position_filtered(variants, filters_applied, summarise = True):
             print('\n'.join(these))
 
     return(by_position,by_position_filtered)
+
+# hard coded information for known filter types
+known_filters = {}
+# per sample filters have custom INFO added to allow for 
+# sample-specific per-site filtering
+
+known_filters['rearrangements'] = {}
+# if dict of ranges e.g. for rearrangements regions extended
+# by no or low read depth mapping, need a list here with each
+# INFO entry
+known_filters['rearrangements']['string'] = [
+'##INFO=<ID=rearrangements1,Number=.,Type=Integer,Description="FILTER: Within a region affected by rearrangements between reference genome and sample. Sample-specific. INFO field is list of base-0 indexes for failed samples in column order">',
+'##INFO=<ID=rearrangements2,Number=.,Type=Integer,Description="FILTER: Adjacent to region affected by rearrangements between reference genome and sample and with >50% without reads mapped, i.e., absent in query or possibly insufficient mapping quality. Sample-specific. INFO field is list of base-0 indexes for failed samples in column order">']
+known_filters['rearrangements']['per_sample'] = True
+
+# reference genome specific filters need a conventional FILTER entry so all variants at a position are excluded
+known_filters['genome_repeats'] = {}
+known_filters['genome_repeats']['string'] = [
+'##FILTER=<ID=genome_repeats,Description="Within a long repeat unit in the reference genome">'
+]
+known_filters['genome_repeats']['per_sample'] = False
 class Caller:
     '''
     A collection of short read datasets that have been aligned to the same genome 
@@ -757,26 +778,6 @@ class Filter:
         # that fail. e.g. "q10;s50" might indicate that at this site the quality is below 10 and the number
         # of samples with data is below 50% of the total number of samples. "0" is reserved and should not
         # be used as a filter String.
-        
-        # hard coded information for known filter types
-        known_filters = {}
-        # per sample filters have custom INFO added to allow for 
-        # sample-specific per-site filtering
-        known_filters['rearrangements'] = {}
-        # if dict of ranges e.g. for rearrangements regions extended
-        # by no or low read depth mapping, need a list here with each
-        # INFO entry
-        known_filters['rearrangements']['string'] = [
-        '##INFO=<ID=rearrangements1,Number=.,Type=Integer,Description="FILTER: Within a region affected by rearrangements between reference genome and sample. Sample-specific. INFO field is list of base-0 indexes for failed samples in column order">',
-        '##INFO=<ID=rearrangements2,Number=.,Type=Integer,Description="FILTER: Adjacent to region affected by rearrangements between reference genome and sample and with >50% without reads mapped, i.e., absent in query or possibly insufficient mapping quality. Sample-specific. INFO field is list of base-0 indexes for failed samples in column order">']
-        known_filters['rearrangements']['per_sample'] = True
-        
-        # reference genome specific filters need a conventional FILTER entry so all variants at a position are excluded
-        known_filters['genome_repeats'] = {}
-        known_filters['genome_repeats']['string'] = '##FILTER=<ID=genome_repeats,Description="Within a long repeat unit in the reference genome">'
-        known_filters['genome_repeats']['per_sample'] = False
-        
-        self.known_filters = known_filters
 
 
 
@@ -1022,10 +1023,10 @@ class Filter:
         filters_to_apply = {}
         for this_filter, ranges in filters.items():
             try:
-                filters_to_apply[this_filter] = self.known_filters[this_filter]
+                filters_to_apply[this_filter] = known_filters[this_filter]
                 filters_to_apply[this_filter]['ranges'] = ranges
             except KeyError:
-                print('Known filter type: {}. Choose from {}'.format(this_filter, ', '.join(self.known_filters) ))
+                print('Unknown filter type: {}. Choose from {}'.format(this_filter, ', '.join(known_filters) ))
 
         self.markVariants(filters_to_apply)
 
