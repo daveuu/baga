@@ -143,7 +143,7 @@ def sortVariantsKeepFilter(header, colnames, variantrows):
         # variant info
         cols = dict(zip(parameter_names, row.rstrip().split('\t')[:len(parameter_names)]))
         # collect per sample filters for this row
-        INFO = dict([i.split('=') for i in cols['INFO'].split(';')])
+        INFO = dict([i.split('=') for i in cols['INFO'].split(';') if '=' in i])
         samples_filtered = {}
         for f in INFOfilters:
             if f in INFO:
@@ -795,6 +795,7 @@ class Filter:
             fail = False
             for s, e in ranges:
                 if s < pos1 <= e:
+                    # this variant is within region to reject
                     fail = True
                     break
             
@@ -803,7 +804,8 @@ class Filter:
                 if sample_index is not False:
                     # applies just to this sample
                     infos = info_cell.split(';')
-                    infos = dict([i.split('=') for i in infos])
+                    # ignore entries without an "="
+                    infos = dict([i.split('=') for i in infos if '=' in i])
                     if filter_id in infos:
                         # add this sample index to existing of previously filtered samples at this position
                         new_filtered_index_list = map(int,infos[filter_id].split(',')) + [sample_index]
@@ -854,32 +856,35 @@ class Filter:
                 # filter_id = 'rearrangements'
                 # filter_info = filters_to_apply[filter_id]
                 if filter_info['per_sample']:
-                    for sample,ranges in filter_info['ranges'].items(): #break
-                        these_filtered[sample] = {}
-                        infos_to_add = set()
-                        if isinstance(ranges, dict):
-                            # sometimes 'extended' versions of filters e.g., no or few reads adjacent to disrupted regions
-                            # add as filtername1, filtername2 etc
-                            for n,(filter_variant,these_ranges) in enumerate(sorted(ranges.items())): #break
-                                # variants list of rows gets iteratively added to per sample
+                    for sample,ranges in sorted(filter_info['ranges'].items()): #break
+                        # either vcf per sample or multi-sample vcfs
+                        # try all samples in all vcfs to handle either scenario
+                        if sample in sample_order:
+                            these_filtered[sample] = {}
+                            infos_to_add = set()
+                            if isinstance(ranges, dict):
+                                # sometimes 'extended' versions of filters e.g., no or few reads adjacent to disrupted regions
+                                # add as filtername1, filtername2 etc
+                                for n,(filter_variant,these_ranges) in enumerate(sorted(ranges.items())): #break
+                                    # variants list of rows gets iteratively added to per sample
+                                    variants, filtered = self.apply_filter_by_ranges(variants, 
+                                                                                these_ranges, 
+                                                                                filter_id+str(n+1), 
+                                                                                sample_index = sample_order.index(sample))
+                                    
+                                    # manually check that changes were applied
+                                    #[t.split('\t')[:8] for t in variants if int(t.split('\t')[1]) in filtered]
+                                    infos_to_add.add(filter_info['string'][n])
+                                    these_filtered[sample][filter_id+str(n+1)] = filtered
+                                    
+                            else:
+                                # one set of filter ranges, per sample
                                 variants, filtered = self.apply_filter_by_ranges(variants, 
-                                                                            these_ranges, 
-                                                                            filter_id+str(n+1), 
+                                                                            ranges, 
+                                                                            filter_id, 
                                                                             sample_index = sample_order.index(sample))
-                                
-                                # manually check that changes were applied
-                                #[t.split('\t')[:8] for t in variants if int(t.split('\t')[1]) in filtered]
-                                infos_to_add.add(filter_info['string'][n])
-                                these_filtered[sample][filter_id+str(n+1)] = filtered
-                                
-                        else:
-                            # one set of filter ranges, per sample
-                            variants, filtered = self.apply_filter_by_ranges(variants, 
-                                                                        ranges, 
-                                                                        filter_id, 
-                                                                        sample_index = sample_order.index(sample))
-                            infos_to_add.add(filter_info['string'])
-                            these_filtered[sample] = filtered
+                                infos_to_add.add(filter_info['string'])
+                                these_filtered[sample] = filtered
                     
                     # add filter info as INFO
                     header['INFO'] += list(infos_to_add)
@@ -888,7 +893,7 @@ class Filter:
                     variants, filtered = self.apply_filter_by_ranges(variants, filter_info['ranges'], filter_id)
                     # record filtered positions per sample even though determined by reference genome
                     these_filtered = dict([(sample,filtered) for sample in sample_order])
-                    header['FILTER'] += [filter_info['string']]
+                    header['FILTER'] += filter_info['string']
                 
                 all_filtered[VCF_path][filter_id] = these_filtered
                 
@@ -917,7 +922,7 @@ class Filter:
         attribute for further analysis.
         '''
         #self.known_filters['genome_repeats']['per_sample']
-        for VCF, filters in self.all_filtered.items():
+        for VCF, filters in sorted(self.all_filtered.items()):
             print('Organising filtered variants from:\n{}'.format(VCF))
             per_sample_per_position_info = {}
             for this_filter, info in filters.items():
@@ -984,12 +989,15 @@ class Filter:
         # do some checks on provided genome and VCFs
         genome_ids = {}
         genome_lengths = {}
-        pattern = _re.compile('##contig=<ID=([A-Za-z0-9]+\.[0-9]+),length=([0-9]+)>')
+        pattern = _re.compile('##contig=<ID=([A-Za-z0-9\._]+),length=([0-9]+)>')
         for VCF in self.VCF_paths: #break
             for line in open(VCF):
                 
                 if line[:9] == '##contig=':
-                    genome_id, genome_length = _re.match(pattern, line).groups()
+                    try:
+                        genome_id, genome_length = _re.match(pattern, line).groups()
+                    except AttributeError:
+                        print('Failed to parse genome information from {}'.format(line))
                     genome_lengths[int(genome_length)] = VCF
                     genome_ids[genome_id] = VCF
                     #print(genome_id, genome_length)

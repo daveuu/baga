@@ -622,7 +622,13 @@ parser_ApplyFilters.add_argument('-r', "--report",
     help = "summarise the effect of filters. Only choice currently implemented is cumulative effect on total variants.",
     type = str,
     nargs = '+',
-    choices = ['cumulative'])
+    choices = ['cumulative'],
+    metavar = 'REPORT_TYPE')
+
+parser_ApplyFilters.add_argument('-i', "--path_to_rearrangements_info", 
+    help = "optionally supply path to where rearrangement filter information is for all samples (if not in current directory; they look like baga.Structure.CheckerInfo-<samplename>__<genomename>.baga). These must be generated using the 'Structure --check' option and are each generated from the same .bam alignment file as the corresponding, supplied VCF files.",
+    type = str)
+
 
 parser_ComparativeAnalysis = subparser_adder.add_parser('ComparativeAnalysis',
                 formatter_class = argparse.RawDescriptionHelpFormatter,
@@ -1764,8 +1770,9 @@ if args.subparser == 'ApplyFilters':
     print('\n-- Apply Filters (part of the Variant Calling module) --\n')
     
     ## to apply variants, provide one reads group name
-    if len(args.reads_name) > 1 and not args.report:
-        sys.exit('Filters can only be applied to one group of reads at a time. Multiple sets can be handled with the --report option, though.')
+    if args.reads_name:
+        if len(args.reads_name) > 1 and not args.report:
+            sys.exit('Filters can only be applied to one group of reads at a time. Multiple sets can be handled with the --report option, though.')
     
     ## to report effects of filters, provide one or more read group names along with --report 
     
@@ -1846,20 +1853,20 @@ if args.subparser == 'ApplyFilters':
                 print('Reporting . . .: {}, {}'.format(args.report,'+'.join(filter_order)))
                 CallVariants.reportCumulative(filter_order, use_name_genome, VCFs_for_report)
     else:
-        # check accessible and collect sample names
-        sample_names = set()
+        # check accessible and collect sample names with genome accession
+        sample_names = {}
         for VCF in VCFs:
             try:
                 with open(VCF, 'r') as filein:
                     header, header_section_order, colnames, variants = CallVariants.parseVCF(VCF)
-                    sample_names.update(colnames[9:])
-                    pass
+                    bits = header['contig'][0].split('<')[-1].split('>')[0].split(',')
+                    contiginfo = dict([bit.split('=') for bit in bits])
+                    for sample_name in colnames[9:]:
+                        sample_names[sample_name] = contiginfo
             except IOError as e:
                 print(e)
                 sys.exit('Failed to open: {}'.format(VCF))
-        
-        sample_names = sorted(sample_names)
-        
+                
         # genome is only needed when generating csv summary with ORFs affected
         from baga import CollectData
         print('Loading genome %s' % use_name_genome)
@@ -1884,17 +1891,30 @@ if args.subparser == 'ApplyFilters':
             
             filters['rearrangements'] = {}
             #for sample,checker in checkers.items():
-            for sample in sample_names:
+            for sample,genomeinfo in sorted(sample_names.items()):
                 
                 if args.include_samples:
                     if sample not in args.include_samples:
                         continue
                 
-                filein = 'baga.Structure.CheckerInfo-{}__{}.baga'.format(sample, use_name_genome)
+                filein = 'baga.Structure.CheckerInfo-{}__{}.baga'.format(sample, genomeinfo['ID'])
+                if args.path_to_rearrangements_info:
+                    filein = os.path.sep.join([args.path_to_rearrangements_info,filein])
+                
                 checker_info = Structure.loadCheckerInfo(filein)
                 
                 e = 'Genome name for checker {} ({}) does not match supplied genome name ({})'.format(filein, checker_info['genome_name'], genome.id)
-                assert checker_info['genome_name'] == genome.id, e
+                name_match = checker_info['genome_name'] == genome.id
+                #### temporarily force to true: CheckerInfo will now save genome length
+                checker_info['genome_length'] = len(genome.sequence)
+                length_match = checker_info['genome_length'] == len(genome.sequence)
+                
+                if not name_match:
+                    print('WARNING: genome name used for rearrangements filter for {} ({}) does not match requested genome to use ({}).'.format(sample, checker_info['genome_name'], genome.id))
+                    if length_match:
+                        print('Genome lengths match so proceeding and assuming alternative names or accession numbers for same genome ({:,} bp).'.format(checker_info['genome_length']))
+                    else:
+                        sys.exit('ERROR: genome length mismatch. Different genome used for rearrangemtns filter analysis to one requested to use to apply filter? ({:,} bp vs {:,} bp).'.format(checker_info['genome_length'],len(genome.sequence)))
                 
                 # report brief summary for this sample
                 print('For sample {}, relative to {}:'.format(sample, genome.id))
