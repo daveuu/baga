@@ -49,7 +49,7 @@ from Bio import AlignIO as _AlignIO
 
 from baga import get_exe_path as _get_exe_path
 from baga import report_time as _report_time
-
+from baga import CallVariants
 
 # for non-stdlib modules that are only required by certain Classes
 # issue warnings here if not found
@@ -100,11 +100,27 @@ class MultipleSequenceAlignment:
     '''
     # could add de novo MSA from sequences using e.g. muscle and Entrez downloads?
 
-    def __init__(self, path_to_VCFs, path_to_INDEL_VCFs = False):
+    def __init__(self, paths_to_VCFs):
+        '''
+        A MultipleSequenceAlignment Builder object must be instantiated with:
+            - list of path(s) to VCF file(s)
+        
+        '''
+        
+        for VCF in paths_to_VCFs:
+            try:
+                f = open(VCF)
+            except IOError:
+                e = 'Could not access {}.\nPlease ensure all files exist and are accessible'.format(VCF)
+        
+        self.paths_to_VCFs = paths_to_VCFs
+
+
+    def old__init__(self, path_to_VCFs, path_to_INDEL_VCFs = False):
         '''
         A MultipleSequenceAlignment Builder object must be instantiated with:
             
-            - path to a VCF file containing
+            - path(s) to VCF file(s)
         '''
         
         e = 'Please supply 1 VCF path for mixed variants or 2 VCF paths for separate SNPs and InDels.\n{} paths supplied'.format(len(path_to_VCFs))
@@ -125,29 +141,214 @@ class MultipleSequenceAlignment:
             self.mixed_VCFs = path_to_VCFs
 
 
-    def parseVCFs(self, samples_to_include = [], 
+    def collectVariants(self, 
+                        samples_to_include = [], 
+                        samples_to_exclude = [],
+                        filters = ['rearrangements','genome_repeats','LowQual','standard_hard_filter'],
+                        force_inclusion_of_invariants = False, 
+                        show_totals = True):
+        
+        '''
+        Given list of VCFs, parse them obeying specified filters and return an optional subset of samples.
+        filters is a list of filters to exclude indicated in either INFO or FILTER column.
+        e.g. filters = ['genome_repeats', rearrangments]
+        filters must be described in CallVarinats.known_filters
+        '''
+
+        # some filters like rearrangements are expanded into two sub filters: rearrangements1 and 2
+        obeyfilters_INFO = set()
+        obeyfilters_FILTER = set()
+        pattern = _re.compile('ID=([0-9A-Za-z_]+),')
+        for this_filter in filters:
+            if this_filter in CallVariants.known_filters:
+                for vcf_header_string in CallVariants.known_filters[this_filter]['string']:
+                    filter_name = _re.findall(pattern, vcf_header_string)[0]
+                    if vcf_header_string[:6] == '##INFO':
+                        obeyfilters_INFO.add(filter_name)
+                    else:
+                        obeyfilters_FILTER.add(filter_name)
+            else:
+                print('Unknown filter type: {}. Choose from {}'.format(this_filter, ', '.join(CallVariants.known_filters) ))
+
+        genome_ids = {}
+        genome_lengths = {}
+
+        SNPs = _defaultdict(dict)
+        InDels = _defaultdict(dict)
+        filtered_log = []
+        for VCF_path in self.paths_to_VCFs:
+            header, header_section_order, colnames, these_variants = CallVariants.parseVCF(VCF_path)
+            headerdict = CallVariants.dictify_vcf_header(header)
+            FILTERfilters = set()
+            if 'FILTER' in headerdict:
+                for FILTER in headerdict['FILTER']:
+                    FILTERfilters.add(FILTER['ID'].strip('\'"'))
+            
+            INFOfilters = set()
+            if 'INFO' in headerdict:
+                for INFO in headerdict['INFO']:
+                    if INFO['Description'].strip('"')[:len('FILTER:')] == 'FILTER:':
+                        INFOfilters.add(INFO['ID'].strip('\'"'))
+            
+            ### hardwired for single chromosome (contig)
+            genome_ids[headerdict['contig'][0]['ID']] = VCF_path
+            genome_lengths[headerdict['contig'][0]['length']] = VCF_path
+            
+            sample_names = colnames[9:]
+            for line in these_variants:
+                bits = line.split('\t')
+                chromosome, pos1, ID, ref, query, qual, FILTER, INFO, FORMAT = bits[:9]
+                # (polymorphisms separated with commas)
+                query_char_states = query.split(',')
+                FILTER = set(FILTER.split(';'))
+                if len(obeyfilters_FILTER & FILTER):
+                    # at least some filters present
+                    filtered_log += ['Omitted variant {} to {} at {} from {} because of "{}" filter'.format(
+                                        ref,
+                                        query,
+                                        pos1,
+                                        ','.join(sample_names),
+                                        ','.join(FILTER))]
+                    continue
+                
+                # collect per sample filters for this row
+                sample_INFOs = bits[9:]
+                GTindex = FORMAT.split(':').index('GT')
+                INFO = dict([i.split('=') for i in INFO.split(';') if '=' in i])
+                #print(INFO,sample_INFOs)
+                samples_filtered = {}
+                for f in obeyfilters_INFO:
+                    if f in INFO:
+                        indexes = map(int, INFO[f].split(','))
+                        for i in indexes:
+                            try:
+                                samples_filtered[sample_names[i]].add(f)
+                            except KeyError:
+                                samples_filtered[sample_names[i]] = set([f])
+                
+                for s,info in zip(sample_names,sample_INFOs):
+                    try:
+                        filtered_log += ['Omitted variant {} to {} at {} from {} because of "{}" filter'.format(
+                                        ref,
+                                        query,
+                                        pos1,
+                                        s,
+                                        ','.join(samples_filtered[s]))]
+                    except KeyError:
+                        # not filtered so record variant
+                        GTstate = info.split(':')[GTindex]
+                        assert '/' not in GTstate, 'Pooled data with allele frequencies not implemented for MSAs ({})'.format(
+                                                                    VCF_path)
+                        if GTstate == '.':
+                            try:
+                                if int(INFO['DP']) != 0:
+                                    print('WARNING: absent genotype but some reads present: {}'.format(INFO['DP']))
+                            except KeyError:
+                                # if not DP, no depth, no alignment: indel
+                                query = '-'
+                        else:
+                            # comma separated variants, but 0 in GT is not variant
+                            # so 1 should index first query, 0 causes exclusion of all variants
+                            query = query_char_states[int(GTstate)-1]
+                        
+                        if GTstate != '0':
+                            if len(ref) == len(query) == 1 and query != '-':
+                                SNPs[s][int(pos1)] = (ref, query)
+                            else:
+                                InDels[s][int(pos1)] = (ref, query)
+
+
+        self.genome_id = genome_ids.keys()[0]
+        self.genome_length = genome_lengths.keys()[0]
+
+
+        # one day log this
+        # print('\n'.join(filtered_log))
+
+
+        e = 'Differing reference genome among provided VCFs? {}'.format(genome_ids.items())
+        assert len(genome_lengths) == 1, e
+
+        if len(genome_ids) > 1:
+            print('WARNING: differing genome IDs among VCFs: {}, but lengths equal ({:,}) so assuming alternative IDs for same genome.'.format(
+                    ', '.join(genome_ids), int(genome_lengths.keys()[0])))
+
+
+        allsamples_found = set(SNPs) | set(InDels)
+        if samples_to_include:
+            # retain only requested samples
+            assert len(set(samples_to_include) & allsamples_found), 'none of requested samples ({}) found in VCFs ({})'.format(
+                                                                                        ','.join(samples_to_include),
+                                                                                        ','.join(allsamples_found))
+            SNPs = dict([(a,b) for a,b in SNPs.items() if a in samples_to_include])
+            InDels = dict([(a,b) for a,b in InDels.items() if a in samples_to_include])
+
+        # ensure samples with no variants are included in variant dicts (and MSA)
+        if force_inclusion_of_invariants:
+            if samples_to_include:
+                use_samples = samples_to_include
+            else:
+                use_samples = allsamples_found
+            
+            for sample in use_samples:
+                try:
+                    SNPs[sample] = SNPs[sample]
+                except KeyError:
+                    print('WARNING: {} requested but no SNPs found in VCF . . including as invariant because force_inclusion_of_invariants == True'.format(sample))
+                    SNPs[sample] = {}
+                try:
+                    InDels[sample] = InDels[sample]
+                except KeyError:
+                    print('WARNING: {} requested but no InDels found in VCF . . including as invariant because force_inclusion_of_invariants == True'.format(sample))
+                    InDels[sample] = {}
+
+        if samples_to_exclude:
+            # exclude samples if requested
+            initial_samples_SNPs = set(SNPs)
+            SNPs = dict([(a,b) for a,b in SNPs.items() if a not in samples_to_exclude])
+            InDels = dict([(a,b) for a,b in InDels.items() if a not in samples_to_exclude])
+            excluded_from_SNPs = initial_samples_SNPs - set(SNPs)
+            if len(excluded_from_SNPs):
+                print('Excluded from SNPs:\n{}'.format('\n'.format(excluded_from_SNPs)))
+                if len(samples_to_exclude) > len(excluded_from_SNPs):
+                    print('WARNING: Requested to exclude {}, but not found in VCFs'.format(
+                                ', '.join(set(samples_to_exclude) - excluded_from_SNPs)))
+            else:
+                print('WARNING: Requested to exclude {}, but none found in VCFs'.format(
+                                ', '.join(samples_to_exclude)))
+
+
+
+        if show_totals:
+            print('-SNPs-\n{}\n'.format('\n'.join(
+                ['{}: {}'.format(a,len(b)) for a,b in sorted(SNPs.items())]
+            )))
+            print('-InDels-\n{}\n'.format('\n'.join(
+                ['{}: {}'.format(a,len(b)) for a,b in sorted(InDels.items())]
+            )))
+
+
+        self.SNPs = SNPs
+        self.InDels = InDels
+
+    def old_parseVCFs(self, samples_to_include = [], 
                         filters_include = ['rearrangements1','rearrangements2'], 
                         filters_exclude = [], 
                         force_inclusion_of_invariants = False, 
                         show_totals = True):
         '''
-        Parse SNPs and InDels out of VCFs.
+        Parse VCFs.
         filters_include is a list of filter names described in INFO column.
         filters_exclude is a list of filters in the FILTER column to ignore,
         e.g. filters_exclude = ['genome_repeats']
         '''
-        
-        VCFs = {
-        'SNPs': self.path_to_SNPs_VCFs,
-        'InDels': self.path_to_InDels_VCFs
-        }
         
         # identify chromosome for this VCF <== this will fail if running against > 1 contigs . . .
         identified = False
         genome_ids = {}
         genome_lengths = {}
         pattern = _re.compile('##contig=<ID=([A-Za-z0-9]+\.[0-9]+),length=([0-9]+)>')
-        for VCF in VCFs['SNPs'] + VCFs['InDels']:
+        for VCF in self.paths_to_VCFs:
             for line in open(VCF):
                 if line[:9] == '##contig=':
                     genome_id, genome_length = _re.match(pattern, line).groups()
@@ -627,16 +828,18 @@ class MultipleSequenceAlignment:
         # could add InDels but would only really contribute to missing data
         # unless end-user chooses to encode indels as characters?
         
+        MSA_filename = MSA_filename.replace('.fna','').replace('.fasta','')
         forMSA = []
         for sample, sequence_array in sorted(alignment_arrays.items()):
             # without explicitly setting description = '', BioPython adds "<unknown description>" to sequence file
             # for each record. Some sequence file parsers include "<unknown description>" with id which can confuse
             # things e.g., ClonalFrameML where tree tip label will not match a sequence
             forMSA += [_SeqRecord( id = sample, name = '', description = '', seq = _Seq(''.join(sequence_array)) )]
+            if len(sample) > 10:
+                print('WARNING: {} may get truncated to ten characters ({}) in {}.phy because of Phylip specs'.format(
+                                        sample, sample[:10], MSA_filename))
         
         MSA = _MultipleSeqAlignment(forMSA)
-        
-        MSA_filename = MSA_filename.replace('.fna','').replace('.fasta','')
         
         print('Writing multiple nucleotide sequence alignment to Fasta file {}.fna'.format(MSA_filename))
         _SeqIO.write(MSA,'{}.fna'.format(MSA_filename), 'fasta')
@@ -655,7 +858,7 @@ class Phylogenetics:
     the Builder class of the MultipleAlignments module.
     '''
 
-    def __init__(self, path_to_multiple_alignment, path_to_tree = None):
+    def __init__(self, path_to_multiple_alignment, tree = False, path_to_tree = False):
         '''
         A ComparativeAnalyses Phylogenetics object must be instantiated with:
             
@@ -668,11 +871,8 @@ class Phylogenetics:
         
         self.path_to_MSA = path_to_multiple_alignment
         
-        if path_to_tree:
-            
-            e = 'Could not find %s.\nPlease ensure file exist'
-            assert _os.path.exists(path_to_tree), e % path_to_tree
-            
+        if tree or path_to_tree:
+            # check dendropy is around
             dependencies_module = 'The Dependencies module can install this package locally.'
             
             try:
@@ -688,8 +888,23 @@ class Phylogenetics:
                                     dependencies_module
                                     )
             assert dendropy_major_version == 4, e
+        
+        if tree:
+            e = '"tree" must be a dendropy Tree, not a {}'.format(type(tree))
+            assert type(tree) is _dendropy.datamodel.treemodel.Tree, e
+            if path_to_tree:
+                print('Ignoring path to tree because also supplied with a tree')
+            
+            self.tree = tree
+            
+        elif path_to_tree:
+            
+            e = 'Could not find %s.\nPlease ensure file exist'
+            assert _os.path.exists(path_to_tree), e % path_to_tree
+            
             
             self.tree = _dendropy.Tree.get_from_path(path_to_tree, 'newick')
+        
 
     def estimate_phylogeny_PhyML(self, path_to_exe = False, num_bootstraps = 0, collect_previous = True):
         '''Infer a phylogeny using phyml and collect parameter estimates e.g. kappa (Tv/Ts ratio)'''
@@ -719,6 +934,10 @@ class Phylogenetics:
         else:
             if not path_to_exe:
                 path_to_exe = _get_exe_path('phyml')
+            
+            firstline = open(self.path_to_MSA).next()
+            if firstline[0] == '>':
+                print('WARNING: {} looks like a FASTA file but PhyML requires Phylip sequence files')
             
             cmd = [path_to_exe]
             cmd += ['-i', self.path_to_MSA, '-o', 'tlr', '-s', 'BEST', '-t', 'e', '-d', 'nt', '-f', 'm', '-v', '0', '-b', str(num_bootstraps)]
@@ -1086,7 +1305,7 @@ class Phylogenetics:
             # B = str(msa[label2MSAindex[reference_id],s-1:e].seq)
             # print(sample,all([a==b for a,b in zip(A,B) if a != '-']))
 
-    def find_homoplasies(self, path):
+    def find_homoplasies(self, column_index = False):
 
         # collect variants from MSA
         # need to decide how to describe variants:
@@ -1098,101 +1317,127 @@ class Phylogenetics:
             # longest terminal edge?
             # actually, do need rooted tree, and a focal 'in group' or clade in which to define homoplasies.
 
+        assert hasattr(self, 'tree'), 'a tree attribute on which to find homoplasies is required (as a DendroPy Tree)'
 
-        # can adapt this code:
-
-        # load MSA and the dict that maps MSA columns with reference genome positions
-        MSA_filename = self.path_to_MSA.replace('.phy','')
-        #MSA_filename = phylo_analyser.path_to_MSA.replace('.phy','')
-        variable_positions_pos1 = baga.bagaload('baga.ComparativeAnalysis.MSA.{}_dict2ref'.format(MSA_filename))
-
+        # load MSA
         print("Loading multiple sequence alignment: {}".format(self.path_to_MSA))
-        msa = _AlignIO.read(self.path_to_MSA, 'phylip')
-        #msa = _AlignIO.read(phylo_analyser.path_to_MSA, 'phylip')
+        try:
+            msa = _AlignIO.read(self.path_to_MSA, 'phylip')
+        except ValueError:
+            assert self.path_to_MSA[-3:].lower() != 'phy', 'problem opening your Phylip file at {}'.format(self.path_to_MSA)
+            try:
+                msa = _AlignIO.read(self.path_to_MSA, 'fasta')
+            except Exception:
+                _sys.exit('There seems to be a problem opening your alignment, assumed to be a FASTA file: {}'.format(self.path_to_MSA))
+
+        if column_index:
+            # if requested, load mapping of alignment columns to chromosome positions (and therefore annotations)
+            MSA_filename = self.path_to_MSA.replace('.phy','')
+            #MSA_filename = phylo_analyser.path_to_MSA.replace('.phy','')
+            variable_positions_pos1 = baga.bagaload('baga.ComparativeAnalysis.MSA.{}_dict2ref'.format(MSA_filename))
+
 
         # make a dict to look up MSA sequences by name
-        label2MSAindex = dict([(s.id,n) for n,s in enumerate(msa)])
+        label2MSAindex = {}
+        for n,s in enumerate(msa):
+            label2MSAindex[self.tree.taxon_namespace.get_taxon(label = s.id.replace('_',' '))] = n
 
-        # load the tree modified and labelled by ClonalFrameML
-        tree = _dendropy.Tree.get_from_path(ClonalFrameML_tree, 'newick')
+        e = 'multiple sequence alignment and tree do not contain the same taxa'
+        try:
+            assert self.tree.taxon_namespace.taxa_bitmask(taxa = label2MSAindex) == self.tree.seed_node.tree_leafset_bitmask, e
+        except KeyError:
+            _sys.exit(e)
 
+        for taxon,i in label2MSAindex.items():
+            print(taxon, len(msa[i].seq))
 
-        SNPs_by_homoplasies = {}
-        for (s,e),samples in homoplasies_to_samples.items():
-            SNPs_by_homoplasies[s,e] = {}
-            ref_seq = str(msa[label2MSAindex[reference_id],s-1:e].seq)
-            #print(s,e,variable_positions_pos1[s],variable_positions_pos1[e])
-            for sample in samples: #break
-                sample_seq = str(msa[label2MSAindex[sample],s-1:e].seq)
-                for n,ch in enumerate(sample_seq):
-                    if ch != '-' and ref_seq[n] != ch:
-                        try:
-                            SNPs_by_homoplasies[s,e][variable_positions_pos1[s+n], ref_seq[n], ch] += [sample]
-                        except KeyError:
-                            SNPs_by_homoplasies[s,e][variable_positions_pos1[s+n], ref_seq[n], ch] = [sample]
-
-                if len(SNPs_by_homoplasies[s,e]) == 0:
-                    print(sample_seq)
-
-        self.path_to_MSA
 
         # collect deepest monophyletic clades that a variant is present in: more than one is a homoplasy
+        # currently requires an outgroup of one to provide an effective ancestral state against which to compare
+
+        # get ancestral state from outgroup
+        nodes = [node for node in self.tree.seed_node.child_nodes() if node.taxon is not None]
+        ## ancestral state could be provided as an argument: SeqRecord same length as MSA etc
+        ## then user can either us outgroup, reference, reconstruct etc.
+        assert len(nodes) == 1, 'require a single taxon outgroup to provide ancestral state'
+
+        ancestral_state = str(msa[label2MSAindex[nodes[0].taxon]].seq)
+
+        # use this to define whether a variant is exists or not
+        print(ancestral_state)
+
         derived_variants_i = {}
         #for n in t.postorder_internal_node_iter():  # internal will only do pairs . . also interested in homoplasies among single pools
-        for n in t.postorder_node_iter():
-          print('+'.join([k.taxon.label for k in n.leaf_nodes()]))
-          these_samples = set([k.taxon.label.split(' ')[-1] for k in n.leaf_nodes()])
-          if 'LESB58' in these_samples:
-            continue
-          else:
-            these_samples = set(map(int,these_samples))
-          #### collect the positions common to the samples in these_samples
-          
-          these_variants = []
-          for sample in these_samples:
-            for v in in_ORF_variants_chrm_pos1[sample]:
-              these_variants += [v]
-            for v in non_ORF_variants_chrm_pos1[sample]:
-              these_variants += [v]
-          
-          these_variants = Counter(these_variants)
-          for v,c in these_variants.items():
-            if c == len(these_samples):
-              if v not in derived_variants_i:
-                derived_variants_i[v] = [these_samples]
-              else:
-                keep_these = []
-                for g in derived_variants_i[v]:
-                  if not g.issubset(these_samples):
-                    keep_these += [g]
-                derived_variants_i[v] = keep_these + [these_samples]
+        for node in self.tree.postorder_node_iter():
+            taxa = set([k.taxon for k in node.leaf_nodes()])
+            if taxa == set(label2MSAindex):
+                # not from root
+                continue
+            
+            #### collect the positions common to the samples in these_samples
+            
+            these_variants = []
+            for taxon in taxa:
+                chars = str(msa[label2MSAindex[taxon]].seq)
+                for n,(r,q) in enumerate(zip(ancestral_state,chars)):
+                    if r != q:
+                        these_variants += [n]
+            
+            these_variants = _Counter(these_variants)
+            
+            #print(these_variants)
+            
+            # these_variants = []
+            # for sample in these_samples:
+                # for v in in_ORF_variants_chrm_pos1[sample]:
+                    # these_variants += [v]
+                # for v in non_ORF_variants_chrm_pos1[sample]:
+                    # these_variants += [v]
+            
+            # these_variants = Counter(these_variants)
+            for v,c in these_variants.items():
+                if c == len(taxa):
+                    if v not in derived_variants_i:
+                        derived_variants_i[v] = [taxa]
+                    else:
+                        keep_these = []
+                        for g in derived_variants_i[v]:
+                            if not g.issubset(taxa):
+                                keep_these += [g]
+                        
+                        derived_variants_i[v] = keep_these + [taxa]
 
-        len(derived_variants_i)                                            # 1926
+        # len(derived_variants_i)                                            # 1926
 
-        len([(a,len(b)) for a,b in derived_variants_i.items() if len(b) > 1])    # 23 homoplasies (losses or recombinations) across haplotypes (isolates)!
-        sorted([(a,len(b)) for a,b in derived_variants_i.items() if len(b) > 1])
+        print(len([(a,len(b)) for a,b in derived_variants_i.items() if len(b) > 1]))    # 23 homoplasies (losses or recombinations) across haplotypes (isolates)!
 
-        sorted([(a,b) for a,b in derived_variants_i.items() if len(b) > 1])
+        for a,b in sorted([(a,len(b)) for a,b in derived_variants_i.items() if len(b) > 1]):
+            print(a,b)
+
+        return(derived_variants_i)
+
+        # sorted([(a,b) for a,b in derived_variants_i.items() if len(b) > 1])
+
+
 
 class Plotter:
     '''
     Plotter class of the ComparativeAnalysis module contains methods to plot 
     phylogenies as SVG files from .
     '''
-    def __init__(self, path_to_tree, plot_output_path,
-        width_cm = 30, height_cm = 30, 
-        viewbox_width_px = 1800, viewbox_height_px = 1800,
-        plot_width_prop = 0.8, plot_height_prop = 0.8, 
-        white_canvas = True):
+
+    def __init__(self,  plot_output_path, 
+                        path_to_tree = False, 
+                        tree = False, 
+                        width_cm = 30, height_cm = 30, 
+                        viewbox_width_px = 1800, viewbox_height_px = 1800,
+                        plot_width_prop = 0.8, plot_height_prop = 0.8, 
+                        white_canvas = True):
         '''
         Plot a phylogeny.
         '''
         
-        e = 'Could not find %s.\nPlease ensure file exist'
-        assert _os.path.exists(path_to_tree), e % path_to_tree
-        
         dependencies_module = 'The Dependencies module can install this package locally.'
-        
         try:
             import dendropy as _dendropy
         except ImportError:
@@ -1207,12 +1452,26 @@ class Plotter:
                                 )
         assert dendropy_major_version == 4, e
         
-        self.tree = _dendropy.Tree.get_from_path(path_to_tree, 'newick')
-        
         try:
             import svgwrite as _svgwrite
         except ImportError:
             print('Could not import the required svgwrite package. {}'.format(dependencies_module))
+        
+        e = 'please supply a DendroPy tree object or a path to a newick formatted tree to load'
+        assert path_to_tree or tree, e
+        
+        if path_to_tree:
+            e = 'Could not find %s.\nPlease ensure file exist'
+            assert _os.path.exists(path_to_tree), e % path_to_tree
+            
+            self.tree = _dendropy.Tree.get_from_path(path_to_tree, 'newick')
+            if tree:
+                print('WARNING: loading tree from path, but tree also supplied. Ignoring latter.')
+        elif tree:
+            assert type(tree) == _dendropy.datamodel.treemodel.Tree, '"tree" must be a DendroPy tree, not {}'.format(type(tree))
+            self.tree = tree
+        
+        self.tree.update_bipartitions()
         
         if plot_output_path[-4:] not in ('.svg', '.SVG'):
             plot_output_path = plot_output_path + '.svg'
@@ -1449,7 +1708,7 @@ class Plotter:
                                                     preserve_spaces = True).rstrip()
 
         # this may mess up underscores . . I think Newick converts spaces to underscores?
-        self.tiporder = _re.findall('[^\(^\)^,^;]+', tree_string)
+        self.tiporder = _re.findall("[^\(^\)^,^;^']+", tree_string)
 
 
     def getVGTs(self):
@@ -1984,7 +2243,21 @@ class Plotter:
 
 
         if len(outgroup_label_list):
+            print('rerooting to outgroup {}'.format(', '.join(outgroup_label_list)))
+            # replace underscores with spaces per Newick standard
+            outgroup_label_list = [a.replace('_',' ') for a in outgroup_label_list]
+            missing_outgroup_labels = []
+            for o in outgroup_label_list:
+                if self.tree.find_node_with_taxon_label(o) is None:
+                    missing_outgroup_labels += [o]
+            
+            e = 'Requested outgroup member(s): {} not found in tree'.format(', '.join(missing_outgroup_labels))
+            assert len(missing_outgroup_labels) == 0, e
+            
             self.reroot_to_outgroup(outgroup_label_list)
+        else:
+            print('rerooting to midpoint')
+            self.tree.reroot_at_midpoint(update_bipartitions=True)
 
 
         if plot_transfers:
@@ -2043,7 +2316,6 @@ class Plotter:
                 node_2_VGT[VGT['l']] = VGT
             if isinstance(plot_transfers, str):
                 # path to raw ClonalFrame output provided
-                
                 # get those affected and their relationships
                 bits = [l.rstrip().split('\t') for l in open(plot_transfers)]
                 homoplasies = dict([(tuple(map(int,bit[1:])),[]) for bit in bits[1:]])
@@ -2162,22 +2434,29 @@ class Plotter:
         if use_names:
             d = _re.compile('[\t ]+')
             try:
-                name_translate = dict([_re.split(d, l.rstrip(), maxsplit = 1) for l in open(use_names) if len(l)])
+                name_translate = dict([_re.split(d, l.rstrip(), maxsplit = 1) for l in open(use_names) if len(l) > 2])
             except IOError:
                 _sys.exit('Could not access the requested --use_names file: {}'.format(use_name))
             
+            # remove underscores for compatibility with DendroPy's Newick handling i.e., with Newick
+            name_translate = dict([(a.replace('_',' '),b.replace('_',' ')) for a,b in name_translate.items()])
+            
             for t in tip_labels:
-                e = 'cannot find tip label {} in supplied tip name translation file: {}'.format(t, use_names)
-                assert t in name_translate, e
+                if t not in name_translate:
+                    print('WARNING: cannot find tip label {} in supplied tip name translation file: {}'.format(
+                                                        t, use_names))
             
             # current style is to retain original label (reads accession) in parentheses
             new_tip_labels = set()
             for t in tip_labels:
                 for VGT in self.VGTs:
                     if VGT['l'] == t:
-                        VGT['l'] = '{} ({})'.format(name_translate[t], t)
-                
-                new_tip_labels.add('{} ({})'.format(name_translate[t], t))
+                        try:
+                            VGT['l'] = '{} ({})'.format(name_translate[t], t)
+                            new_tip_labels.add('{} ({})'.format(name_translate[t], t))
+                        except KeyError:
+                            # no translation supplied for this tip
+                            new_tip_labels.add(t)
             
             tip_labels = new_tip_labels
 

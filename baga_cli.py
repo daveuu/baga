@@ -641,21 +641,21 @@ recombination events.',
 --reads_name Liverpool --genome FM209186.1  --include_invariants\n', 
 text_width, replace_whitespace = False))
 
-mutually_exclusive_group = parser_ComparativeAnalysis.add_mutually_exclusive_group(required=True)
+mutually_exclusive_group1 = parser_ComparativeAnalysis.add_mutually_exclusive_group(required=True)
 
-mutually_exclusive_group.add_argument('-m', "--build_MSA", 
+mutually_exclusive_group1.add_argument('-m', "--build_MSA", 
     help = "build a multiple sequence alignment from a reference genome and SNPs listed in VCF files",
     action = 'store_true')
 
-mutually_exclusive_group.add_argument('-i', "--infer_phylogeny", 
+mutually_exclusive_group1.add_argument('-i', "--infer_phylogeny", 
     help = "infer a phylogeny from a multiple sequence alignment",
     action = 'store_true')
 
-mutually_exclusive_group.add_argument('-r', "--infer_recombination", 
+mutually_exclusive_group1.add_argument('-r', "--infer_recombination", 
     help = "infer recombination from a phylogeny and multiple sequence alignment",
     action = 'store_true')
 
-mutually_exclusive_group.add_argument('-p', "--plot_phylogeny", 
+mutually_exclusive_group1.add_argument('-p', "--plot_phylogeny", 
     help = "plot a phylogeny, possibly including recombination inferences",
     action = 'store_true')
 
@@ -664,13 +664,26 @@ parser_ComparativeAnalysis.add_argument('-g', "--genome_name",
     help = "name of genome obtained by the CollectData option on which to base a MSA along with SNPs",
     type = str)
 
-parser_ComparativeAnalysis.add_argument('-n', "--reads_name", 
-    help = "name of read datasets groups to include in an MSA. Should match --reads_name option used previously in baga GATK-based read calling pipline",
+mutually_exclusive_group2 = parser_ComparativeAnalysis.add_mutually_exclusive_group(required=False)
+
+mutually_exclusive_group2.add_argument('-n', "--reads_name", 
+    help = "name of read datasets groups to include in an MSA, if processed by PrepareReads and AlignReads options. Should match --reads_name option used previously",
+    type = str,
+    nargs = '+')
+
+mutually_exclusive_group2.add_argument('-v', "--vcfs_path", 
+    help = "path to vcf files. If a directory path(s) is provided, all *.VCF and *.vcf files will be included. A list of filenames with full path or with *, ? or [] characters can also be provided (with unix-style pathname pattern expansion for the latter)",
     type = str,
     nargs = '+')
 
 parser_ComparativeAnalysis.add_argument('-s', "--include_samples", 
-    help = "restrict MSA to these samples. If omitted, plots for all samples are included.",
+    help = "restrict MSA to these samples. If omitted, all samples are included.",
+    type = str,
+    nargs = '+',
+    metavar = 'SAMPLE_NAME')
+
+parser_ComparativeAnalysis.add_argument('-e', "--exclude_samples", 
+    help = "exclude these samples from MSA. If omitted, no samples are excluded.",
     type = str,
     nargs = '+',
     metavar = 'SAMPLE_NAME')
@@ -682,6 +695,10 @@ parser_ComparativeAnalysis.add_argument('-l', "--include_invariants",
 parser_ComparativeAnalysis.add_argument('-c', "--core_only", 
     help = "only include sites present in all samples",
     action = 'store_true')
+
+parser_ComparativeAnalysis.add_argument('-B', "--sample_bams", 
+    help = "path to file linking sample names to BAM files to collect reference genome coverage information. Format: prer line <sample name><tab><path to BAM>",
+    type = str)
 
 # for infer_phylo
 parser_ComparativeAnalysis.add_argument('-M', "--path_to_MSA", 
@@ -1946,67 +1963,119 @@ if args.subparser == 'ComparativeAnalysis':
     from baga import CollectData
     
     if args.build_MSA:
-        # baga pipeline information provided <== only way currently implemented
-        # allow for multiple rounds of recalibration at end of CalVariants i.e., 1 or 2 and select 2 if available
-        use_name_genome = args.genome_name.replace('baga.CollectData.Genome-', '' , 1).replace('.baga', '')
-        import baga
-        path_to_SNPs_VCFs = []
-        path_to_InDels_VCFs = []
-        paths_to_BAMs = []
-        for these_reads in args.reads_name:
-            print('Collecting VCFs for {}'.format(these_reads))
-            use_name_reads = these_reads.replace('baga.AlignReads.Reads-', '' , 1).replace('.baga', '')
-            alns_name = '__'.join([use_name_reads, use_name_genome])
+        # required: reference genome
+        # required: reads name OR path to VCFs (. . optional path to BAMs to properly include gaps)
+        # ... need to link VCFs to BAMs . . . . 
+        # VCFs contain sample names, require file sample_name\tpath_to_bam\n
+        use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome-', args.genome_name)
+        if args.reads_name:
+            # baga pipeline information provided <== only way currently implemented
+            # allow for multiple rounds of recalibration at end of CallVariants i.e., 1 or 2 and select 2 if available
             
-            filein = 'baga.CallVariants.Caller-{}.baga'.format(alns_name)
-            caller = CallVariants.Caller(baga = filein)
-            
-            if hasattr(caller, 'path_to_hardfiltered_SNPs') and hasattr(caller, 'path_to_hardfiltered_INDELs'):
-                checkthis = caller.path_to_hardfiltered_SNPs[-1]
-                try:
-                    with open(checkthis) as fin:
-                        path_to_SNPs_VCFs += [checkthis]
-                        print('Found: {}'.format(checkthis))
-                except IOError:
-                    print('Could not find: {}'.format(checkthis))
-                    sys.exit('You may need to rerun the analysis that should have generated that file')
+            import baga
+            path_to_SNPs_VCFs = []
+            path_to_InDels_VCFs = []
+            paths_to_BAMs = []
+            for these_reads in args.reads_name:
+                print('Collecting VCFs for {}'.format(these_reads))
+                #use_name_reads = these_reads.replace('baga.AlignReads.Reads-', '' , 1).replace('.baga', '')
+                use_path_reads,use_name_reads = check_baga_path('baga.AlignReads.Reads-', these_reads)
+                alns_name = '__'.join([use_name_reads, use_name_genome])
                 
-                checkthis = caller.path_to_hardfiltered_INDELs[-1]
-                try:
-                    with open(checkthis) as fin:
-                        path_to_InDels_VCFs += [checkthis]
-                        print('Found: {}'.format(checkthis))
-                except IOError:
-                    print('Could not find: {}'.format(checkthis))
-                    sys.exit('You may need to rerun the analysis that should have generated that file')
-            else:
-                print('ERROR: path to GATK hardfiltered variants not found in {}'.format(filein))
-                print('It seems the analysis described in {} is incomplete. Try completing or rerunning using the CallVariants module'.format(filein))
-                NotImplementedError('Building multiple alignments from one VCF per sample is not yet implemented: Coming soon!')
-                # see code in ApplyFilters section to collect other per sample VCFs
+                filein = 'baga.CallVariants.Caller-{}.baga'.format(alns_name)
+                caller = CallVariants.Caller(baga = filein)
+                
+                if hasattr(caller, 'path_to_hardfiltered_SNPs') and hasattr(caller, 'path_to_hardfiltered_INDELs'):
+                    checkthis = caller.path_to_hardfiltered_SNPs[-1]
+                    try:
+                        with open(checkthis) as fin:
+                            path_to_SNPs_VCFs += [checkthis]
+                            print('Found: {}'.format(checkthis))
+                    except IOError:
+                        print('Could not find: {}'.format(checkthis))
+                        sys.exit('You may need to rerun the analysis that should have generated that file')
+                    
+                    checkthis = caller.path_to_hardfiltered_INDELs[-1]
+                    try:
+                        with open(checkthis) as fin:
+                            path_to_InDels_VCFs += [checkthis]
+                            print('Found: {}'.format(checkthis))
+                    except IOError:
+                        print('Could not find: {}'.format(checkthis))
+                        sys.exit('You may need to rerun the analysis that should have generated that file')
+                else:
+                    print('ERROR: path to GATK hardfiltered variants not found in {}'.format(filein))
+                    print('It seems the analysis described in {} is incomplete. Try completing or rerunning using the CallVariants module'.format(filein))
+                    NotImplementedError('Building multiple alignments from one VCF per sample is not yet implemented: Coming soon!')
+                    # see code in ApplyFilters section to collect other per sample VCFs
+                
+                print('Collecting BAMs for {}'.format(these_reads))
+                alignments = AlignReads.SAMs(baga = 'baga.AlignReads.SAMs-{}.baga'.format(alns_name))
+                for BAM in alignments.ready_BAMs[-1]:
+                    checkthis = BAM
+                    try:
+                        with open(checkthis) as fin:
+                            paths_to_BAMs += [checkthis]
+                            print('Found: {}'.format(checkthis))
+                    except IOError:
+                        print('Could not find: {}'.format(checkthis))
+                        sys.exit('You may need to rerun the analysis that should have generated that file')
             
-            print('Collecting BAMs for {}'.format(these_reads))
-            alignments = AlignReads.SAMs(baga = 'baga.AlignReads.SAMs-{}.baga'.format(alns_name))
-            for BAM in alignments.ready_BAMs[-1]:
-                checkthis = BAM
+            MSA_filename = '{}__{}_SNPs'.format(use_name_genome,'_'.join(args.reads_name))
+            
+        else:
+            # list of folders or files provided in args.vcf_paths
+            paths_to_VCFs = []
+            for path in args.vcfs_path:
+                if os.path.isdir(path):
+                    path_contents = os.listdir(path)
+                    theseVCFs = [os.path.sep.join([path,f]) for f in path_contents if f[-3:] in ('VCF', 'vcf')]
+                    e = 'No VCF files (*.vcf or *.VCF) found in:\n{}'.format(args.alignments_path)
+                    assert len(theseVCFs), e
+                    paths_to_VCFs += theseVCFs
+                else:
+                    # add file
+                    paths_to_VCFs += [path]
+            
+            if args.sample_bams:
+                # path_to_VCFs and file linking samples to supplied instead of full baga pipeline info
                 try:
-                    with open(checkthis) as fin:
-                        paths_to_BAMs += [checkthis]
-                        print('Found: {}'.format(checkthis))
+                    BAMs = dict([line.rstrip().split('\t') for line in open(args.sample_bams).readlines()])
                 except IOError:
-                    print('Could not find: {}'.format(checkthis))
-                    sys.exit('You may need to rerun the analysis that should have generated that file')
+                    print('there was a problem reading file: {}'.format(args.sample_bams))
+                except ValueError:
+                    print('there was a problem parsing file: {}'.format(args.sample_bams))
+            
+            path_to_InDels_VCFs = False
+            # could generate better name here? 
+            if len(paths_to_VCFs) == 1:
+                vcf_name = '1_VCF'
+            else:
+                vcf_name = '{}_VCFs'.format(len(paths_to_VCFs))
+            
+            MSA_filename = '{}__{}_SNPs'.format(use_name_genome,vcf_name)
         
+        print('Loaded VCF locations:\n{}'.format('\n'.join(paths_to_VCFs)))
+        
+        #print('Loaded BAM locations:\n{}'.format('\n'.join(BAMs.values())))
+        
+        ### now collected required info: build MSA
         print('Loading genome %s' % use_name_genome)
         genome = CollectData.Genome(local_path = 'baga.CollectData.Genome-{}.baga'.format(use_name_genome), format = 'baga')
         
-        MSA_builder = ComparativeAnalysis.MultipleSequenceAlignment(path_to_SNPs_VCFs, path_to_InDels_VCFs)
-        MSA_builder.parseVCFs()
-        #MSA_builder.parseVCFs(filters_include = [])
-        #MSA_builder.parseVCFs(filters_exclude = ['genome_repeats'], filters_include = [])
-        #MSA_builder.getCoverageRanges(paths_to_BAMs, BAM_suffix = 'realn.bam')
-        MSA_builder.getCoverageRanges(paths_to_BAMs)
-        MSA_builder.writeMSA(   '{}__{}_SNPs'.format(use_name_genome,'_'.join(args.reads_name)), 
+        MSA_builder = ComparativeAnalysis.MultipleSequenceAlignment(paths_to_VCFs)
+        MSA_builder.collectVariants(samples_to_include = args.include_samples,
+                                    samples_to_exclude = args.exclude_samples)
+        
+        # #MSA_builder.parseVCFs(filters_include = [])
+        # #MSA_builder.parseVCFs(filters_exclude = ['genome_repeats'], filters_include = [])
+        
+        ## this will be either sampleBAM dict BAMs or list paths_to_BAMs
+        ## should be able to generate dict BAMs in both cases i.e., make this also for BAGA pipeline reads_name option
+        
+        # #MSA_builder.getCoverageRanges(paths_to_BAMs, BAM_suffix = 'realn.bam')
+        # MSA_builder.getCoverageRanges(paths_to_BAMs)
+        MSA_builder.writeMSA(   MSA_filename, 
                                 strict_core = args.core_only, 
                                 include_invariants = args.include_invariants, 
                                 genome = genome)
@@ -2038,7 +2107,7 @@ if args.subparser == 'ComparativeAnalysis':
             genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
             genome_length = len(genome.sequence)
         elif args.genome_length:
-            genome_length = genome_length
+            genome_length = args.genome_length
         else:
             print('Provide --genome_name or --genome_length for a scale bar unit of actual substitutions')
             genome_length = False
@@ -2053,8 +2122,8 @@ if args.subparser == 'ComparativeAnalysis':
         print('Plotting to {}'.format(plot_output_path))
         
         phylo_plotter = ComparativeAnalysis.Plotter(
-                            args.path_to_tree.replace('_rooted',''),   # deal with rootedness at some point
                             plot_output_path,
+                            args.path_to_tree.replace('_rooted',''),   # deal with rootedness at some point
                             # smaller values keeps edges in smaller central
                             # zone allowing for longer tip labels
                             plot_width_prop = 0.75, 
@@ -2071,7 +2140,12 @@ if args.subparser == 'ComparativeAnalysis':
         else:
             plot_transfers = False
         
-        phylo_plotter.doPlot(outgroup_label_list = ['FM209186.1'], 
+        if args.out_group:
+            outgroup_label_list = args.out_group
+        else:
+            outgroup_label_list = []
+        
+        phylo_plotter.doPlot(outgroup_label_list = outgroup_label_list, 
                              stroke_width = 3, 
                              label_size = 15, 
                              plotinnerlabels = False,
