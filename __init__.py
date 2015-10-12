@@ -39,7 +39,10 @@ def bagasave(object_tuple,file_name):
     _cPickle.dump(object_tuple, _gzip.open('%s.baga' % file_name,'wb'))
 
 def bagaload(file_name):
-    return _cPickle.load(_gzip.open('%s.baga' % file_name,'rb'))
+    if file_name[-5:] == '.baga':
+        return _cPickle.load(_gzip.open('%s' % file_name,'rb'))
+    else:
+        return _cPickle.load(_gzip.open('%s.baga' % file_name,'rb'))
 
 def cpu_count():
     try:
