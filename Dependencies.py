@@ -238,7 +238,15 @@ def prep_simple_make(path = False, configure = False, alt_command = False):
     if path:
         _os.chdir(_os.path.sep.join([_os.path.pardir]*len(path)))
 
-def check_no_error(path = '', system = False, java_commands = False, extra = False):
+def check_no_error(path = '', system = False, java_commands = False, extra = False, extra_pre = False):
+    '''
+    check a binary executable can be called.
+    A failure is considered as OSError, not a non-zero exit status.
+    Can check in default baga location or a specified path or the system path 
+    or java.
+    Additional commands and be appended with 'extra' list or pre-pended with 
+    'extra-pre' list e.g., 'python2' for when python >3.3 is not supported but installed
+    '''
     if java_commands:
         p = _subprocess.Popen(['java'] + java_commands, stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT)
         output = p.stdout.read()
@@ -259,6 +267,9 @@ def check_no_error(path = '', system = False, java_commands = False, extra = Fal
         
         if extra:
             cmd += extra
+        
+        if extra_pre:
+            cmd = extra_pre + cmd
         
         try:
             o = _subprocess.check_output(cmd)
@@ -617,6 +628,21 @@ dependencies['phyml'] = {
     # 'checker': {'function': check_no_error,
                 # 'arguments':{'path': ['exonerate-2.2.0-x86_64', 'bin', 'exonerate']}}
     # }
+
+
+dependencies['spades'] = {
+    'name': 'spades',
+    'description': 'short read de novo assembler',
+    'source': 'download',
+    'url': 'http://spades.bioinf.spbau.ru/release3.6.1/SPAdes-3.6.1-Linux.tar.gz',
+    'commit': None,
+    'checksum': None,
+    'destination': destination_programs,
+    'preparation': None,
+    'checker': {'function': check_no_error,
+                'arguments':{'path': ['SPAdes-3.6.1-Linux', 'bin', 'spades.py'],
+                             'extra_pre': ['python2']}}
+    }
 dependencies_notes = {}
 
 dependencies_notes['sickle'] = {
@@ -679,6 +705,11 @@ dependencies_notes['clonalframeml'] = {
 dependencies_notes['phyml'] = {
 'Compilation from Git repository (i.e., from github.com) requires libtool among other things. Sometimes compute clusters are lacking a few essentials . . . Pre-compiled executables are available from http://www.atgc-montpellier.fr/phyml/binaries.php but require registration. After downloading, place binary in '
     }
+
+dependencies_notes['clonalframeml'] = {
+'Requires Python, supports: v2.4, 2.5, 2.6, 2.7, 3.2 and 3.3 (not 3.4 or 3.5)'
+    }
+
 
 dependencies_by_task = {}
 dependencies_by_task['CollectData'] = [
