@@ -423,8 +423,7 @@ class Reads:
                     use_files += file_list
                     
                 else:
-                    print('Found compressed and uncompressed fastq files.\n\
-                Using {} gzipped files'.format(len(file_list_gz)))
+                    print('Found compressed and uncompressed fastq files.\nUsing {} gzipped files'.format(len(file_list_gz)))
                     # could select from a combination without doubling up . . .
                     # preference for uncompressed:
                     # use_files = sorted(list(set(file_list_gz) - set([f+'.gz' for f in file_list])) + file_list)
@@ -480,10 +479,17 @@ class Reads:
 
         # match pairs
         filepairs = {}
-        for f in use_files:
-            
-            bits = _re.split('([^0-9][12][^0-9])', f)
-            assert len(bits) == 3, 'Problem parsing read files: ensure pairs are numbered 1 and 2 . . else please report as bug. Problem filename: {}'.format(f)
+        for path in use_files:
+            path_bits = path.split(_os.path.sep)
+            filename = path_bits[-1]
+            # {1} prevents splitting at 1 or 2 first character
+            bits = _re.split('([^0-9]{1}[12][^0-9])', filename)
+            e = 'Problem parsing read files: ensure pairs are numbered 1 and 2\n'
+            e += 'BAGA looks for 1 and 2 labelling in read pair filenames, excluding at the start and 1 or 2 among other digits.\n'
+            e += 'E.g. *R1.fastq.gz and *R2.fastq.gz would be OK, 1_thesereads.fastq.gz and 2_thesereads.fastq.gz would not.\n'
+            e += '(leading digits OK for sample numbering: 1_* 2_* 3_* etc but must each have 1 or 2 elsewhere in file name)\n'
+            e += ' . . else please report as bug. Problem filename: {}'.format(filename)
+            assert len(bits) == 3, e
             known_suffixes = ['.fastq.gz','.fq.gz','.fastq','.fq']
             # make name for each pair that is consistant parts of file name
             # joining with space caused problems when incorporating into a filename downstream
@@ -497,15 +503,15 @@ class Reads:
                     pairname = pairnamenew.rstrip(' ')
                     continue
             
+            # store with keys 1 or 2
             try:
-                filepairs[pairname][int(bits[1][1])] = f
+                filepairs[pairname][int(bits[1][1])] = path
             except KeyError:
-                filepairs[pairname] = {int(bits[1][1]): f}
+                filepairs[pairname] = {int(bits[1][1]): path}
 
         # check pairs are accessible
         checked_read_files = {}
         for pairname,files in filepairs.items():
-            #print('Pair name: {}'.format(pairname))
             print('Collected pair: {} and {}'.format(files[1], files[2]))
             
             try:
