@@ -107,10 +107,12 @@ def check_baga_path(baga_prefix, supplied_name):
     do some checks to see what was supplied at commandline. Return both
     the name and the path to the baga file
     '''
+    if baga_prefix[-1] == '-':
+        baga_prefix = baga_prefix[:-1]
     # try as path
     try:
         use_path = os.path.expanduser(supplied_name)
-        use_name = use_path.split(os.path.sep)[-1].replace(baga_prefix,'').replace('.baga','')
+        use_name = use_path.split(os.path.sep)[-1].replace(baga_prefix+'-','').replace('.baga','')
         with open(use_path,'rb') as f:
             return(use_path,use_name)
     except IOError:
@@ -1061,19 +1063,20 @@ if args.subparser == 'PrepareReads':
     import baga
     if args.reads_name is not None:
         
-        use_name = args.reads_name.replace('baga.CollectData.Reads-', '' , 1).replace('.baga', '')
+        #use_name = args.reads_name.replace('baga.CollectData.Reads-', '' , 1).replace('.baga', '')
+        use_path_reads,use_name_reads = check_baga_path('baga.PrepareReads.Reads', args.reads_name)
         
         from baga import PrepareReads
         
         if args.subsample_to_cov is not None:
             # make a new CallVariants.Reads object
-            print('Loading reads group %s' % use_name)
-            downloaded_reads = baga.bagaload('baga.CollectData.Reads-%s' % use_name)
+            print('Loading reads group %s' % use_name_reads)
+            downloaded_reads = baga.bagaload('baga.CollectData.Reads-%s' % use_name_reads)
             reads = PrepareReads.Reads(downloaded_reads)
             read_cov_depth, genome_size = args.subsample_to_cov
-            print('Subsampling reads group {} to {}x coverage for a {:,} bp genome'.format(use_name, read_cov_depth, genome_size))
+            print('Subsampling reads group {} to {}x coverage for a {:,} bp genome'.format(use_name_reads, read_cov_depth, genome_size))
             reads.subsample(genome_size, read_cov_depth, force = args.force)
-            reads.saveLocal(use_name)
+            reads.saveLocal(use_name_reads)
         
         if args.adaptors is not None:
             # need to test parallelism with lots of stdout reports
@@ -1081,27 +1084,27 @@ if args.subparser == 'PrepareReads':
                 # didn't subsample in current analysis
                 if args.adaptors == 'fullsample':
                     print('Not using previously subsampled reads because "--adaptors fullsample" supplied.')
-                    print('Loading collected reads group %s' % use_name)
-                    downloaded_reads = baga.bagaload('baga.CollectData.Reads-%s' % use_name)
+                    print('Loading collected reads group %s' % use_name_reads)
+                    downloaded_reads = baga.bagaload('baga.CollectData.Reads-%s' % use_name_reads)
                     reads = PrepareReads.Reads(downloaded_reads)
                 else:
-                    print('Loading subsampled reads group %s' % use_name)
-                    reads = baga.bagaload('baga.PrepareReads.Reads-%s' % use_name)
+                    print('Loading subsampled reads group %s' % use_name_reads)
+                    reads = baga.bagaload('baga.PrepareReads.Reads-%s' % use_name_reads)
             
             try:
                 reads.cutAdaptors(force = args.force, max_cpus = args.max_cpus)
             except OSError:
                 exe_fail('cutadapt')
             
-            reads.saveLocal(use_name)
+            reads.saveLocal(use_name_reads)
         
         if args.trim:
             # could check whether adaptor cut read files exist
             # need to test parallelism with lots of stdout reports
             if not args.adaptors:
                 # load a previously adaptor cut reads set
-                print('Loading processed reads group %s' % use_name)
-                reads = baga.bagaload('baga.PrepareReads.Reads-%s' % use_name)
+                print('Loading processed reads group %s' % use_name_reads)
+                reads = baga.bagaload('baga.PrepareReads.Reads-%s' % use_name_reads)
             
             print('\nTrimming reads . . .')
             try:
@@ -1109,14 +1112,14 @@ if args.subparser == 'PrepareReads':
             except OSError:
                 exe_fail('sickle')
             
-            reads.saveLocal(use_name)
+            reads.saveLocal(use_name_reads)
         
         if args.delete_intermediates:
             print('Checking on intermediate fastq files to delete . . .')
             if not args.adaptors and not args.trim:
                 # load a previously adaptor cut reads set
-                print('Loading processed reads group %s' % use_name)
-                reads = baga.bagaload('baga.PrepareReads.Reads-%s' % use_name)
+                print('Loading processed reads group %s' % use_name_reads)
+                reads = baga.bagaload('baga.PrepareReads.Reads-%s' % use_name_reads)
             
             total_size = 0
             # check stage 1 files and stage 2 files
@@ -1172,8 +1175,11 @@ if using:
 ''')
             sys.exit(1)
         
-        use_name_reads = args.reads_name.replace('baga.PrepareReads.Reads-', '' , 1).replace('.baga', '')
-        use_name_genome = args.genome_name.replace('baga.CollectData.Genome-', '' , 1).replace('.baga', '')
+        
+        use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
+        use_path_reads,use_name_reads = check_baga_path('baga.PrepareReads.Reads', args.reads_name)
+        #use_name_reads = args.reads_name.replace('baga.PrepareReads.Reads-', '' , 1).replace('.baga', '')
+        #use_name_genome = args.genome_name.replace('baga.CollectData.Genome-', '' , 1).replace('.baga', '')
         alns_name = '__'.join([use_name_reads, use_name_genome])
         
         import baga
@@ -1183,9 +1189,10 @@ if using:
         
         if args.align:
             print('Loading processed reads group %s' % use_name_reads)
-            prepared_reads = baga.bagaload('baga.PrepareReads.Reads-%s' % use_name_reads)
+            #prepared_reads = baga.bagaload('baga.PrepareReads.Reads-%s' % use_name_reads)
+            prepared_reads = baga.bagaload(use_path_reads)
             print('Loading genome %s' % use_name_genome)
-            genome = CollectData.Genome(local_path = 'baga.CollectData.Genome-{}.baga'.format(use_name_genome), format = 'baga')
+            genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
             # create alignment object
             alignments = AlignReads.SAMs(reads = prepared_reads, genome = genome)
             print('\nAligning reads . . .')
@@ -1309,7 +1316,7 @@ if args.subparser == 'Repeats':
     from baga import Repeats
     from baga import CollectData
     
-    use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome-', args.genome_name)
+    use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
     
     assert all([use_path_genome,use_name_genome]), 'Could not locate genome given: {}'.format(args.genome_name)
     
@@ -1702,8 +1709,10 @@ if using any of:
 ''')
             sys.exit(1)
         
-        use_name_reads = args.reads_name.replace('baga.AlignReads.Reads-', '' , 1).replace('.baga', '')
-        use_name_genome = args.genome_name.replace('baga.CollectData.Genome-', '' , 1).replace('.baga', '')
+        use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
+        use_path_reads,use_name_reads = check_baga_path('baga.PrepareReads.Reads', args.reads_name)
+        #use_name_reads = args.reads_name.replace('baga.PrepareReads.Reads-', '' , 1).replace('.baga', '')
+        #use_name_genome = args.genome_name.replace('baga.CollectData.Genome-', '' , 1).replace('.baga', '')
         alns_name = '__'.join([use_name_reads, use_name_genome])
         
         import baga
@@ -1795,7 +1804,7 @@ if args.subparser == 'ApplyFilters':
     
     from baga import CallVariants
     
-    use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome-', args.genome_name)
+    use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
     
     assert all([use_path_genome,use_name_genome]), 'Could not locate genome given: {}'.format(args.genome_name)
     
@@ -1967,7 +1976,7 @@ if args.subparser == 'ComparativeAnalysis':
         # required: reads name OR path to VCFs (. . optional path to BAMs to properly include gaps)
         # ... need to link VCFs to BAMs . . . . 
         # VCFs contain sample names, require file sample_name\tpath_to_bam\n
-        use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome-', args.genome_name)
+        use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
         if args.reads_name:
             # baga pipeline information provided <== only way currently implemented
             # allow for multiple rounds of recalibration at end of CallVariants i.e., 1 or 2 and select 2 if available
@@ -1979,7 +1988,7 @@ if args.subparser == 'ComparativeAnalysis':
             for these_reads in args.reads_name:
                 print('Collecting VCFs for {}'.format(these_reads))
                 #use_name_reads = these_reads.replace('baga.AlignReads.Reads-', '' , 1).replace('.baga', '')
-                use_path_reads,use_name_reads = check_baga_path('baga.AlignReads.Reads-', these_reads)
+                use_path_reads,use_name_reads = check_baga_path('baga.AlignReads.Reads', these_reads)
                 alns_name = '__'.join([use_name_reads, use_name_genome])
                 
                 filein = 'baga.CallVariants.Caller-{}.baga'.format(alns_name)
@@ -2061,7 +2070,7 @@ if args.subparser == 'ComparativeAnalysis':
         
         ### now collected required info: build MSA
         print('Loading genome %s' % use_name_genome)
-        genome = CollectData.Genome(local_path = 'baga.CollectData.Genome-{}.baga'.format(use_name_genome), format = 'baga')
+        genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
         
         MSA_builder = ComparativeAnalysis.MultipleSequenceAlignment(paths_to_VCFs)
         MSA_builder.collectVariants(samples_to_include = args.include_samples,
@@ -2102,7 +2111,7 @@ if args.subparser == 'ComparativeAnalysis':
     if args.plot_phylogeny:
         # should check either or etc here
         if args.genome_name:
-            use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome-', args.genome_name)
+            use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
             print('Loading genome %s' % use_name_genome)
             genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
             genome_length = len(genome.sequence)
