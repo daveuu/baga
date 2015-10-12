@@ -750,6 +750,40 @@ parser_ComparativeAnalysis.add_argument('-G', "--genome_length",
     help = "For plotting transfers on phylogeny, reference genome length (alternatively supply --genome_name of CollectData saved object).",
     type = int)
 
+parser_AssembleReads = subparser_adder.add_parser('AssembleReads',
+                formatter_class = argparse.RawDescriptionHelpFormatter,
+                description = textwrap.fill('Assemble reads into contiguous chromosome sequences.',
+                                            text_width,
+                                            replace_whitespace = False),
+                epilog = textwrap.fill('Example usage: %(prog)s --denovo spades \
+--reads_name Liverpool\n', 
+text_width, replace_whitespace = False))
+
+
+parser_AssembleReads.add_argument('-n', "--reads_name", 
+    help = "name of read datasets groups on which to perform assembly. Reads should have collected and prepared with BAGA's CollectData and PrepareReads options. Should match --reads_name option used previously",
+    required = True,
+    type = str,
+    nargs = '+')
+
+parser_AssembleReads.add_argument('-s', "--include_samples", 
+    help = "Implement Me! restrict assembly to these samples within the read datasets groups provided by --reads_name/-n. If omitted, all samples are included.",
+    type = str,
+    nargs = '+',
+    metavar = 'SAMPLE_NAME')
+
+parser_AssembleReads.add_argument('-e', "--exclude_samples", 
+    help = "Implement Me! exclude these samples from assembly from among samples within the read datasets groups provided by --reads_name/-n. If omitted, no samples are excluded.",
+    type = str,
+    nargs = '+',
+    metavar = 'SAMPLE_NAME')
+
+parser_AssembleReads.add_argument('-P', "--program", 
+    help = "software to use for assembly: currently only spades!",
+    type = str,
+    choices = ['spades'],
+    default = 'spades')
+
 args = parser.parse_args()
 
 
@@ -2183,3 +2217,61 @@ if args.subparser == 'ComparativeAnalysis':
                              scale_bar = True,
                              genome_length = genome_length)
         
+
+### Assemble Reads ###
+
+if args.subparser == 'AssembleReads':
+    print('\n-- Reads Assembly module --')
+    import baga
+    from baga import AssembleReads
+    for this_reads_name in args.reads_name:
+        use_path_reads,use_name_reads = check_baga_path('baga.PrepareReads.Reads', this_reads_name)
+        print('Loading processed reads group %s' % use_name_reads)
+        prepared_reads = baga.bagaload(use_path_reads)
+        
+        if args.program == 'spades':
+            reads = AssembleReads.DeNovo(prepared_reads)
+            reads.SPAdes()
+    
+    # if args.delete_intermediates:
+        # print('Checking on intermediate fastq files to delete . . .')
+        # if not args.adaptors and not args.trim:
+            # # load a previously adaptor cut reads set
+            # print('Loading processed reads group %s' % use_name_reads)
+            # reads = baga.bagaload('baga.PrepareReads.Reads-%s' % use_name_reads)
+        
+        # total_size = 0
+        # # check stage 1 files and stage 2 files
+        # if hasattr(reads,'read_files') and hasattr(reads,'adaptorcut_read_files'):
+            # stage1s = check_files(reads.read_files)
+            # stage2s = check_files(reads.adaptorcut_read_files)
+            # if stage2s:
+                # if stage1s:
+                    # # delete stage 1 files if have all <== not for now . . .
+                    # # print('Deleting original or subsampled fastq files . . .')
+                    # # total_size += delete_files(reads.read_files, extra = '_subsmp')
+                    # print('Retaining original fastq files even though processed versions exist because re-downloading is time consuming!')
+                # else:
+                    # print('Some or all of original or subsampled fastq files seem to have been deleted')
+            # else:
+                # print('Missing some cutadapt-processed files: not deleting originals or subsampled')
+        
+        # if hasattr(reads,'adaptorcut_read_files') and hasattr(reads,'trimmed_read_files'):
+            # stage2s = check_files(reads.adaptorcut_read_files)
+            # stage3s = check_files(reads.trimmed_read_files)
+            
+            # if stage3s:
+                # if stage2s:
+                    # # delete stage 2 files if have all
+                    # print('Deleting cutadapt-processed fastq files . . .')
+                    # total_size += delete_files(reads.adaptorcut_read_files)
+                # else:
+                    # print('Some or all of cutadapt-processed fastq files seem to have been deleted')
+            # else:
+                # print('Missing some sickle-processed files: not deleting cutadapt-processed')
+        
+        # if total_size:
+            # print('Saved {:.2f} Gb by deleting intermediate files'.format(total_size/1000000000.0))
+        # else:
+            # print('Nothing deleted.')
+
