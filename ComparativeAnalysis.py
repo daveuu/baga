@@ -535,6 +535,8 @@ class MultipleSequenceAlignment:
     collect per position along genome, aligned read coverage depth that pass a 
     quality standard and return ranges without reads.
     Defaults to trying load a previous set of scanned missing regions if possible.
+    path_to_BAMs can be a string describing folder of BAMs or a list of strings for
+    each BAM.
         '''
         
         if len(path_to_BAMs):
@@ -682,21 +684,26 @@ class MultipleSequenceAlignment:
             e = 'If including all positions in alignment, original genome must be provided'
             assert genome != None, e
             
-            e = 'If including all positions in alignment, BAM files from which VCFs generated must be scanned for missing regions using getCoverageRanges() method'
-            assert hasattr(self, 'missing_regions'), e
+            # strict: require BAMs and missing regions for full-length multiple sequence alignment
+            # e = 'If including all positions in alignment, BAM files from which VCFs generated must be scanned for missing regions using getCoverageRanges() method'
+            # assert hasattr(self, 'missing_regions'), e
             
             ref_genome_seq = genome.sequence
-            
-            gaps = _Counter()
-            for sample,ranges in self.missing_regions.items():
-                for (s,e) in ranges:
-                    for pos0 in xrange(s,e):
-                        gaps[pos0] += 1
-            
-            #disjoint_consecs = [a/10 for a in sorted(gaps)]
-            # turn gap positions into ranges
-            gap_ranges = makeRanges(sorted(gaps))
-            #gap_ranges = [(s*10,e*10) for s,e in gap_ranges]
+            if hasattr(self, 'missing_regions'):
+                gaps = _Counter()
+                for sample,ranges in self.missing_regions.items():
+                    for (s,e) in ranges:
+                        for pos0 in xrange(s,e):
+                            gaps[pos0] += 1
+                
+                #disjoint_consecs = [a/10 for a in sorted(gaps)]
+                # turn gap positions into ranges
+                gap_ranges = makeRanges(sorted(gaps))
+                #gap_ranges = [(s*10,e*10) for s,e in gap_ranges]
+            else:
+                print('WARNING: making a full-length multiple-sequence alignment without checking read alignments for missing pieces of chromosome is a risky assumption! Only proceed if you know there are no missing pieces of chromosome among your samples relative to the reference chromosome and/or BAMs are unavailable.')
+                gaps = {}
+                gap_ranges = []
             
         else:
             # prepare appropriate functions and an iterator for only variable positions

@@ -1975,6 +1975,16 @@ if args.subparser == 'ComparativeAnalysis':
         # required: reference genome
         # required: reads name OR path to VCFs (. . optional path to BAMs to properly include gaps)
         # ... need to link VCFs to BAMs . . . . 
+        # check appropriate combination of options provided
+        if args.reads_name:
+            if args.sample_bams:
+                print('If --reads_name/-n provided, --sample_bams/-B is not necessary: ignoring latter')
+        elif args.vcfs_path:
+            # these two added as "add_mutually_exclusive_group"
+            if args.include_invariants:
+                if not args.sample_bams:
+                    print('WARNING: making a full-length multiple-sequence alignment without checking read alignments for missing pieces of chromosome is a risky assumption! Only proceed if you know there are no missing pieces of chromosome among your samples relative to the reference chromosome and/or BAMs are unavailable.')
+        
         # VCFs contain sample names, require file sample_name\tpath_to_bam\n
         use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
         if args.reads_name:
@@ -2034,7 +2044,9 @@ if args.subparser == 'ComparativeAnalysis':
             
         else:
             # list of folders or files provided in args.vcf_paths
+            # not part of a baga pipeline, so need BAMs linked to samples separately in --sample_bams
             paths_to_VCFs = []
+            paths_to_BAMs = []
             for path in args.vcfs_path:
                 if os.path.isdir(path):
                     path_contents = os.listdir(path)
@@ -2046,6 +2058,12 @@ if args.subparser == 'ComparativeAnalysis':
                     # add file
                     paths_to_VCFs += [path]
             
+            # could forbid full size alignments without BAMs to inform missing regions
+            # if any([args.include_invariants, args.sample_bams]):
+                # e = '--include_invariants and --sample_bams must be used together.'
+                # assert all([args.include_invariants, args.sample_bams]), e
+            
+            # but will allow it with a warning for flexibility in case BAMs unavailable etc
             if args.sample_bams:
                 # path_to_VCFs and file linking samples to supplied instead of full baga pipeline info
                 try:
@@ -2054,6 +2072,9 @@ if args.subparser == 'ComparativeAnalysis':
                     print('there was a problem reading file: {}'.format(args.sample_bams))
                 except ValueError:
                     print('there was a problem parsing file: {}'.format(args.sample_bams))
+                
+                # make a list for .getCoverageRanges()
+                paths_to_BAMs = sorted(BAMs.values())
             
             path_to_InDels_VCFs = False
             # could generate better name here? 
@@ -2066,7 +2087,6 @@ if args.subparser == 'ComparativeAnalysis':
         
         print('Loaded VCF locations:\n{}'.format('\n'.join(paths_to_VCFs)))
         
-        #print('Loaded BAM locations:\n{}'.format('\n'.join(BAMs.values())))
         
         ### now collected required info: build MSA
         print('Loading genome %s' % use_name_genome)
@@ -2076,14 +2096,11 @@ if args.subparser == 'ComparativeAnalysis':
         MSA_builder.collectVariants(samples_to_include = args.include_samples,
                                     samples_to_exclude = args.exclude_samples)
         
-        # #MSA_builder.parseVCFs(filters_include = [])
-        # #MSA_builder.parseVCFs(filters_exclude = ['genome_repeats'], filters_include = [])
         
-        ## this will be either sampleBAM dict BAMs or list paths_to_BAMs
-        ## should be able to generate dict BAMs in both cases i.e., make this also for BAGA pipeline reads_name option
+        if len(paths_to_BAMs):
+            print('Loaded BAM locations:\n{}'.format('\n'.join(paths_to_BAMs)))
+            MSA_builder.getCoverageRanges(paths_to_BAMs)
         
-        # #MSA_builder.getCoverageRanges(paths_to_BAMs, BAM_suffix = 'realn.bam')
-        # MSA_builder.getCoverageRanges(paths_to_BAMs)
         MSA_builder.writeMSA(   MSA_filename, 
                                 strict_core = args.core_only, 
                                 include_invariants = args.include_invariants, 
