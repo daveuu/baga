@@ -134,6 +134,9 @@ def checkStructure(BAMs, mean_param = 5, min_mapping_quality = 5, resolution = 1
         checker.getCoverageDepths(min_mapping_quality = min_mapping_quality)
         print('Calculating mean insert size for {} reads aligned to {}'.format(sample, checker.genome_name))
         checker.getMeanInsertSize()
+        if checker.mean_insert_size == -1:
+            print('Skipping: no aligned pairs found')
+            continue
         print('mean insert size == {:.1f}'.format(checker.mean_insert_size))
         print('Collecting non-proper : proper pair ratios for {} reads aligned to {}'.format(sample, checker.genome_name))
         checker.getProperRatios(resolution)
@@ -364,7 +367,17 @@ class Checker:
                     if insert_length < upper_limit:
                         isizes.append(insert_length)
             
-            mean_insert_size = sum(isizes) / float(len(isizes))
+            try:
+                mean_insert_size = sum(isizes) / float(len(isizes))
+            except ZeroDivisionError:
+                print('No paired, aligned reads found in {}'.format(self.reads.filename))
+                print('Structure analysis for rearrangements is not possible')
+                mean_insert_size = -1
+            
+        elif mean_insert_size == -1:
+            print('Previously, no paired, aligned reads found in {}'.format(self.reads.filename))
+            print('Structure analysis for rearrangements is not possible')
+
 
         if save and not loaded_from_file:
             try:
