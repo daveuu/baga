@@ -139,7 +139,10 @@ class Genome:
         def getFromEntrez(accession, user_email):
             _Entrez.email = user_email
             handle = _Entrez.efetch(db = "nuccore", rettype = "gb", retmode = "text", id = accession)
-            seq_record = _SeqIO.read(handle, "genbank")
+            try:
+                seq_record = _SeqIO.read(handle, "genbank")
+            except ValueError as error_message:
+                print("There was a problem with the genome (accession: {}) downloaded from NCBI via Entrez: {}. Retry because Entrez can be unreliable, or try loading from a .gbk file downloaded manually from e.g., ftp://ftp.ncbi.nih.gov/genomes/Bacteria/".format(accession, error_message))
             handle.close()
             self.ORF_ranges, self.large_mobile_element_ranges = extractLoci(seq_record)
             self.sequence = _array('c', seq_record.seq)
