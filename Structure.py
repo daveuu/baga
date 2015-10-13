@@ -1737,7 +1737,6 @@ class Collector:
                                       chrom_start - num_padding_positions, 
                                       chrom_end + num_padding_positions)
 
-
         read_pairs = {}
         for r in reads_iter:
             if r.is_reverse:
@@ -1756,6 +1755,8 @@ class Collector:
         self.chrom_start = chrom_start
         self.chrom_end = chrom_end
         self.num_padding_positions = num_padding_positions
+
+        print('Found {} pairs with at least one read mapped to this region'.format(len(self.read_pairs)))
 
     def writeCollection(self, path_to_fastq_folder):
         '''
@@ -1779,7 +1780,7 @@ class Collector:
                         zeropadding,
                         self.num_padding_positions)
 
-        rs_fastq_filename = '{0}_{1:0{3}d}-{2:0{3}d}+{4}_S.fastq'.format(
+        rS_fastq_filename = '{0}_{1:0{3}d}-{2:0{3}d}+{4}_S.fastq'.format(
                         prefix,
                         self.chrom_start,
                         self.chrom_end,
@@ -1792,13 +1793,17 @@ class Collector:
                         path_to_fastq_folder,
                         r2_fastq_filename,
                         path_to_fastq_folder,
-                        rs_fastq_filename))
+                        rS_fastq_filename))
 
-        r1_out = open(_os.path.sep.join([path_to_fastq_folder,r1_fastq_filename]), 'w')
+        r1_out_path = _os.path.sep.join([path_to_fastq_folder,r1_fastq_filename])
+        r1_out = open(r1_out_path, 'w')
 
-        r2_out = open(_os.path.sep.join([path_to_fastq_folder,r2_fastq_filename]), 'w')
+        r2_out_path = _os.path.sep.join([path_to_fastq_folder,r2_fastq_filename])
+        r2_out = open(r2_out_path, 'w')
 
-        rs_out = open(_os.path.sep.join([path_to_fastq_folder,rs_fastq_filename]), 'w')
+        rS_out_path = _os.path.sep.join([path_to_fastq_folder,rS_fastq_filename])
+        rS_out = open(rS_out_path, 'w')
+
 
         for read_id,reads in self.read_pairs.items():
             if len(reads) == 2:
@@ -1814,7 +1819,7 @@ class Collector:
                             r2qual))
             elif len(reads) == 1:
                 n,(rseq,rqual) = reads.items()[0]
-                rs_out.write('@{}/{}\n{}\n+\n{}\n'.format(
+                rS_out.write('@{}/{}\n{}\n+\n{}\n'.format(
                             read_id,
                             n,
                             rseq,
@@ -1822,12 +1827,17 @@ class Collector:
 
         r1_out.close()
         r2_out.close()
-        rs_out.close()
+        rS_out.close()
+
+        # return output destination for assembly
+        return(r1_out_path, r2_out_path, rS_out_path)
 
 
-    def getUnmapped(self):
+    def getUnmapped(self, low_quality_mapping_threshold = 10):
         '''
-        Using pySAM, fetch all unmapped paired end reads
+        Using pySAM, fetch all unmapped and poorly mapped (aligned) paired end reads
+        default for poorly mapped is 10% (0.1) chance of being wrong or worse:
+        -10*math.log(0.1)/math.log(10) == 10
         '''
 
         # for now, only handling first chromosome
@@ -1836,13 +1846,15 @@ class Collector:
         # so this is approximate as pos1 or pos0 not specified
         reads_iter = self.reads.fetch(chromo_name)
 
-        print('Searching for unmapped reads for {} against {}'.format(self.reads.header['RG'][0]['ID'], chromo_name))
-
+        print('Searching for unmapped and poorly mapped (aligned) reads for {} against {}'.format(self.reads.header['RG'][0]['ID'], chromo_name))
+        c = 0
         read_pairs = {}
         for r in reads_iter:
-            if r.is_unmapped:
+            c += 1
+            if r.is_unmapped or r.mapping_quality <= low_quality_mapping_threshold:
                 if r.is_reverse:
-                    # SEQ being reverse complemented - not sure why unmapped reads would do that
+                    # SEQ being reverse complemented
+                    # not sure why unmapped reads would be reverse complemented from fastq sequence
                     read_info = (r.query_sequence[::-1].translate(self.transtable), r.qual[::-1])
                 else:
                     read_info = (r.query_sequence, r.qual)
@@ -1854,13 +1866,13 @@ class Collector:
 
         self.unmapped_read_pairs = read_pairs
 
-        print('Found {} pairs with at least one read unmapped'.format(len(self.unmapped_read_pairs)))
+        print('Found {} pairs (of {:,}) with at least one read unmapped'.format(len(self.unmapped_read_pairs), c))
 
 
 
     def writeUnmapped(self, path_to_fastq_folder):
         '''
-        Write reads to a fastq file
+        Write reads to fastq files returning a tuple of paths to: reads 1, reads 2 and singletons
         '''
 
         prefix = '{}__{}'.format(self.reads_name, self.genome_name)
@@ -1871,7 +1883,7 @@ class Collector:
         r2_fastq_filename = '{0}_unmapped_R2.fastq'.format(
                         prefix)
 
-        rs_fastq_filename = '{0}_unmapped_S.fastq'.format(
+        rS_fastq_filename = '{0}_unmapped_S.fastq'.format(
                         prefix)
 
         print('Writing to:\n{}/{}\n{}/{}\n{}/{}\n'.format(
@@ -1880,13 +1892,17 @@ class Collector:
                         path_to_fastq_folder,
                         r2_fastq_filename,
                         path_to_fastq_folder,
-                        rs_fastq_filename))
+                        rS_fastq_filename))
 
-        r1_out = open(_os.path.sep.join([path_to_fastq_folder,r1_fastq_filename]), 'w')
 
-        r2_out = open(_os.path.sep.join([path_to_fastq_folder,r2_fastq_filename]), 'w')
+        r1_out_path = _os.path.sep.join([path_to_fastq_folder,r1_fastq_filename])
+        r1_out = open(r1_out_path, 'w')
 
-        rs_out = open(_os.path.sep.join([path_to_fastq_folder,rs_fastq_filename]), 'w')
+        r2_out_path = _os.path.sep.join([path_to_fastq_folder,r2_fastq_filename])
+        r2_out = open(r2_out_path, 'w')
+
+        rS_out_path = _os.path.sep.join([path_to_fastq_folder,rS_fastq_filename])
+        rS_out = open(rS_out_path, 'w')
 
         for read_id,reads in self.unmapped_read_pairs.items():
             if len(reads) == 2:
@@ -1902,7 +1918,7 @@ class Collector:
                             r2qual))
             elif len(reads) == 1:
                 n,(rseq,rqual) = reads.items()[0]
-                rs_out.write('@{}/{}\n{}\n+\n{}\n'.format(
+                rS_out.write('@{}/{}\n{}\n+\n{}\n'.format(
                             read_id,
                             n,
                             rseq,
@@ -1910,7 +1926,10 @@ class Collector:
 
         r1_out.close()
         r2_out.close()
-        rs_out.close()
+        rS_out.close()
+
+        # return output destination for assembly
+        return(r1_out_path, r2_out_path, rS_out_path)
 
 
 if __name__ == '__main__':

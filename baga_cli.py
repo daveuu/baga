@@ -1684,6 +1684,7 @@ if args.subparser == 'Structure':
                 header = pysam.Samfile(BAM, 'rb').header
                 BAMs_by_ids[(header['RG'][0]['ID'],header['SQ'][0]['SN'])] = BAM
             
+            from baga import AssembleReads
             for (sample, genome_name), info in sorted(checker_info.items()):
                 path_to_fastq_folder = 'read_collections/{}'.format(genome_name)
                 if not os.path.exists(path_to_fastq_folder):
@@ -1709,12 +1710,25 @@ if args.subparser == 'Structure':
                 use_regions = zip(use_regions[::2],use_regions[1::2])
                 
                 collector.getUnmapped()
-                collector.writeUnmapped(path_to_fastq_folder)
+                r1_out_path_um, r2_out_path_um, rS_out_path_um = collector.writeUnmapped(path_to_fastq_folder)
                 
-                # for (s,e) in use_regions:
-                    # print(s,e)
-                    # collector.makeCollection(s,e,500)
-                    # collector.writeCollection(path_to_fastq_folder)
+                reads_paths = {}
+                # make a second dict of reads for assembly, all values for unmapped reads
+                # that need to be included in each assembly
+                reads_path_unmapped = {}
+                for (s,e) in use_regions:
+                    collector.makeCollection(s,e,500)
+                    r1_out_path, r2_out_path, rS_out_path = collector.writeCollection(path_to_fastq_folder)
+                    # put assembly in folder with same name as read files
+                    output_folder = '_'.join(r1_out_path.split('_')[:-1]).split(os.path.sep)[-1]
+                    reads_paths[output_folder] = (r1_out_path, r2_out_path, rS_out_path)
+                    print(output_folder)
+                    reads_path_unmapped[output_folder] = r1_out_path_um, r2_out_path_um, rS_out_path_um
+                
+                reads = AssembleReads.DeNovo(paths_to_reads = reads_paths, paths_to_reads2 = reads_path_unmapped)
+                reads.SPAdes(output_folder = ['read_collections',genome_name])
+
+
 
 
 ### Call Variants ###
@@ -2230,7 +2244,7 @@ if args.subparser == 'AssembleReads':
         prepared_reads = baga.bagaload(use_path_reads)
         
         if args.program == 'spades':
-            reads = AssembleReads.DeNovo(prepared_reads)
+            reads = AssembleReads.DeNovo(baga = prepared_reads)
             reads.SPAdes()
     
     # if args.delete_intermediates:
