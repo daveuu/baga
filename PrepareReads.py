@@ -89,10 +89,7 @@ class Reads:
         try:
             self.read_files = reads.read_files
         except AttributeError:
-            print('''
-    baga.CallVariants.Reads needs a baga.CollectData.Reads object 
-    with a "read_files" attribute. This can be obtained with the 
-    "getFromENA()" or "getFromPath()" methods.''')
+            print('baga.PrepareReads.Reads needs a baga.CollectData.Reads object with a "read_files" attribute. This can be obtained with the "getFromENA()" or "getFromPath()" methods.')
     def saveLocal(self, name):
         '''
         Save processed read info to a local compressed pickle file.

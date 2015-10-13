@@ -91,6 +91,7 @@ class SAMs:
             self.genome_id = genome.id
         
         elif baga and not (reads and genome):
+            # for reloading a previous instantiation
             with _tarfile.open(baga, "r:gz") as tar:
                 for member in tar:
                     contents = _StringIO(tar.extractfile(member).read())
@@ -148,6 +149,8 @@ class SAMs:
                     local_alns_path = ['alignments'], 
                     force = False, 
                     max_cpus = -1):
+
+
         if not path_to_exe:
             path_to_exe = _get_exe_path('bwa')
 
@@ -187,13 +190,14 @@ class SAMs:
 
         for pairname, files in self.read_files.items():
             assert _os.path.exists(files[1]), e2 % files[1]
-            assert _os.path.exists(files[1]), e2 % files[1]
+            assert _os.path.exists(files[2]), e2 % files[2]
 
         have_index_files = [_os.path.exists(genome_fna + '.' + a) for a in ('ann','pac','amb','bwt','sa')]
 
         if not all(have_index_files):
             print('Writing BWA index files for %s' % genome_fna)
             _subprocess.call([path_to_exe, 'index', genome_fna])
+
 
         aligned_read_files = {}
         for pairname,files in self.read_files.items():
