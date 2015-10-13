@@ -1097,15 +1097,16 @@ if args.subparser == 'PrepareReads':
     import baga
     if args.reads_name is not None:
         
-        #use_name = args.reads_name.replace('baga.CollectData.Reads-', '' , 1).replace('.baga', '')
-        use_path_reads,use_name_reads = check_baga_path('baga.PrepareReads.Reads', args.reads_name)
+        use_path_reads,use_name_reads = check_baga_path('baga.CollectData.Reads', args.reads_name)
+        e = 'Could not locate a saved baga.CollectData.Reads-<reads_name>.baga for reads group given: {}'.format(args.reads_name)
+        assert all([use_path_reads,use_name_reads]), e
         
         from baga import PrepareReads
         
         if args.subsample_to_cov is not None:
             # make a new CallVariants.Reads object
             print('Loading reads group %s' % use_name_reads)
-            downloaded_reads = baga.bagaload('baga.CollectData.Reads-%s' % use_name_reads)
+            downloaded_reads = baga.bagaload('baga.CollectData.Reads-{}'.format(use_name_reads))
             reads = PrepareReads.Reads(downloaded_reads)
             read_cov_depth, genome_size = args.subsample_to_cov
             print('Subsampling reads group {} to {}x coverage for a {:,} bp genome'.format(use_name_reads, read_cov_depth, genome_size))
@@ -1211,9 +1212,11 @@ if using:
         
         
         use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
+        e = 'Could not locate a saved baga.CollectData.Genome-<genome_name>.baga for name given: {}'.format(args.genome_name)
+        assert all([use_path_genome,use_name_genome]), e
         use_path_reads,use_name_reads = check_baga_path('baga.PrepareReads.Reads', args.reads_name)
-        #use_name_reads = args.reads_name.replace('baga.PrepareReads.Reads-', '' , 1).replace('.baga', '')
-        #use_name_genome = args.genome_name.replace('baga.CollectData.Genome-', '' , 1).replace('.baga', '')
+        e = 'Could not locate a saved baga.PrepareReads.Reads-<reads_name>.baga for reads group given: {}'.format(args.reads_name)
+        assert all([use_path_reads,use_name_reads]), e
         alns_name = '__'.join([use_name_reads, use_name_genome])
         
         import baga
@@ -1351,8 +1354,8 @@ if args.subparser == 'Repeats':
     from baga import CollectData
     
     use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
-    
-    assert all([use_path_genome,use_name_genome]), 'Could not locate genome given: {}'.format(args.genome_name)
+    e = 'Could not locate a saved baga.CollectData.Genome-<genome_name>.baga for name given: {}'.format(args.genome_name)
+    assert all([use_path_genome,use_name_genome]), e
     
     if args.find:
         print('Loading genome %s' % use_name_genome)
@@ -1411,12 +1414,12 @@ if args.subparser == 'Structure':
             if not args.genome_name:
                 parser.error('--genome_name/-g is required with --reads_name/-n. (The baga CollectData-processed genome used with the AlignReads option)')
             
-            #use_name_genome = args.genome_name.replace('baga.CollectData.Genome-', '' , 1).replace('.baga', '')
             use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
-            e = 'Could not locate genome given: {}'.format(args.genome_name)
+            e = 'Could not locate a saved baga.CollectData.Genome-<genome_name>.baga for name given: {}'.format(args.genome_name)
             assert all([use_path_genome,use_name_genome]), e
             
-            use_name_group = args.reads_name.replace('baga.AlignReads.SAMs-', '' , 1).replace('.p.gz', '')
+            # in case full filename provided
+            use_name_group = args.reads_name.replace('baga.AlignReads.SAMs-', '' , 1).replace('.p.gz', '').replace('.baga', '')
             
             print('Loading alignments information for: {}__{} from AlignReads output'.format(use_name_group, use_name_genome))
             from baga import AlignReads
@@ -1758,9 +1761,11 @@ if using any of:
             sys.exit(1)
         
         use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
-        use_path_reads,use_name_reads = check_baga_path('baga.PrepareReads.Reads', args.reads_name)
-        #use_name_reads = args.reads_name.replace('baga.PrepareReads.Reads-', '' , 1).replace('.baga', '')
-        #use_name_genome = args.genome_name.replace('baga.CollectData.Genome-', '' , 1).replace('.baga', '')
+        e = 'Could not locate a saved baga.CollectData.Genome-<genome_name>.baga for name given: {}'.format(args.genome_name)
+        assert all([use_path_genome,use_name_genome]), e
+        use_path_reads,use_name_reads = check_baga_path('baga.AlignReads.SAM', args.reads_name)
+        e = 'Could not locate a saved baga.AlignReads.SAMs-<reads_name>.baga for reads group given: {}'.format(args.reads_name)
+        assert all([use_path_reads,use_name_reads]), e
         alns_name = '__'.join([use_name_reads, use_name_genome])
         
         import baga
@@ -1853,8 +1858,8 @@ if args.subparser == 'ApplyFilters':
     from baga import CallVariants
     
     use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
-    
-    assert all([use_path_genome,use_name_genome]), 'Could not locate genome given: {}'.format(args.genome_name)
+    e = 'Could not locate a saved baga.CollectData.Genome-<genome_name>.baga for name given: {}'.format(args.genome_name)
+    assert all([use_path_genome,use_name_genome]), e
     
     VCFs_for_report = {}
     
@@ -1862,9 +1867,13 @@ if args.subparser == 'ApplyFilters':
     if args.reads_name:
         for these_reads in args.reads_name:
             # baga pipeline information provided
-            # allow for multiple rounds of recalibration at end of CalVariants i.e., 1 or 2 and select 2 if available
+            # allow for multiple rounds of recalibration at end of CallVariants i.e., 1 or 2 and select 2 if available
             import baga
-            use_name_reads = these_reads.replace('baga.AlignReads.Reads-', '' , 1).replace('.baga', '')
+            # sometimes the baga from the previous step in the pipeline is not actually needed
+            # so this name and file check could be relaxed
+            use_path_reads,use_name_reads = check_baga_path('baga.AlignReads.SAM', these_reads)
+            e = 'Could not locate a saved baga.AlignReads.SAMs-<reads_name>.baga for reads group given: {}'.format(these_reads)
+            assert all([use_path_reads,use_name_reads]), e
             alns_name = '__'.join([use_name_reads, use_name_genome])
             
             filein = 'baga.CallVariants.Caller-{}.baga'.format(alns_name)
@@ -1887,20 +1896,6 @@ if args.subparser == 'ApplyFilters':
             else:
                 print('WARNING: path to GATK called variants not found in {}'.format(filein))
                 sys.exit('It seems the analysis described in {} is incomplete. Try completing or rerunning using the CallVariants module'.format(filein))
-            
-            # old code for manually collecting baga pipelined VCFs
-            # collected = defaultdict(list)
-            # pattern = re.compile('{}__{}_([0-9])_samples_hardfiltered_[A-Za-z]+.vcf$'.format(use_name_reads, use_name_genome))
-            # files = os.listdir(os.path.sep.join(['variants', use_name_genome]))
-            # for f in files:
-                # m = re.match(pattern, f)
-                # if m is not None:
-                    # collected[m.groups()[0]] += [os.path.sep.join(['variants', use_name_genome, f])]
-            
-            # eg_path = "{}{}__{}_samples_hardfiltered_SNPs.vcf".format(os.path.sep.join(['variants', use_name_genome,'']), use_name_reads, use_name_genome)
-            # e = "Could not find any VCFs in the expected location e.g., {}".format(eg_path)
-            # assert len(collected) > 0, e
-            # VCF_paths = [files for n,files in sorted(collected.items())][-1]
         
     else:
         # list of folders or files provided in args.vcf_paths
@@ -2035,6 +2030,8 @@ if args.subparser == 'ComparativeAnalysis':
         
         # VCFs contain sample names, require file sample_name\tpath_to_bam\n
         use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
+        e = 'Could not locate a saved baga.CollectData.Genome-<genome_name>.baga for name given: {}'.format(args.genome_name)
+        assert all([use_path_genome,use_name_genome]), e
         if args.reads_name:
             # baga pipeline information provided <== only way currently implemented
             # allow for multiple rounds of recalibration at end of CallVariants i.e., 1 or 2 and select 2 if available
@@ -2045,8 +2042,11 @@ if args.subparser == 'ComparativeAnalysis':
             paths_to_BAMs = []
             for these_reads in args.reads_name:
                 print('Collecting VCFs for {}'.format(these_reads))
-                #use_name_reads = these_reads.replace('baga.AlignReads.Reads-', '' , 1).replace('.baga', '')
-                use_path_reads,use_name_reads = check_baga_path('baga.AlignReads.Reads', these_reads)
+                # sometimes the baga from the previous step in the pipeline is not actually needed
+                # so this name and file check could be relaxed
+                use_path_reads,use_name_reads = check_baga_path('baga.AlignReads.SAM', these_reads)
+                e = 'Could not locate a saved baga.AlignReads.SAMs-<reads_name>.baga for reads group given: {}'.format(these_reads)
+                assert all([use_path_reads,use_name_reads]), e
                 alns_name = '__'.join([use_name_reads, use_name_genome])
                 
                 filein = 'baga.CallVariants.Caller-{}.baga'.format(alns_name)
@@ -2240,6 +2240,8 @@ if args.subparser == 'AssembleReads':
     from baga import AssembleReads
     for this_reads_name in args.reads_name:
         use_path_reads,use_name_reads = check_baga_path('baga.PrepareReads.Reads', this_reads_name)
+        e = 'Could not locate a saved baga.PrepareReads.Reads-<reads_name>.baga for reads group given: {}'.format(this_reads_name)
+        assert all([use_path_reads,use_name_reads]), e
         print('Loading processed reads group %s' % use_name_reads)
         prepared_reads = baga.bagaload(use_path_reads)
         
