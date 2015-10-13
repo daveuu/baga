@@ -1591,7 +1591,8 @@ if args.subparser == 'Structure':
             use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
             assert all([use_path_genome,use_name_genome]), 'Could not locate genome given: {}'.format(args.genome_name)
             
-            use_name_group = args.reads_name.replace('baga.AlignReads.SAMs-', '' , 1).replace('.p.gz', '')
+            # in case full filename provided
+            use_name_group = args.reads_name.replace('baga.AlignReads.SAMs-', '' , 1).replace('.p.gz', '').replace('.baga', '')
             
             baga_file = 'baga.AlignReads.SAMs-{}__{}.baga'.format(use_name_group, use_name_genome)
             print('Loading alignments information for: {} aligned to {} from {} output'.format(use_name_group, use_name_genome, baga_file))
@@ -1763,8 +1764,8 @@ if using any of:
         use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
         e = 'Could not locate a saved baga.CollectData.Genome-<genome_name>.baga for name given: {}'.format(args.genome_name)
         assert all([use_path_genome,use_name_genome]), e
-        use_path_reads,use_name_reads = check_baga_path('baga.AlignReads.SAM', args.reads_name)
-        e = 'Could not locate a saved baga.AlignReads.SAMs-<reads_name>.baga for reads group given: {}'.format(args.reads_name)
+        use_path_reads,use_name_reads = check_baga_path('baga.PrepareReads.Reads', args.reads_name)
+        e = 'Could not locate a saved baga.PrepareReads.Reads-<reads_name>.baga for reads group given: {}'.format(args.reads_name)
         assert all([use_path_reads,use_name_reads]), e
         alns_name = '__'.join([use_name_reads, use_name_genome])
         
@@ -1871,8 +1872,8 @@ if args.subparser == 'ApplyFilters':
             import baga
             # sometimes the baga from the previous step in the pipeline is not actually needed
             # so this name and file check could be relaxed
-            use_path_reads,use_name_reads = check_baga_path('baga.AlignReads.SAM', these_reads)
-            e = 'Could not locate a saved baga.AlignReads.SAMs-<reads_name>.baga for reads group given: {}'.format(these_reads)
+            use_path_reads,use_name_reads = check_baga_path('baga.PrepareReads.Reads', these_reads)
+            e = 'Could not locate a saved baga.PrepareReads.Reads-<reads_name>.baga for reads group given: {}'.format(these_reads)
             assert all([use_path_reads,use_name_reads]), e
             alns_name = '__'.join([use_name_reads, use_name_genome])
             
@@ -2044,8 +2045,8 @@ if args.subparser == 'ComparativeAnalysis':
                 print('Collecting VCFs for {}'.format(these_reads))
                 # sometimes the baga from the previous step in the pipeline is not actually needed
                 # so this name and file check could be relaxed
-                use_path_reads,use_name_reads = check_baga_path('baga.AlignReads.SAM', these_reads)
-                e = 'Could not locate a saved baga.AlignReads.SAMs-<reads_name>.baga for reads group given: {}'.format(these_reads)
+                use_path_reads,use_name_reads = check_baga_path('baga.PrepareReads.Reads', these_reads)
+                e = 'Could not locate a saved baga.PrepareReads.Reads-<reads_name>.baga for reads group given: {}'.format(these_reads)
                 assert all([use_path_reads,use_name_reads]), e
                 alns_name = '__'.join([use_name_reads, use_name_genome])
                 
