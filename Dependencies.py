@@ -245,7 +245,8 @@ def check_no_error(path = '', system = False, java_commands = False, extra = Fal
     Can check in default baga location or a specified path or the system path 
     or java.
     Additional commands and be appended with 'extra' list or pre-pended with 
-    'extra-pre' list e.g., 'python2' for when python >3.3 is not supported but installed
+    'extra-pre' list e.g., specifying 'python2' for when python3 defaults but 
+    python >3.3 is installed but not supported.
     '''
     if java_commands:
         p = _subprocess.Popen(['java'] + java_commands, stdout=_subprocess.PIPE, stderr=_subprocess.STDOUT)
@@ -273,12 +274,17 @@ def check_no_error(path = '', system = False, java_commands = False, extra = Fal
         
         try:
             o = _subprocess.check_output(cmd)
-            #print(o)
+            print(o)
             return(True)
             
         except _subprocess.CalledProcessError as e:
-            print(e.output)
-            return(True)
+            if e.returncode == 2:
+                # for python calling a non-existant python program
+                return(False)
+            else:
+                # some programs that exit return code 1 if commands not given
+                # . . . but they are installed and available
+                return(True)
             
         except OSError as e:
             print('{}: {}'.format(cmd[0], e))
