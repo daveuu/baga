@@ -159,7 +159,7 @@ class DeNovo:
                                 )]
 
         start_time = _time.time()
-        contigs = []
+        contigs = {}
         for cnum, (pairname, files) in enumerate(self.read_files.items()):
             # allow use of tuples or dicts by converting dicts to lists
             if isinstance(files, dict):
@@ -202,7 +202,7 @@ class DeNovo:
             cmd += ['--careful']
             print(' '.join(cmd))
             _subprocess.call(cmd)
-            contigs += [_os.path.sep.join([this_output_path,'contigs.fasta'])]
+            contigs[pairname] = _os.path.sep.join([this_output_path,'contigs.fasta'])
             
             if len(self.read_files) > 1:
                 # report durations, time left etc

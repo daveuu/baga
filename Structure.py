@@ -34,6 +34,7 @@ from baga import _gzip
 from baga import _tarfile
 from baga import _StringIO
 from baga import _json
+from baga import _subprocess
 
 from array import array as _array
 import operator as _operator
@@ -43,8 +44,12 @@ import string as _string
 
 # external Python modules
 import pysam as _pysam
+from Bio import SeqIO as _SeqIO
+from Bio.Seq import Seq as _Seq
+from Bio.SeqRecord import SeqRecord as _SeqRecord
 
 from baga import report_time as _report_time
+from baga import get_exe_path as _get_exe_path
 def main():
     pass
 
@@ -1931,6 +1936,102 @@ class Collector:
         # return output destination for assembly
         return(r1_out_path, r2_out_path, rS_out_path)
 
+class Aligner:
+    '''
+    Aligner class of the Structure module contains methods to align contigs, 
+    assembled de novo from regions likely to be affected by rearrangements (as 
+    found by an instance of the Checker class), back to those regions in the reference chromosome.
+    '''
+    def __init__(self, genome):
+        '''
+        A region of interest aligner be instantiated with a CollectData.Genome 
+        instance to align to.
+        '''
+        
+        self.genome = genome
+        self.ORFs_ordered = sorted(genome.ORF_ranges, key = genome.ORF_ranges.get)
+        self.exe_aligner = _get_exe_path('seq-align')
+    def NeedlemanWunch_seqalign(self, seqA, seqB, protein = 'no'):
+        
+        '''
+        Call seq-align as a subprocess to do a Needleman-Wunch gapped pairwise globl alignment
+        '''
+        if protein in (True, 'yes'):
+            seqA = seqA.translate()
+            seqB = seqB.translate()
+
+        # seqA = _Seq('cgcacgatttgtagtcccgtgtctgcatggacatagcca')
+        # seqB = _Seq('aacacaaacaacacaccgggcctagtagagagttggcggcgcc')
+        # seqA = _Seq('AMKINVFYAEEEESRCSRPFIISPSLVVGLREQRNLKLDSKKASLV')
+        # seqB = _Seq('AMKIIKIKNVFYAESRCSRPFIISPSLVVGVQRREQRNLKLDSKKASLV')
+        seqrecords = [_SeqRecord(seqA, id = 'A'), _SeqRecord(seqB, id = 'B')]
+        out_handle = _StringIO()
+        _SeqIO.write(seqrecords, out_handle, 'fasta')
+        cmd = [self.exe_aligner]
+        cmd += ['--stdin']
+        # because expected to deteriorate?
+        # cmd += ['--freeendgap']
+        proc = _subprocess.Popen(
+            cmd, stdout = _subprocess.PIPE,
+            stdin = _subprocess.PIPE)
+
+        proc.stdin.write(out_handle.getvalue())
+        proc.stdin.close()
+        result = proc.stdout.read()
+        proc.wait()
+        A, B = result.split('\n')[:2]
+        return(A, B)
+
+    def alignRegions(self, assemblies_by_region, pID_window = 100, pID_step = 10):
+        
+        '''
+        Provided with a dict of chromosome range tuples to contig file paths, 
+        align each range to the contigs using seq-align as a subprocess to do 
+        a Needleman-Wunch gapped pairwise globl alignment.
+        '''
+
+
+        aligned = {}
+        for (s,e),contigfile in sorted(assemblies_by_region.items()):
+            if e - s > 200:
+                print((s,e),e-s,contigfile)
+                ref_chrom_region = _Seq(self.genome.sequence[s:e].tostring())
+                for n,rec in enumerate(_SeqIO.parse(contigfile,'fasta')):
+                    use_seq = rec
+                    ref_alnd,contig_alnd = self.NeedlemanWunch_seqalign(ref_chrom_region, rec.seq)
+                    pIDs = dict(self.get_percent_ID(ref_alnd, contig_alnd, window = pID_window, step = pID_step))
+                    ref_alnd_rc,contig_alnd_rc = self.NeedlemanWunch_seqalign(ref_chrom_region, rec.seq.reverse_complement())
+                    pIDs_rc = dict(self.get_percent_ID(ref_alnd_rc, contig_alnd_rc, window = pID_window, step = pID_step))
+                    if sum(pIDs.values()) > sum(pIDs_rc.values()):
+                        if max(pIDs.values()) >= 0.90:
+                            # only print if contains a 200bp window with > 90% identity
+                            fout = _os.path.sep.join(contigfile.split(_os.path.sep)[:-1]) + '_{}.fna'.format(n+1)
+                            seqs = []
+                            seqs += [_SeqRecord(seq = _Seq(ref_alnd), id = 'ref_{:07d}_{:07d}'.format(e,s))]
+                            seqs += [_SeqRecord(seq = _Seq(contig_alnd), id = rec.id)]
+                            _SeqIO.write(seqs, fout, 'fasta')
+                            print('Writing: {}'.format(fout))
+                    else:
+                        if max(pIDs_rc.values()) >= 0.90:
+                            # only print if contains a 200bp window with > 90% identity
+                            fout = _os.path.sep.join(contigfile.split(_os.path.sep)[:-1]) + '_{}.fna'.format(n+1)
+                            seqs = []
+                            seqs += [_SeqRecord(seq = _Seq(ref_alnd_rc), id = 'ref_{:07d}_{:07d}'.format(e,s))]
+                            seqs += [_SeqRecord(seq = _Seq(contig_alnd_rc), id = rec.id)]
+                            _SeqIO.write(seqs, fout, 'fasta')
+                            print('Writing: {}'.format(fout))
+
+
+
+    def get_percent_ID(self, A, B, window = 100, step = 20):
+        pID_per_window = []
+        for i in range(0, len(A)-window, step):
+            Achunk = A[i:i+window]
+            Bchunk = B[i:i+window]
+            pID = sum([a == b for a,b in zip(Achunk,Bchunk)])/float(window)
+            pID_per_window += [(i+window/2,pID)]
+
+        return(pID_per_window)
 
 if __name__ == '__main__':
     main()

@@ -1679,6 +1679,9 @@ if args.subparser == 'Structure':
                         fout.write('"{}","{}","rearrangements2",{},{}\n'.format(genome_name, sample, start, end))
         
         if args.collect:
+            use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
+            assert all([use_path_genome,use_name_genome]), 'Could not locate genome given: {}'.format(args.genome_name)
+            genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
             ## which BAMs?
             ## this is a bit clunky . . probably best to parse BAM headers once, above
             ## move into baga function from cli?
@@ -1720,6 +1723,7 @@ if args.subparser == 'Structure':
                 # make a second dict of reads for assembly, all values for unmapped reads
                 # that need to be included in each assembly
                 reads_path_unmapped = {}
+                assemblies_by_region = {}
                 for (s,e) in use_regions:
                     collector.makeCollection(s,e,500)
                     r1_out_path, r2_out_path, rS_out_path = collector.writeCollection(path_to_fastq_folder)
@@ -1728,9 +1732,14 @@ if args.subparser == 'Structure':
                     reads_paths[output_folder] = (r1_out_path, r2_out_path, rS_out_path)
                     print(output_folder)
                     reads_path_unmapped[output_folder] = r1_out_path_um, r2_out_path_um, rS_out_path_um
+                    assemblies_by_region[s,e] = os.path.sep.join(['read_collections', genome_name, output_folder, 'contigs.fasta'])
                 
                 reads = AssembleReads.DeNovo(paths_to_reads = reads_paths, paths_to_reads2 = reads_path_unmapped)
                 reads.SPAdes(output_folder = ['read_collections',genome_name])
+                # a dict of paths to contigs per region
+                aligner = Structure.Aligner(genome)
+                # provide dict of range tuples with 
+                aligner.alignRegions(assemblies_by_region)
 
 
 
