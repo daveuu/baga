@@ -832,7 +832,7 @@ class Finder:
         for i in range(0, len(A)-window, step):
             Achunk = A[i:i+window]
             Bchunk = B[i:i+window]
-            pID = sum([a == b for a,b in zip(Achunk,Bchunk)])/100.0
+            pID = sum([a == b for a,b in zip(Achunk,Bchunk)])/float(window)
             pID_per_window += [(i+window/2,pID)]
 
         return(pID_per_window)
