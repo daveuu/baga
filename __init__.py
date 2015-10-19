@@ -130,6 +130,11 @@ def get_exe_path(name):
     '''
     Use the Dependencies module to get the path to an executable.
     Allows keeping that information in one place.
+    If returned value is a string, it is the executable path;
+    if returned value is a list, it is the executable path with path
+    to script.
+    Therefore, output needs to be checked and handled appropriately 
+    with subprocess methods.
     '''
     from baga.Dependencies import dependencies as _dependencies
     path_to_exe = []
@@ -140,8 +145,21 @@ def get_exe_path(name):
         path_to_exe += [_dependencies[name]['destination']]
     
     path_to_exe += _dependencies[name]['checker']['arguments']['path']
+    
     path_to_exe = _os.path.sep.join(path_to_exe)
+    
+    try:
+        # will return list because executable + script
+        # would need to be checked and handled appropriately with subprocess methods
+        pre = _os.path.sep.join(_dependencies[name]['checker']['arguments']['extra_pre'])
+        path_to_exe = [pre,path_to_exe]
+    except KeyError:
+        # nothing to prepend e.g., python2 for spades
+        # i.e. python2 when python3.3 is last python3 supported but >3.3 installed
+        pass
+    
     return(path_to_exe)
+
 
 def get_jar_path(name):
     '''

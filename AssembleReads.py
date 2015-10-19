@@ -140,23 +140,11 @@ class DeNovo:
         max_processes = _decide_max_processes( max_cpus )
 
         # if an exe is not provided, use that stored in Dependencies
-        # TODO: update to use baga.get_exe_path(name) with 'extra_pre' <==
         if len(exe):
             use_exe = _os.path.sep.join(exe)
         else:
             from baga import Dependencies
-            try:
-                # for e.g. python2 when python3.3 is last python3 supported
-                use_exe = Dependencies.dependencies['spades']['checker']['arguments']['extra_pre'] + \
-                                [_os.path.sep.join(
-                                    [Dependencies.destination_programs] + \
-                                    Dependencies.dependencies['spades']['checker']['arguments']['path']
-                                )]
-            except KeyError:
-                use_exe = [_os.path.sep.join(
-                                    [Dependencies.destination_programs] + \
-                                    Dependencies.dependencies['spades']['checker']['arguments']['path']
-                                )]
+            use_exe = _get_exe_path('spades')
 
         start_time = _time.time()
         contigs = {}
@@ -173,7 +161,13 @@ class DeNovo:
             if not _os.path.exists(this_output_path):
                 _os.makedirs(this_output_path)
             
-            cmd = list(use_exe)
+            if isinstance(use_exe, list):
+                # allow for use of prepended executable with script to run
+                cmd = use_exe
+            else:
+                # or just executable
+                cmd = [use_exe]
+            
             cmd += ['--pe1-1', use_files[0]]
             cmd += ['--pe1-2', use_files[1]]
             try:
