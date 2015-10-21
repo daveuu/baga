@@ -131,6 +131,7 @@ class DeNovo:
         --cov-cutoff <float> positive float value, or 'auto', or 'off'. Default value is 'off'
         '''
 
+
         base_output_path = _os.path.sep.join(output_folder)
         if not _os.path.exists(base_output_path):
             _os.makedirs(base_output_path)
@@ -147,6 +148,7 @@ class DeNovo:
             use_exe = _get_exe_path('spades')
 
         start_time = _time.time()
+        # prepare commandline and launch each SPAdes assembly
         contigs = {}
         for cnum, (pairname, files) in enumerate(self.read_files.items()):
             # allow use of tuples or dicts by converting dicts to lists
@@ -163,7 +165,7 @@ class DeNovo:
             
             if isinstance(use_exe, list):
                 # allow for use of prepended executable with script to run
-                cmd = use_exe
+                cmd = list(use_exe)
             else:
                 # or just executable
                 cmd = [use_exe]
@@ -171,17 +173,19 @@ class DeNovo:
             cmd += ['--pe1-1', use_files[0]]
             cmd += ['--pe1-2', use_files[1]]
             try:
+                # use unpaired reads if available
                 cmd += ['--pe1-s', use_files[2]]
             except IndexError:
                 pass
             try:
+                # add a second library if provided
                 if isinstance(self.read_files2[pairname], dict):
+                    # if a dict supplied, make it a list
                     use_files2 = []
                     for k,v in sorted(self.read_files2[pairname].items()):
                         use_files2 += [v]
                 else:
                     use_files2 = self.read_files2[pairname]
-                # add a second library if provided
                 cmd += ['--pe2-1', use_files2[0]]
                 cmd += ['--pe2-2', use_files2[1]]
                 try:
@@ -195,8 +199,42 @@ class DeNovo:
             cmd += ['--memory', str(mem_num_gigs)]
             cmd += ['--careful']
             print(' '.join(cmd))
-            _subprocess.call(cmd)
-            contigs[pairname] = _os.path.sep.join([this_output_path,'contigs.fasta'])
+            # allow for failed SPAdes runs (possibly caused by small fastq files) <== but also check they were actually built properly
+            thetime = _time.asctime( _time.localtime(_time.time()) )
+            print('about to launch SPAdes . . .')
+            proc = _subprocess.Popen(cmd, stdout=_subprocess.PIPE, stderr=_subprocess.PIPE)
+            try:
+                stdout_value, stderr_value = proc.communicate()
+                checkthese = []
+                getline = False
+                for line in stdout_value.split('\n'):
+                    if 'Warnings saved to' in line:
+                        getline = False
+                    if getline:
+                        l = line.rstrip()
+                        if len(l):
+                            checkthese += [l]
+                    if 'SPAdes pipeline finished WITH WARNINGS!' in line:
+                        getline = True
+                
+                if len(checkthese):
+                    print('SPAdes completed with warnings:\n{}\n'.format('\n'.join(checkthese)))
+                else:
+                    print('SPAdes completed without warnings')
+                
+                # with open('___SPAdes_{}_good_{}.log'.format(cnum, thetime), 'w') as fout:
+                    # fout.write(stdout_value)
+                contigs[pairname] = _os.path.sep.join([this_output_path,'contigs.fasta'])
+            except _subprocess.CalledProcessError as e:
+                print('SPAdes probably did not complete: error returned ({})'.format(proc.returncode))
+                print('Error: {}'.format(e))
+                print('Writing some info relevent to SPAdes crash to ___SPAdes_{}_bad_{}.log'.format(cnum, thetime))
+                with open('___SPAdes_{}_bad_{}.log'.format(cnum, thetime), 'w') as fout:
+                    fout.write(dir(proc))
+                    fout.write('\n' + str(e.returncode) + '\n')
+                    fout.write(_os.path.sep.join([this_output_path,'contigs.fasta']))
+                
+                contigs[pairname] = None
             
             if len(self.read_files) > 1:
                 # report durations, time left etc

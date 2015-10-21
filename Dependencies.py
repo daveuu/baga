@@ -566,7 +566,7 @@ dependencies['seq-align'] = {
     'source': 'git',
     'url': 'https://github.com/noporpoise/seq-align',
     # git rev-parse --short 05893831281ac26cfe299777416ef28f29f908f1 == 0589383
-    'commit': '05893831281ac26cfe299777416ef28f29f908f1',
+    'commit': '2472ddd774c9d01aed0bbe34b2b64724f6f2bc07',
     'checksum': None,
     'destination': destination_programs,
     'preparation': [{'function': prep_simple_make,

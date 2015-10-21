@@ -35,6 +35,7 @@ from baga import _tarfile
 from baga import _StringIO
 from baga import _json
 from baga import _subprocess
+from baga import _sys
 
 from array import array as _array
 import operator as _operator
@@ -1768,74 +1769,82 @@ class Collector:
         Write reads to a fastq file
         '''
 
-        prefix = '{}__{}'.format(self.reads_name, self.genome_name)
-        zeropadding = len(str(self.reads.header['SQ'][0]['LN']))
-
-        r1_fastq_filename = '{0}_{1:0{3}d}-{2:0{3}d}+{4}_R1.fastq'.format(
-                        prefix,
+        if len(self.read_pairs) == 0:
+            print('WARNING: no reads found at {}-{} bp between {} and {}. Not writing fastq files.'.format(
                         self.chrom_start,
                         self.chrom_end,
-                        zeropadding,
-                        self.num_padding_positions)
-
-        r2_fastq_filename = '{0}_{1:0{3}d}-{2:0{3}d}+{4}_R2.fastq'.format(
-                        prefix,
-                        self.chrom_start,
-                        self.chrom_end,
-                        zeropadding,
-                        self.num_padding_positions)
-
-        rS_fastq_filename = '{0}_{1:0{3}d}-{2:0{3}d}+{4}_S.fastq'.format(
-                        prefix,
-                        self.chrom_start,
-                        self.chrom_end,
-                        zeropadding,
-                        self.num_padding_positions)
-
-        print('Writing to:\n{}/{}\n{}/{}\n{}/{}\n'.format(
-                        path_to_fastq_folder,
-                        r1_fastq_filename,
-                        path_to_fastq_folder,
-                        r2_fastq_filename,
-                        path_to_fastq_folder,
-                        rS_fastq_filename))
-
-        r1_out_path = _os.path.sep.join([path_to_fastq_folder,r1_fastq_filename])
-        r1_out = open(r1_out_path, 'w')
-
-        r2_out_path = _os.path.sep.join([path_to_fastq_folder,r2_fastq_filename])
-        r2_out = open(r2_out_path, 'w')
-
-        rS_out_path = _os.path.sep.join([path_to_fastq_folder,rS_fastq_filename])
-        rS_out = open(rS_out_path, 'w')
-
-
-        for read_id,reads in self.read_pairs.items():
-            if len(reads) == 2:
-                r1seq,r1qual = reads[1]
-                r1_out.write('@{}/1\n{}\n+\n{}\n'.format(
-                            read_id,
-                            r1seq,
-                            r1qual))
-                r2seq,r2qual = reads[2]
-                r2_out.write('@{}/1\n{}\n+\n{}\n'.format(
-                            read_id,
-                            r2seq,
-                            r2qual))
-            elif len(reads) == 1:
-                n,(rseq,rqual) = reads.items()[0]
-                rS_out.write('@{}/{}\n{}\n+\n{}\n'.format(
-                            read_id,
-                            n,
-                            rseq,
-                            rqual))
-
-        r1_out.close()
-        r2_out.close()
-        rS_out.close()
-
-        # return output destination for assembly
-        return(r1_out_path, r2_out_path, rS_out_path)
+                        self.reads_name, 
+                        self.genome_name))
+            return(None, None, None)
+        else:
+            prefix = '{}__{}'.format(self.reads_name, self.genome_name)
+            zeropadding = len(str(self.reads.header['SQ'][0]['LN']))
+            
+            r1_fastq_filename = '{0}_{1:0{3}d}-{2:0{3}d}+{4}_R1.fastq'.format(
+                            prefix,
+                            self.chrom_start,
+                            self.chrom_end,
+                            zeropadding,
+                            self.num_padding_positions)
+            
+            r2_fastq_filename = '{0}_{1:0{3}d}-{2:0{3}d}+{4}_R2.fastq'.format(
+                            prefix,
+                            self.chrom_start,
+                            self.chrom_end,
+                            zeropadding,
+                            self.num_padding_positions)
+            
+            rS_fastq_filename = '{0}_{1:0{3}d}-{2:0{3}d}+{4}_S.fastq'.format(
+                            prefix,
+                            self.chrom_start,
+                            self.chrom_end,
+                            zeropadding,
+                            self.num_padding_positions)
+            
+            print('Writing to:\n{}/{}\n{}/{}\n{}/{}\n'.format(
+                            path_to_fastq_folder,
+                            r1_fastq_filename,
+                            path_to_fastq_folder,
+                            r2_fastq_filename,
+                            path_to_fastq_folder,
+                            rS_fastq_filename))
+            
+            r1_out_path = _os.path.sep.join([path_to_fastq_folder,r1_fastq_filename])
+            r1_out = open(r1_out_path, 'w')
+            
+            r2_out_path = _os.path.sep.join([path_to_fastq_folder,r2_fastq_filename])
+            r2_out = open(r2_out_path, 'w')
+            
+            rS_out_path = _os.path.sep.join([path_to_fastq_folder,rS_fastq_filename])
+            rS_out = open(rS_out_path, 'w')
+            
+            
+            for read_id,reads in self.read_pairs.items():
+                if len(reads) == 2:
+                    r1seq,r1qual = reads[1]
+                    r1_out.write('@{}/1\n{}\n+\n{}\n'.format(
+                                read_id,
+                                r1seq,
+                                r1qual))
+                    r2seq,r2qual = reads[2]
+                    r2_out.write('@{}/1\n{}\n+\n{}\n'.format(
+                                read_id,
+                                r2seq,
+                                r2qual))
+                elif len(reads) == 1:
+                    n,(rseq,rqual) = reads.items()[0]
+                    rS_out.write('@{}/{}\n{}\n+\n{}\n'.format(
+                                read_id,
+                                n,
+                                rseq,
+                                rqual))
+            
+            r1_out.close()
+            r2_out.close()
+            rS_out.close()
+            
+            # return output destination for assembly
+            return(r1_out_path, r2_out_path, rS_out_path)
 
 
     def getUnmapped(self, low_quality_mapping_threshold = 10):
@@ -1879,6 +1888,10 @@ class Collector:
         '''
         Write reads to fastq files returning a tuple of paths to: reads 1, reads 2 and singletons
         '''
+        if len(self.unmapped_read_pairs) == 0:
+            print('WARNING: no unmapped or poorly mapped reads found between {} and {} (this might not be a problem).'.format(
+                        self.reads_name, 
+                        self.genome_name))
 
         prefix = '{}__{}'.format(self.reads_name, self.genome_name)
 
@@ -1951,11 +1964,17 @@ class Aligner:
         self.genome = genome
         self.ORFs_ordered = sorted(genome.ORF_ranges, key = genome.ORF_ranges.get)
         self.exe_aligner = _get_exe_path('seq-align')
-    def NeedlemanWunch_seqalign(self, seqA, seqB, protein = 'no'):
+    def seqalign(self, seqA, seqB, algorithm = 'needleman_wunsch', protein = 'no'):
         
         '''
-        Call seq-align as a subprocess to do a Needleman-Wunch gapped pairwise globl alignment
+        Call seq-align as a subprocess to do a gapped pairwise optimal alignment
+        algorithm = 'needleman_wunsch'|'smith_waterman'
         '''
+
+        # update aligner executable
+        # 'smith_waterman' or 'needleman_wunsch'
+        exe = _os.path.sep.join(self.exe_aligner.split(_os.path.sep)[:-1]+[algorithm])
+
         if protein in (True, 'yes'):
             seqA = seqA.translate()
             seqB = seqB.translate()
@@ -1964,62 +1983,127 @@ class Aligner:
         # seqB = _Seq('aacacaaacaacacaccgggcctagtagagagttggcggcgcc')
         # seqA = _Seq('AMKINVFYAEEEESRCSRPFIISPSLVVGLREQRNLKLDSKKASLV')
         # seqB = _Seq('AMKIIKIKNVFYAESRCSRPFIISPSLVVGVQRREQRNLKLDSKKASLV')
-        seqrecords = [_SeqRecord(seqA, id = 'A'), _SeqRecord(seqB, id = 'B')]
-        out_handle = _StringIO()
-        _SeqIO.write(seqrecords, out_handle, 'fasta')
-        cmd = [self.exe_aligner]
-        cmd += ['--stdin']
-        # because expected to deteriorate?
-        # cmd += ['--freeendgap']
-        proc = _subprocess.Popen(
-            cmd, stdout = _subprocess.PIPE,
-            stdin = _subprocess.PIPE)
+        if algorithm == 'needleman_wunsch':
+            out_handle = _StringIO()
+            seqrecords = [_SeqRecord(seqA, id = 'A'), _SeqRecord(seqB, id = 'B')]
+            _SeqIO.write(seqrecords, out_handle, 'fasta')
+            cmd = [exe]
+            cmd += ['--stdin']
+            cmd += ['--freestartgap']
+            cmd += ['--freeendgap']
+            # print(' '.join(cmd))
+            proc = _subprocess.Popen(
+                cmd,
+                stdout = _subprocess.PIPE,
+                stderr = _subprocess.PIPE,
+                stdin = _subprocess.PIPE)
+            
+            result, err = proc.communicate(out_handle.getvalue())
+            try:
+                A, B = result.split('\n')[:2]
+                return(A, B)
+            except ValueError as e:
+                _sys.exit('There seems to be a problem with the seqalign output:\n{} ({})'.format(err,e))
 
-        proc.stdin.write(out_handle.getvalue())
-        proc.stdin.close()
-        result = proc.stdout.read()
-        proc.wait()
-        A, B = result.split('\n')[:2]
-        return(A, B)
+        else:
+            print('WARNING: smith-waterman wrapper is unimplemented: output much more complex and is simply printed to stdout for now')
+            out_handle = _StringIO()
+            #seqrecords = [_SeqRecord(seqA, id = 'A'), _SeqRecord(seqB, id = 'B')]
+            #_SeqIO.write(seqrecords, out_handle, 'fasta')
+            # smith_waterman seems to required raw sequences, not fastas
+            seqrecords = '\n'.join([str(seqA), str(seqB)])
+            out_handle.write(seqrecords)
+            cmd = [exe]
+            cmd += ['--stdin']
+            # because expected to deteriorate?
+            # cmd += ['--freeendgap']
+            # print(' '.join(cmd))
+            proc = _subprocess.Popen(
+                cmd,
+                stdout = _subprocess.PIPE,
+                stderr = _subprocess.PIPE,
+                stdin = _subprocess.PIPE)
+            
+            # proc.stdin.write(out_handle.getvalue())
+            # proc.stdin.close()
+            #result = proc.stdout.read()
+            result, err = proc.communicate(out_handle.getvalue())
+            #proc.wait()
+            print(result)
+            # try:
+                # A, B = result.split('\n')[:2]
+                # print(A,B)
+                # return(A, B)
+            # except ValueError as e:
+                # _sys.exit('There seems to be a problem with the seqalign output:\n{} ({})'.format(err,e))
+            
 
-    def alignRegions(self, assemblies_by_region, pID_window = 100, pID_step = 10):
+
+    def alignRegions(self, assemblies_by_region, 
+                           num_padding_positions = 5000, 
+                           pID_window = 100, 
+                           pID_step = 10, 
+                           path_to_omit_sequences = False):
         
         '''
         Provided with a dict of chromosome range tuples to contig file paths, 
         align each range to the contigs using seq-align as a subprocess to do 
         a Needleman-Wunch gapped pairwise globl alignment.
+        path_to_omit_sequences can be a fasta file of contigs that should be ignored if
+        encountered (e.g. contigs from unmapped reads to subtract from assemblies
+        that include reads from regions of interest)
         '''
 
+        unmapped_read_contigs = set([str(rec.seq) for rec in _SeqIO.parse(path_to_omit_sequences, 'fasta')])
+
+        # the minimum percent identity required at one or more windows along the alignment
+        min_pID_aligned = 0.9
 
         aligned = {}
         for (s,e),contigfile in sorted(assemblies_by_region.items()):
             if e - s > 200:
                 print((s,e),e-s,contigfile)
-                ref_chrom_region = _Seq(self.genome.sequence[s:e].tostring())
+                ref_chrom_region = _Seq(self.genome.sequence[s-num_padding_positions:e+num_padding_positions].tostring())
+                ref_region_id = 'ref_{:07d}_{:07d}'.format(s-num_padding_positions,e+num_padding_positions)
                 for n,rec in enumerate(_SeqIO.parse(contigfile,'fasta')):
-                    use_seq = rec
-                    ref_alnd,contig_alnd = self.NeedlemanWunch_seqalign(ref_chrom_region, rec.seq)
-                    pIDs = dict(self.get_percent_ID(ref_alnd, contig_alnd, window = pID_window, step = pID_step))
-                    ref_alnd_rc,contig_alnd_rc = self.NeedlemanWunch_seqalign(ref_chrom_region, rec.seq.reverse_complement())
-                    pIDs_rc = dict(self.get_percent_ID(ref_alnd_rc, contig_alnd_rc, window = pID_window, step = pID_step))
-                    if sum(pIDs.values()) > sum(pIDs_rc.values()):
-                        if max(pIDs.values()) >= 0.90:
-                            # only print if contains a 200bp window with > 90% identity
-                            fout = _os.path.sep.join(contigfile.split(_os.path.sep)[:-1]) + '_{}.fna'.format(n+1)
-                            seqs = []
-                            seqs += [_SeqRecord(seq = _Seq(ref_alnd), id = 'ref_{:07d}_{:07d}'.format(e,s))]
-                            seqs += [_SeqRecord(seq = _Seq(contig_alnd), id = rec.id)]
-                            _SeqIO.write(seqs, fout, 'fasta')
-                            print('Writing: {}'.format(fout))
+                    if str(rec.seq) not in unmapped_read_contigs:
+                        print('Aligning novel contig: {}'.format(rec.id))
+                        use_seq = rec
+                        #ref_alnd,contig_alnd = self.seqalign(ref_chrom_region, rec.seq, 'smith_waterman')
+                        ref_alnd,contig_alnd = self.seqalign(ref_chrom_region, rec.seq, 'needleman_wunsch')
+                        pIDs = dict(self.get_percent_ID(ref_alnd, contig_alnd, window = pID_window, step = pID_step))
+                        #ref_alnd_rc,contig_alnd_rc = self.seqalign(ref_chrom_region, rec.seq.reverse_complement(), 'smith_waterman')
+                        ref_alnd_rc,contig_alnd_rc = self.seqalign(ref_chrom_region, rec.seq.reverse_complement(), 'needleman_wunsch')
+                        pIDs_rc = dict(self.get_percent_ID(ref_alnd_rc, contig_alnd_rc, window = pID_window, step = pID_step))
+                        retained = False
+                        if sum(pIDs.values()) > sum(pIDs_rc.values()):
+                            if max(pIDs.values()) >= min_pID_aligned:
+                                # only print if contains a pID_window bp window with > 90% identity
+                                fout = _os.path.sep.join(contigfile.split(_os.path.sep)[:-1]) + '_contig{:02d}.fna'.format(n+1)
+                                seqs = []
+                                seqs += [_SeqRecord(seq = _Seq(ref_alnd), 
+                                                    id = ref_region_id)]
+                                seqs += [_SeqRecord(seq = _Seq(contig_alnd), 
+                                                    id = rec.id)]
+                                _SeqIO.write(seqs, fout, 'fasta')
+                                print('Writing: {}'.format(fout))
+                                retained = True
+                        else:
+                            if max(pIDs_rc.values()) >= min_pID_aligned:
+                                # only print if contains a pID_window bp window with > 90% identity
+                                fout = _os.path.sep.join(contigfile.split(_os.path.sep)[:-1]) + '_contig{:02d}_rc.fna'.format(n+1)
+                                seqs = []
+                                seqs += [_SeqRecord(seq = _Seq(ref_alnd_rc), 
+                                                    id = ref_region_id)]
+                                seqs += [_SeqRecord(seq = _Seq(contig_alnd_rc), 
+                                                    id = rec.id)]
+                                _SeqIO.write(seqs, fout, 'fasta')
+                                print('Writing: {}'.format(fout))
+                                retained = True
+                        if not retained:
+                            print('No alignment with a percent identity >= {:.0%} over a window of {} bp'.format(min_pID_aligned, pID_window))
                     else:
-                        if max(pIDs_rc.values()) >= 0.90:
-                            # only print if contains a 200bp window with > 90% identity
-                            fout = _os.path.sep.join(contigfile.split(_os.path.sep)[:-1]) + '_{}.fna'.format(n+1)
-                            seqs = []
-                            seqs += [_SeqRecord(seq = _Seq(ref_alnd_rc), id = 'ref_{:07d}_{:07d}'.format(e,s))]
-                            seqs += [_SeqRecord(seq = _Seq(contig_alnd_rc), id = rec.id)]
-                            _SeqIO.write(seqs, fout, 'fasta')
-                            print('Writing: {}'.format(fout))
+                        print('Omitting contig from unmapped/poorly mapped reads: {}'.format(rec.id))
 
 
 

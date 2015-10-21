@@ -289,7 +289,7 @@ parser_PrepareReads.add_argument('-N', "--max_cpus",
 
 parser_PrepareReads.add_argument('-F', "--force", 
     help = "overwrite existing data: required when repeating an analysis else \
-previous versions retained. Retension of previous versions is convenient for \
+previous versions retained. Retention of previous versions is convenient for \
 resuming an interrupted analysis in which only some read sets were processed.",
     action = 'store_true',
     default = False)
@@ -350,7 +350,7 @@ parser_AlignReads.add_argument('-N', "--max_cpus",
 
 parser_AlignReads.add_argument('-F', "--force", 
     help = "overwrite existing data: required when repeating an analysis else \
-previous versions retained. Retension of previous versions is convenient for \
+previous versions retained. Retention of previous versions is convenient for \
 resuming an interrupted analysis in which only some read sets were processed.",
     action = 'store_true',
     default = False)
@@ -493,9 +493,25 @@ parser_Structure.add_argument('-s', "--summarise",
     action = 'store_true')
 
 parser_Structure.add_argument('-C', "--collect", 
-    help = "extract short reads aligned to regions of putative rearrangements found using '--find' and write to a .fastq file. Requires --reads_name, optionally with --include_samples to limit to specific samples and --collect_range to specify a range to collect reads for if not those already found by '--find'. Alternatively use --checkinfos_path to specify samples with corresponding 'baga.Structure.CheckerInfo-<sample_name>__<genome_name>.baga'.",
+    help = "extract short reads aligned to regions of putative rearrangements found using '--find', write to a .fastq file, assemble each of them using SPAdes and align contigs back to reference chromosome. Requires --reads_name, optionally with --include_samples to limit to specific samples and --collect_range to specify a range to collect reads for if not those already found by '--find'. Alternatively use --checkinfos_path to specify samples with corresponding 'baga.Structure.CheckerInfo-<sample_name>__<genome_name>.baga'.",
     action = 'store_true')
 
+parser_Structure.add_argument('-R', "--collect_range", 
+    help = "extract short reads aligned at specified region, write to a .fastq file, assemble de novo using SPAdes and align contigs back to reference chromosome. --num_padding_positions will be set to zero.",
+    type = int,
+    nargs = 2,
+    metavar = 'CHROMOSOME_POSITION')
+
+parser_Structure.add_argument('-F', "--force", 
+    help = "overwrite existing assemblies when using --collect/-C.",
+    action = 'store_true',
+    default = False)
+
+parser_Structure.add_argument('-P', "--num_padding_positions", 
+    help = "for the de novo assembly of collected reads that were aligned/mapped to the reference genome at regions of putative rearrangements, optionally specify additional padding (bp) around each region to collect more reads and assmeble longer contigs for pairwise alignment back to the reference",
+    type = int,
+    default = 5000,
+    metavar = 'NUM_BASEPAIRS')
 
 
 parser_CallVariants = subparser_adder.add_parser('CallVariants',
@@ -523,7 +539,7 @@ parser_CallVariants.add_argument('-g', "--genome_name",
 
 parser_CallVariants.add_argument('-F', "--force", 
     help = "overwrite existing per isolate data: required when repeating an \
-analysis else previous versions retained. Retension of previous versions is \
+analysis else previous versions retained. Retention of previous versions is \
 convenient for resuming an interrupted analysis in which only some read sets \
 were processed.",
     action = 'store_true',
@@ -1407,7 +1423,7 @@ if args.subparser == 'Structure':
     if not(args.check or args.plot or args.plot_range or args.summarise or args.collect):
         parser_Structure.error('Need at least one of --check/-c, --plot/-p or --plot_range/-r or --summarise/-s or --collect/-C')
     
-    if args.check or args.plot or args.plot_range or args.collect:
+    if args.check or args.plot or args.plot_range or args.collect or args.collect_range:
         # collect BAMs
         if args.reads_name:
             # baga pipeline information provided
@@ -1530,7 +1546,11 @@ if args.subparser == 'Structure':
                 
                 print('Plotting filter regions for {} reads aligned to {}'.format(sample, genome.id))
                 
-                if args.plot:
+                if args.plot_range:
+                    # just the requested range
+                    do_ranges = [args.plot_range]
+                    
+                elif args.plot:
                     # all ranges for filtering for this sample
                     
                     # currently range selection is rearrangements filter, not including the extensions
@@ -1546,10 +1566,6 @@ if args.subparser == 'Structure':
                             plot_chrom_end = int(round(e + 500 + 100, -3))
                         
                         do_ranges += [(plot_chrom_start,plot_chrom_end)]
-                    
-                else:
-                    # just the requested range
-                    do_ranges = [args.plot_range]
                 
                 for plot_chrom_start,plot_chrom_end in do_ranges:
                     
@@ -1580,7 +1596,7 @@ if args.subparser == 'Structure':
     elif args.reads_name and not args.genome_name:
         parser.error('--genome_name/-g is required with --reads_name/-n. (The baga CollectData-processed genome used with the AlignReads option)')
     
-    if args.summarise or args.collect:
+    if args.summarise or args.collect or args.collect_range:
         # both tasks share some requirements: deal with these first
         
         if args.reads_name:
@@ -1678,7 +1694,7 @@ if args.subparser == 'Structure':
                     for start, end in info['suspect_regions']['rearrangements_extended']:
                         fout.write('"{}","{}","rearrangements2",{},{}\n'.format(genome_name, sample, start, end))
         
-        if args.collect:
+        if args.collect or args.collect_range:
             use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
             assert all([use_path_genome,use_name_genome]), 'Could not locate genome given: {}'.format(args.genome_name)
             genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
@@ -1705,41 +1721,82 @@ if args.subparser == 'Structure':
                                         genome_name)
                 assert genome_name == collector.reads.references[0], e
                 
-                # join main rearrangement zones with extended regions if found
-                all_regions = sorted(
-                              info['suspect_regions']['rearrangements'] + \
-                              info['suspect_regions']['rearrangements_extended'])
-                
-                from collections import Counter
-                use_regions = [a for b in all_regions for a in b]
-                c = Counter(use_regions)
-                use_regions = [a for a in use_regions if c[a] == 1]
-                use_regions = zip(use_regions[::2],use_regions[1::2])
+                if args.collect_range:
+                    use_regions = [args.collect_range]
+                    use_num_padding_positions = 0
+                else:
+                    # join main rearrangement zones with extended regions if found
+                    # to get contiguous blocks for investigation
+                    all_regions = sorted(
+                                  info['suspect_regions']['rearrangements'] + \
+                                  info['suspect_regions']['rearrangements_extended'])
+                    
+                    from collections import Counter
+                    use_regions = [a for b in all_regions for a in b]
+                    c = Counter(use_regions)
+                    use_regions = [a for a in use_regions if c[a] == 1]
+                    use_regions = zip(use_regions[::2],use_regions[1::2])
+                    use_num_padding_positions = args.num_padding_positions
                 
                 collector.getUnmapped()
                 r1_out_path_um, r2_out_path_um, rS_out_path_um = collector.writeUnmapped(path_to_fastq_folder)
                 
+                # assemble poorly/unmapped alone first
+                reads_path_unmapped = {}
+                reads_path_unmapped['bad_and_unmapped'] = r1_out_path_um, r2_out_path_um, rS_out_path_um
+                path_to_contigs = os.path.sep.join(['read_collections', 
+                                                    genome_name, 
+                                                    'bad_and_unmapped', 
+                                                    'contigs.fasta'])
+                if os.path.exists(path_to_contigs) and \
+                   os.path.getsize(path_to_contigs) > 0 and \
+                   not args.force:
+                    print('Found assembly at {}\nUse --force/-F to overwrite. Skipping . . .'.format(path_to_contigs))
+                else:
+                    if not args.force:
+                        print('Nothing found at {}. Doing assembly.'.format(path_to_contigs))
+                    reads = AssembleReads.DeNovo(paths_to_reads = reads_path_unmapped)
+                    reads.SPAdes(output_folder = ['read_collections',genome_name])
+                
+                # assemble read from each region with poorly/unmapped
                 reads_paths = {}
                 # make a second dict of reads for assembly, all values for unmapped reads
                 # that need to be included in each assembly
                 reads_path_unmapped = {}
                 assemblies_by_region = {}
                 for (s,e) in use_regions:
-                    collector.makeCollection(s,e,500)
+                    collector.makeCollection(s, e, use_num_padding_positions)
                     r1_out_path, r2_out_path, rS_out_path = collector.writeCollection(path_to_fastq_folder)
+                    if not r1_out_path:
+                        # if no reads found, False returned
+                        # do not add to reads_paths dict for assembly
+                        continue
                     # put assembly in folder with same name as read files
                     output_folder = '_'.join(r1_out_path.split('_')[:-1]).split(os.path.sep)[-1]
-                    reads_paths[output_folder] = (r1_out_path, r2_out_path, rS_out_path)
                     print(output_folder)
-                    reads_path_unmapped[output_folder] = r1_out_path_um, r2_out_path_um, rS_out_path_um
-                    assemblies_by_region[s,e] = os.path.sep.join(['read_collections', genome_name, output_folder, 'contigs.fasta'])
+                    path_to_contigs = os.path.sep.join(['read_collections', 
+                                                        genome_name, 
+                                                        output_folder, 
+                                                        'contigs.fasta'])
+                    assemblies_by_region[s,e] = path_to_contigs
+                    if os.path.exists(path_to_contigs) and \
+                       os.path.getsize(path_to_contigs) > 0 and \
+                       not args.force:
+                        print('Found assembly at {}\nUse --force/-F to overwrite. Skipping . . .'.format(path_to_contigs))
+                    else:
+                        reads_paths[output_folder] = (r1_out_path, r2_out_path, rS_out_path)
+                        reads_path_unmapped[output_folder] = r1_out_path_um, r2_out_path_um, rS_out_path_um
                 
                 reads = AssembleReads.DeNovo(paths_to_reads = reads_paths, paths_to_reads2 = reads_path_unmapped)
-                reads.SPAdes(output_folder = ['read_collections',genome_name])
+                reads.SPAdes(output_folder = ['read_collections', genome_name])
                 # a dict of paths to contigs per region
                 aligner = Structure.Aligner(genome)
-                # provide dict of range tuples with 
-                aligner.alignRegions(assemblies_by_region)
+                unmappedfasta = os.path.sep.join(['read_collections', 
+                                                  genome_name, 
+                                                  'bad_and_unmapped', 
+                                                  'contigs.fasta'])
+                # provide dict of range tuples
+                aligner.alignRegions(assemblies_by_region, use_num_padding_positions, path_to_omit_sequences = unmappedfasta)
 
 
 
