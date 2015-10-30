@@ -238,9 +238,15 @@ def prep_simple_make(path = False, configure = False, alt_command = False):
     if path:
         _os.chdir(_os.path.sep.join([_os.path.pardir]*len(path)))
 
-def check_no_error(path = '', system = False, java_commands = False, extra = False, extra_pre = False):
+def check_no_error(path = '', 
+                   system = False, 
+                   java_commands = False, 
+                   extra = False, 
+                   extra_pre = False,
+                   success_returncode = 1):
     '''
     check a binary executable can be called.
+    
     A failure is considered as OSError, not a non-zero exit status.
     Can check in default baga location or a specified path or the system path 
     or java.
@@ -274,17 +280,23 @@ def check_no_error(path = '', system = False, java_commands = False, extra = Fal
         
         try:
             o = _subprocess.check_output(cmd)
-            print(o)
+            o = '\n'.join(['external> '+l for l in o.split('\n')])+'\n'
+            print(o) # eventually put in the debugging log <== too much noise
+            # some programs output a help screen if commands not given
+            # . . . they are installed and available
             return(True)
             
         except _subprocess.CalledProcessError as e:
-            if e.returncode == 2:
-                # for python calling a non-existant python program
-                return(False)
-            else:
-                # some programs that exit return code 1 if commands not given
+            if e.returncode == success_returncode:
+                # some programs that exit return non-zero code if commands not given
+                # usually this is 1, but occasionally it is 2 (e.g. cutadapt)
+                # but a fail on 2 is e.g. python calling a non-existent python program
+                # should be set in the dependencies dictionary if not 1 (default)
                 # . . . but they are installed and available
                 return(True)
+                
+            else:
+                return(False)
             
         except OSError as e:
             print('{}: {}'.format(cmd[0], e))
@@ -436,8 +448,13 @@ dependencies['cutadapt'] = {
     'preparation': [{'function': prep_python_install,
                 'arguments': {'extras': ['--user']}}],
     'checker': {'function': check_no_error,
-                'arguments': {'path': [_os.path.expanduser('~'), '.local','bin', 'cutadapt']}}
+                'arguments': {'path': [_os.path.expanduser('~'), '.local','bin', 'cutadapt'],
+                              # usually this is not required: 0 return code
+                              # else is 1, the default success for non-zero
+                              # but occassionally is 2 as in this case
+                              'success_returncode':2}}
     }
+
 
 dependencies['svgwrite'] = {
     'name': 'svgwrite',
