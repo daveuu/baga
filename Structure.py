@@ -2054,7 +2054,10 @@ class Aligner:
         that include reads from regions of interest)
         '''
 
-        unmapped_read_contigs = set([str(rec.seq) for rec in _SeqIO.parse(path_to_omit_sequences, 'fasta')])
+        if path_to_omit_sequences:
+            unmapped_read_contigs = set([str(rec.seq) for rec in _SeqIO.parse(path_to_omit_sequences, 'fasta')])
+        else:
+            unmapped_read_contigs = set()
 
         # the minimum percent identity required at one or more windows along the alignment
         min_pID_aligned = 0.9

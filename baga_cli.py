@@ -1709,7 +1709,7 @@ if args.subparser == 'Structure':
             
             from baga import AssembleReads
             for (sample, genome_name), info in sorted(checker_info.items()):
-                path_to_fastq_folder = 'read_collections/{}'.format(genome_name)
+                path_to_fastq_folder = os.path.sep.join(['read_collections',genome_name])
                 if not os.path.exists(path_to_fastq_folder):
                     os.makedirs(path_to_fastq_folder)
                 
@@ -1743,18 +1743,20 @@ if args.subparser == 'Structure':
                 
                 # assemble poorly/unmapped alone first
                 reads_path_unmapped = {}
-                reads_path_unmapped['bad_and_unmapped'] = r1_out_path_um, r2_out_path_um, rS_out_path_um
-                path_to_contigs = os.path.sep.join(['read_collections', 
+                output_folder_um = '_'.join(r1_out_path_um.split('_')[:-1]).split(os.path.sep)[-1]
+                reads_path_unmapped[output_folder_um] = r1_out_path_um, r2_out_path_um, rS_out_path_um
+                path_to_bad_unmapped_contigs = os.path.sep.join(['read_collections',
                                                     genome_name, 
-                                                    'bad_and_unmapped', 
+                                                    output_folder_um,
                                                     'contigs.fasta'])
-                if os.path.exists(path_to_contigs) and \
-                   os.path.getsize(path_to_contigs) > 0 and \
+                if os.path.exists(path_to_bad_unmapped_contigs) and \
+                   os.path.getsize(path_to_bad_unmapped_contigs) > 0 and \
                    not args.force:
-                    print('Found assembly at {}\nUse --force/-F to overwrite. Skipping . . .'.format(path_to_contigs))
+                    print('Found assembly at {}\nUse --force/-F to overwrite. Skipping . . .'.format(path_to_bad_unmapped_contigs))
                 else:
                     if not args.force:
-                        print('Nothing found at {}. Doing assembly.'.format(path_to_contigs))
+                        print('Nothing found at {}. Doing assembly.'.format(path_to_bad_unmapped_contigs))
+                    
                     reads = AssembleReads.DeNovo(paths_to_reads = reads_path_unmapped)
                     reads.SPAdes(output_folder = ['read_collections',genome_name])
                 
@@ -1793,13 +1795,27 @@ if args.subparser == 'Structure':
                 aligner = Structure.Aligner(genome)
                 unmappedfasta = os.path.sep.join(['read_collections', 
                                                   genome_name, 
-                                                  'bad_and_unmapped', 
+                                                  output_folder_um, 
                                                   'contigs.fasta'])
-                # provide dict of range tuples
-                aligner.alignRegions(assemblies_by_region, use_num_padding_positions, path_to_omit_sequences = unmappedfasta)
-
-
-
+                if os.path.exists(unmappedfasta) and os.path.getsize(unmappedfasta) > 0:
+                    # provide dict of range tuples
+                    aligner.alignRegions(assemblies_by_region, use_num_padding_positions, path_to_omit_sequences = unmappedfasta)
+                else:
+                    print('WARNING: no assembled unmapped and poorly mapped reads found at:\n{}'.format(unmappedfasta))
+                    try:
+                        r1_size = os.path.getsize(r1_out_path_um)
+                        r2_size = os.path.getsize(r2_out_path_um)
+                        print('but reads, {} ({:,} bytes) and {} ({:,} bytes), exist . . check SPAdes assembly log in {}'.format(
+                                                                r1_out_path_um,
+                                                                r1_size,
+                                                                r2_out_path_um,
+                                                                r2_size,
+                                                                unmappedfasta.replace('contigs.fasta','')))
+                    except IOError:
+                        print('WARNING: could not find unmapped and poorly aligned reads at:\n{}\n{}\n'
+                        'this is unexpected but conceivable.'.format('a','b'))
+                    print('proceeding with alignment of assembled putatively rearranged regions to reference nonetheless')
+                    aligner.alignRegions(assemblies_by_region, use_num_padding_positions)
 
 ### Call Variants ###
 
@@ -1906,8 +1922,6 @@ if using any of:
                         max_cpus = args.max_cpus)
             
             caller.saveLocal(alns_name)
-    
-
     
 
 ### Apply Filters ###
