@@ -557,7 +557,7 @@ parser_CallVariants.add_argument('-n', "--max_cpus",
     default = -1)
 
 parser_CallVariants.add_argument('-m', "--max_memory", 
-    help = "maximum number of memory to use in gigabytes",
+    help = "maximum memory to use in gigabytes",
     type = int,
     default = 8)
 
@@ -799,6 +799,10 @@ parser_AssembleReads.add_argument('-P', "--program",
     type = str,
     choices = ['spades'],
     default = 'spades')
+
+parser_AssembleReads.add_argument('-m', "--max_memory", 
+    help = "maximum memory to use in gigabytes for each assembly. If not specified, total available at launch time will be used.",
+    type = int)
 
 args = parser.parse_args()
 
@@ -2328,7 +2332,13 @@ if args.subparser == 'AssembleReads':
         
         if args.program == 'spades':
             reads = AssembleReads.DeNovo(baga = prepared_reads)
-            reads.SPAdes()
+            if args.max_memory:
+                use_mem_gigs = args.max_memory
+            else:
+                # round down available GBs
+                use_mem_gigs = int(baga.get_available_memory())
+            
+            reads.SPAdes(mem_num_gigs = use_mem_gigs)
     
     # if args.delete_intermediates:
         # print('Checking on intermediate fastq files to delete . . .')
