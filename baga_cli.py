@@ -513,6 +513,9 @@ parser_Structure.add_argument('-P', "--num_padding_positions",
     default = 5000,
     metavar = 'NUM_BASEPAIRS')
 
+parser_Structure.add_argument('-m', "--max_memory", 
+    help = "maximum memory to use in gigabytes for each assembly. If not specified, total available at launch time will be used.",
+    type = int)
 
 parser_CallVariants = subparser_adder.add_parser('CallVariants',
                 formatter_class = argparse.RawDescriptionHelpFormatter,
@@ -1712,6 +1715,12 @@ if args.subparser == 'Structure':
                 BAMs_by_ids[(header['RG'][0]['ID'],header['SQ'][0]['SN'])] = BAM
             
             from baga import AssembleReads
+            if args.max_memory:
+                use_mem_gigs = args.max_memory
+            else:
+                # round down available GBs
+                use_mem_gigs = int(baga.get_available_memory())
+            
             for (sample, genome_name), info in sorted(checker_info.items()):
                 path_to_fastq_folder = os.path.sep.join(['read_collections',genome_name])
                 if not os.path.exists(path_to_fastq_folder):
@@ -1762,7 +1771,7 @@ if args.subparser == 'Structure':
                         print('Nothing found at {}. Doing assembly.'.format(path_to_bad_unmapped_contigs))
                     
                     reads = AssembleReads.DeNovo(paths_to_reads = reads_path_unmapped)
-                    reads.SPAdes(output_folder = ['read_collections',genome_name])
+                    reads.SPAdes(output_folder = ['read_collections',genome_name], mem_num_gigs = use_mem_gigs)
                 
                 # assemble read from each region with poorly/unmapped
                 reads_paths = {}
@@ -1794,7 +1803,7 @@ if args.subparser == 'Structure':
                         reads_path_unmapped[output_folder] = r1_out_path_um, r2_out_path_um, rS_out_path_um
                 
                 reads = AssembleReads.DeNovo(paths_to_reads = reads_paths, paths_to_reads2 = reads_path_unmapped)
-                reads.SPAdes(output_folder = ['read_collections', genome_name])
+                reads.SPAdes(output_folder = ['read_collections', genome_name], mem_num_gigs = use_mem_gigs)
                 # a dict of paths to contigs per region
                 aligner = Structure.Aligner(genome)
                 unmappedfasta = os.path.sep.join(['read_collections', 
