@@ -68,6 +68,36 @@ def cpu_count():
     except (KeyError, ValueError):
         pass
 
+def get_available_memory(info_file = '/proc/meminfo'):
+    '''Get free memory (GB) in systems with a /proc/meminfo'''
+    try:
+        meminfo = open(info_file).readlines()
+    except IOError:
+        print('Could not open file for collecting memory status: {}'.format(info_file))
+        return(None)
+    
+    total = -1
+    free = -1
+    buffers = -1
+    cache = -1
+    for line in meminfo:
+        if 'MemTotal' in line:
+            total = float(line.split(' ')[-2])/1048576
+        elif 'MemFree' in line:
+            free = float(line.split(' ')[-2])/1048576
+        elif 'Buffers' in line:
+            buffers = float(line.split(' ')[-2])/1048576
+        elif 'Cached' in line:
+            cache = float(line.split(' ')[-2])/1048576
+    
+    e = 'Problems parsing {}:\n{}\n'.format(info_file, ''.join(meminfo))
+    assert -1 not in (total, free, buffers, cache), e
+    
+    available = free + buffers + cache
+    print('Memory available: {:.2f} GB, ({:.2f} + {:.2f} + {:.2f}) of {:.2f} GB'.format(available, free, buffers, cache, total))
+    return(available)
+
+
 def decide_max_processes(max_cpus):
     '''
     decide how many CPUs to use
