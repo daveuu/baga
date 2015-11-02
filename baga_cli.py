@@ -651,6 +651,68 @@ parser_ApplyFilters.add_argument('-i', "--path_to_rearrangements_info",
     type = str)
 
 
+parser_CheckLinkage = subparser_adder.add_parser('CheckLinkage',
+                formatter_class = argparse.RawDescriptionHelpFormatter,
+                description = textwrap.fill('Check for alleles on the same \
+read or read pair (fragment; and therefore the same chromosomes) called at \
+polymorphisms in a sample of pooled genomic DNA. Infrequent co-incidence of \
+variants on the same read in nearby polymorphisms implies variants occuring in \
+different genomes in the sample (separate lineages) and has been described as a \
+"multidiverse" signature in:\n\n\
+Lieberman, T. D., Flett, K. B., Yelin, I., Martin, T. R., McAdam, A. J., Priebe, G. P. & Kishony, R. \n\
+Genetic variation of a bacterial pathogen within individuals with cystic fibrosis provides a record of selective pressures.\n\
+Nature Genetics, 2013, 46, 82-87.',
+                                            text_width,
+                                            replace_whitespace = False),
+                epilog = textwrap.fill('The linkage checker is expected to \
+operate on a short reads aligned to a genome and the corresponding variants. \
+These can be provided by a previous BAGA analysis or by providing paths to BAM \
+and VCF files. \
+\n\n\
+Example usages:\n\
+%(prog)s --genome_name FM209186.1 --reads_name Liverpool --check\n\
+%(prog)s --alignments_path path/to/my/bams --vcfs_path path/to/my/vcfs --check --genome_name FM209186.1\n', 
+text_width, replace_whitespace = False))
+
+mutually_exclusive_group = parser_CheckLinkage.add_mutually_exclusive_group(required=True)
+
+mutually_exclusive_group.add_argument('-n', "--reads_name", 
+    help = "name of read datasets group if processed by PrepareReads and AlignReads options. Should match --reads_name option used previously",
+    type = str)
+
+mutually_exclusive_group.add_argument('-a', "--alignment_paths", 
+    help = "path to paired-end short read alignments to a reference genome. If a directory path(s) is provided, all *.BAM and *.bam files will be included. A list of filenames with full path or with *, ? or [] characters can also be provided (with unix-style pathname pattern expansion for the latter)",
+    type = str,
+    nargs = '+',
+    metavar = 'PATH_TO_BAMs')
+
+parser_CheckLinkage.add_argument('-g', "--genome_name", 
+    help = "Name of genome obtained by the CollectData option and if the BAGA variant calling pipeline was used, the same genome used with AlignReads and CallVariants options",
+    type = str,
+    required=True)
+
+parser_CheckLinkage.add_argument('-p', "--vcf_paths", 
+    help = "path to vcf files. If a directory path(s) is provided, all *.VCF and *.vcf files will be included. A list of filenames with full path or with *, ? or [] characters can also be provided (with unix-style pathname pattern expansion for the latter)",
+    type = str,
+    nargs = '+',
+    metavar = 'PATH_TO_VCFs')
+
+parser_CheckLinkage.add_argument('-c', "--check", 
+    help = "check variant linkage on paired reads (fragments) in a pooled dataset",
+    action = 'store_true')
+
+parser_CheckLinkage.add_argument('-S', "--include_samples", 
+    help = "Restrict checking to these samples else if omitted, all samples are checked.",
+    type = str,
+    nargs = '+',
+    metavar = 'SAMPLE_NAME')
+
+parser_CheckLinkage.add_argument('-F', "--force", 
+    help = "overwrite existing files when using --collect/-C.",
+    action = 'store_true',
+    default = False)
+
+
 parser_ComparativeAnalysis = subparser_adder.add_parser('ComparativeAnalysis',
                 formatter_class = argparse.RawDescriptionHelpFormatter,
                 description = textwrap.fill('Build multiple sequence alignments \
@@ -2099,6 +2161,126 @@ if args.subparser == 'ApplyFilters':
 
                 
         
+
+### Check Linkage ###
+
+if args.subparser == 'CheckLinkage':
+    print('\n-- Check Linkage (part of the Variant Calling module) --\n')
+    # required input: paths to corresponding VCFs and BAMs
+    # which baga objects contain that information?
+    from baga import CollectData
+    use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
+    from baga import CallVariants
+    if args.reads_name:
+        # allegedly works in 2 and 3
+        raise NotImplementedError('Waiting for pooled samples to be implemented in baga.CallVariants. Use --vcf_paths --alignment_paths instead')
+        # part of baga pipeline
+        if not args.genome_name:
+            parser.error('--genome_name/-g is required with --reads_name/-n. (The baga CollectData-processed genome used with the AlignReads option)')
+        
+        # in this case, don't need to load the genome, just have its sanitised name
+        # e = 'Could not locate a saved baga.CollectData.Genome-<genome_name>.baga for name given: {}'.format(args.genome_name)
+        # assert all([use_path_genome,use_name_genome]), e
+        # allow for multiple rounds of recalibration at end of CallVariants i.e., 1 or 2 and select 2 if available
+        # sometimes the baga from the previous step in the pipeline is not actually needed
+        # so this name and file check could be relaxed
+        use_path_reads,use_name_reads = check_baga_path('baga.PrepareReads.Reads', args.reads_name)
+        e = 'Could not locate a saved baga.PrepareReads.Reads-<reads_name>.baga for reads group given: {}'.format(these_reads)
+        assert all([use_path_reads,use_name_reads]), e
+        alns_name = '__'.join([use_name_reads, use_name_genome])
+        
+        filein = 'baga.CallVariants.Caller-{}.baga'.format(alns_name)
+        caller = CallVariants.Caller(baga = filein)
+        
+        if hasattr(caller, 'path_to_hardfiltered_SNPs') and hasattr(caller, 'path_to_hardfiltered_INDELs'):
+            # only one for VCFs so no overwriting
+            VCFs = [caller.path_to_hardfiltered_SNPs[-1], caller.path_to_hardfiltered_INDELs[-1]]
+        elif hasattr(caller, 'path_to_unfiltered_VCF'):
+            print('WARNING: path to GATK hardfiltered variants not found in {}'.format(filein))
+            print('It is recommended to complete the GATK variant calling with the CallVariants module')
+            VCFs = [caller.path_to_unfiltered_VCF[-1]]
+        elif hasattr(caller, 'paths_to_raw_gVCFs'):
+            print('WARNING: path to GATK joint called variants not found in {}'.format(filein))
+            print('It is recommended to complete the GATK variant calling with the CallVariants module')
+            VCFs = caller.paths_to_raw_gVCFs[-1]
+        else:
+            print('WARNING: path to GATK called variants not found in {}'.format(filein))
+            sys.exit('It seems the analysis described in {} is incomplete. Try completing or rerunning using the CallVariants module'.format(filein))
+        
+        print('Loading alignments information for: {}__{} from AlignReads output'.format(use_name_group, use_name_genome))
+        from baga import AlignReads
+        alignments = AlignReads.SAMs(baga = 'baga.AlignReads.SAMs-{}__{}.baga'.format(use_name_group, use_name_genome))
+        
+        e = 'the reads for "--reads_name/-n {}" seem to not have been fully processed by the AlignReads module: they are missing the "ready_BAMs" attribute. Please ensure the AlignReads commands "--align --deduplicate --indelrealign" have been performed.'.format(args.reads_name)
+        assert hasattr(alignments, 'ready_BAMs'), e
+        ### shouldn't all BAMs have headers parsed and stored in dict with (sample,genome) from the start?
+        BAMs = alignments.ready_BAMs[-1]
+        sample_names = sorted(alignments.read_files)
+        # check on requested samples: crop BAMs accordingly <== and VCFs, and what about sample matching . . .
+        if args.include_samples:
+            if not args.reads_name:
+                # need sample names so will parse BAMs
+                import pysam
+                sample_names = {}
+                for BAM in BAMs:
+                    sample_names[pysam.Samfile(BAM, 'rb').header['RG'][0]['ID']] = BAM
+            
+            missing_labels = sorted(set(args.include_samples) - set(sample_names))
+            found_labels = sorted(set(args.include_samples) & set(sample_names))
+            e = ['None of the requested sample labels were found among the previously checked reads.']
+            e += ['Requested: {}'.format(', '.join(args.include_samples))]
+            e += ['Available: {}'.format(', '.join(sorted(sample_names)))]
+            assert len(found_labels), '\n'.join(e)
+            
+            if len(missing_labels):
+                print('WARNING: could not find the following requested samples among previously checked reads.')
+                print(', '.join(missing_labels))
+            
+            # update BAMs for args.check
+            print(BAMs)
+            if not args.reads_name:
+                BAMs = [sample_names[sample] for sample in found_labels]
+            else:
+                BAMs = [BAM for BAM in BAMs if BAM.split(os.path.sep)[-1].split('__')[0] in found_labels]
+            
+            print(BAMs)
+            # update sample_names for arg.plot
+            sample_names = sorted(found_labels)
+            
+    else:
+        # list of folders or files provided in args.vcf_paths
+        VCFs = []
+        for path in args.vcf_paths:
+            if os.path.isdir(path):
+                path_contents = os.listdir(path)
+                theseVCFs = [os.path.sep.join([path,f]) for f in path_contents if f[-3:] in ('VCF', 'vcf')]
+                e = 'No VCF files (*.vcf or *.VCF) found in:\n{}'.format(args.alignment_paths)
+                assert len(theseVCFs), e
+                VCFs += theseVCFs
+            else:
+                # add file
+                VCFs += [path]
+        print('Loaded VCF locations:\n{}'.format('\n'.join(VCFs)))
+        BAMs = []
+        for path in args.alignment_paths:
+            if os.path.isdir(path):
+                path_contents = os.listdir(path)
+                theseBAMs = [os.path.sep.join([path,f]) for f in path_contents if f[-3:] in ('BAM', 'bam')]
+                e = 'No BAM files (*.bam or *.BAM) found in:\n{}'.format(args.alignment_paths)
+                assert len(theseBAMs), e
+                BAMs += theseBAMs
+            else:
+                # add file
+                BAMs += [path]
+        print('Loaded BAM locations:\n{}'.format('\n'.join(BAMs)))
+        print('Loading genome %s' % use_name_genome)
+        genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
+    
+    if args.check:
+        linkage_checker = CallVariants.Linkage(genome = genome, vcf_paths = VCFs, alignment_paths = BAMs)
+        linkage_checker.doLinkageCheck()
+    else:
+        print('use --check to actually fo the checking . . .')
 
 if args.subparser == 'ComparativeAnalysis':
     print('\n-- Comparative Analyses --\n')

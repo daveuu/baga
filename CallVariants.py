@@ -43,6 +43,7 @@ from baga import _json
 from baga import _time
 
 # external Python modules
+import pysam as _pysam
 from Bio import SeqIO as _SeqIO
 from Bio.Seq import Seq as _Seq
 from Bio.SeqRecord import SeqRecord as _SeqRecord
@@ -762,6 +763,7 @@ class Filter:
         '''
         A CallVariants.Filter object must be instantiated with:
             - a list of paths to VCF files
+            - a CollectData genome object
         '''
         
         e = 'Could not find %s.\nPlease ensure all files exist'
@@ -1032,6 +1034,1184 @@ class Filter:
 
         self.reportFiltered()
 
+class Linkage:
+    '''Methods to measure co-incidence of alleles on the same reads or fragments.
+
+    Currently baga.CollectData.Genome only supports single chromosome genomes
+    This test should be run separately for each reference genome (chromosome) against which 
+    reads are mapped against.
+
+    Alleles on the same reads (and therefore same chromosomes) called at 
+    polymorphisms in a sample of pooled genomic DNA. Infrequent co-incidence of 
+    variants on the same read in nearby polymorphisms implies variants occuring 
+    in different genomes in the sample (separate lineages) and has been described 
+    as a "multidiverse" signature in:
+
+    Lieberman, T. D., Flett, K. B., Yelin, I., Martin, T. R., McAdam, A. J., Priebe, 
+    G. P. & Kishony, R. 
+    Genetic variation of a bacterial pathogen within individuals with cystic 
+    fibrosis provides a record of selective pressures.
+    Nature Genetics, 2013, 46, 82-87
+    '''
+    def __init__(self, vcf_paths = False, 
+                       alignment_paths = False, 
+                       genome = False, 
+                       baga = False):
+        """
+        Instatiate a baga.CallVariants.Linkage object.
+        
+        Requires either:
+        - a list of baga genomes (current implementation means: chromosomes)
+        (genomes = )
+        - a list of BAM file paths (alignment_paths = )
+        - a list to VCF file paths (VCF_paths = )
+        or
+        - a path to a saved baga.CallVariants.Linkage object (baga =)
+        """
+        
+        e = 'Instantiate with an alignment object and paths to VCF files or ' + \
+        'a previously saved Caller'
+        assert ((genome and alignment_paths and vcf_paths) and not baga) or \
+               (not (genome and alignment_paths and vcf_paths) and baga), e
+        
+        if alignment_paths:
+            e = 'Could not find file: "%s".\nPlease ensure all files exist'
+            for VCF in vcf_paths:
+                assert _os.path.exists(VCF), e % VCF
+            
+            self.VCF_paths = vcf_paths
+            
+            for BAM in alignment_paths:
+                assert _os.path.exists(BAM), e % BAM
+            
+            self.alignment_paths = alignment_paths
+            
+            self.genome = genome
+        
+        elif baga:
+            with _tarfile.open(baga, "r:gz") as tar:
+                for member in tar:
+                    contents = _StringIO(tar.extractfile(member).read())
+                    try:
+                        # either json serialised conventional objects
+                        contents = _json.loads(contents.getvalue())
+                    except ValueError:
+                        #print('json failed: {}'.format(member.name))
+                        # or longer python array.array objects
+                        contents = _array('c', contents.getvalue())
+                    
+                    setattr(self, member.name, contents)
+
+    def saveLocal(self, name):
+        '''
+        Save processed baga object info to a local compressed pickle file.
+        
+        'name' should exclude extension: .baga will be added
+        '''
+        fileout = 'baga.CallVariants.Linkage-%s.baga' % name
+        with _tarfile.open(fileout, "w:gz") as tar:
+            print('Writing to {} . . . '.format(fileout))
+            for att_name, att in self.__dict__.items():
+                if isinstance(att, _array):
+                    io = _StringIO(att.tostring())
+                    io.seek(0, _os.SEEK_END)
+                    length = io.tell()
+                    io.seek(0)
+                    thisone = _tarfile.TarInfo(name = att_name)
+                    thisone.size = length
+                    tar.addfile(tarinfo = thisone, fileobj = io)
+                else:
+                    # try saving everything else here by jsoning
+                    try:
+                        io = _StringIO()
+                        _json.dump(att, io)
+                        io.seek(0, _os.SEEK_END)
+                        length = io.tell()
+                        io.seek(0)
+                        thisone = _tarfile.TarInfo(name = att_name)
+                        thisone.size = length
+                        tar.addfile(tarinfo = thisone, fileobj = io)
+                    except TypeError:
+                        # ignore non-jsonable things like functions
+                        # include unicodes, strings, lists etc etc
+                        #print('omitting {}'.format(att_name))
+                        pass
+
+    def parsePooledVCF(self, minGQ = 0):
+        '''extract variant information from a VCF with ploidy > 1 e.g. pooled'''
+
+        def do_type(v):
+          try:
+            return int(v)
+          except ValueError:
+            try:
+              return float(v)
+            except ValueError:
+              return v
+
+        pooled_variants = {}
+
+        for VCF in self.VCF_paths:
+            header, header_section_order, colnames, variants = parseVCF(VCF)
+            headerdict = dictify_vcf_header(header)
+            these_variants = {}
+            for variantline in variants:
+                chrm, pos, x, ref_char, alt_chars, s, filter_status, info1, info2keys, info2values = variantline.rstrip().split('\t')
+                if filter_status == 'PASS':
+                    # parse VCF line
+                    info1_extra = set([a for a in info1.split(';') if '=' not in a])
+                    info1 = dict([a.split('=') for a in info1.split(';') if '=' in a])
+                    del info1['set']
+                    info2 = dict(zip(info2keys.split(':'),info2values.split(':')))
+                    allinfo = {}
+                    for k,v in info1.items()+info2.items():
+                        allinfo[k] = do_type(v)
+                    # first in list is ref, others are alts
+                    allinfo['reference'] = ref_char
+                    allinfo['variants'] = alt_chars.split(',')
+                    allinfo['extra'] = set(info1_extra)
+                    allinfo['GT'] = tuple(map(int,allinfo['GT'].split('/')))
+                    ### set stringency here: Phred-scaled confidence for GT 
+                    ### <10 is <90%, <20 is <99%, >20 is generally desirable
+                    ### however GT isn't well suited to the artificially high
+                    ### ploidy samples containing e.g. >10 samples because
+                    ### of the greater demand on precision versus presence/absence
+                    ### i.e. a low GQ for a 20/40 SNP doesn't imply the SNP call
+                    ### itself is a false positive
+                    if allinfo['GQ'] >= minGQ:
+                        try:
+                            these_variants[chrm][int(pos)] = allinfo
+                        except KeyError:
+                            these_variants[chrm] = {}
+                            these_variants[chrm][int(pos)] = allinfo
+            
+            pooled_variants[VCF] = these_variants
+                
+        self.pooled_variants = pooled_variants
+
+
+
+    def collectAdjacentPolymorphisms(self, dist = 1000):
+        '''collect polymorphsims within a specific distance on chromosome'''
+
+        clusters = {}
+        for VCF,chromosomes in sorted(self.pooled_variants.items()):
+            clusters[VCF] = {}
+            for chromosome,variants in chromosomes.items():
+                positions = sorted(variants)
+                done = set()
+                these_clusters = []
+                for n,p1 in enumerate(positions):
+                    this_cluster = []
+                    for p2 in positions[(n+1):]:
+                        if p2 - p1 < dist:
+                            this_cluster += [p2]
+                        else:
+                            if len(this_cluster) > 0:
+                                this_cluster += [p1]
+                                this_cluster = sorted(set(this_cluster) - done)
+                                if len(this_cluster) > 0:
+                                    if len(this_cluster) == 1:
+                                        this_cluster += [these_clusters[-1][-1]]
+                        
+                                    these_clusters += [sorted(this_cluster)]
+                                    done.update(this_cluster)
+                            break
+                
+                clusters[VCF][chromosome] = these_clusters
+
+        self.clusters = clusters
+
+    def check_loci_in_read(self, check_loci_pos1, refseq, refread0_to_varread0, chrm1_to_refread0, r):
+        '''Check coincidence of alleles on single reads from pooled gDNA samples'''
+        alleles_per_loci = {}
+        for n,(locus_pos1,alleles) in enumerate(check_loci_pos1):
+            ref_char = alleles[0]
+            var_chars = alleles[1:]
+            
+            ## get this aligned region of ref chromosome
+            # (equivalent to read without any variant positions)
+            # start position first
+            refread_start0 = chrm1_to_refread0[locus_pos1]
+            # end of each piece is either next variant or the end of the sequence
+            if n == len(check_loci_pos1) - 1:
+                # this is last variant: select to end of alignment (of a read with no variants)
+                refread_end0 = len(refseq) - 1
+            else:
+                # next variant does not align in a read if it is spanned by a deletion
+                # at this or another variant <== not tested yet
+                # ==> if long del absent: no problem; if del present, r.reference_end
+                # will be extended because it is defined by the length of alignment, not
+                # read length
+                refread_end0 = chrm1_to_refread0[check_loci_pos1[n+1][0]]
+                len(chrm1_to_refread0)
+            
+            this_piece_ref = str(refseq[refread_start0:refread_end0])
+            
+            ## get this aligned region of read using provided alignment
+            # (containing none, some or all variants in an unknown combination of alleles
+            # for comparison with refread)
+            # start of a slice is at pos0
+            # If var read has a deletion at start of this segment, those positions will
+            # be without key (refread0 index) in refread0_to_varread0 because no
+            # homologous sequence in refread0.
+            # To collect appropriate, variant-containing, segment from r.query_sequence
+            # as a slice: refread0-1 => varread0; then varread0+1 is correct slice start.
+            # If var read has an insertion at start of this segment, those positions
+            # will be without value (varread0 index) in refread0_to_varread0 because no
+            # homologous sequence in varread0.
+            # to collect appropriate, variant-containing, segment from r.query_sequence
+            # as a slice: refread0-1 => varread0; then varread0+1 is correct slice start.
+            
+            if refread_start0 == 0:
+                # for SNPs at first position
+                varread_start0 = refread0_to_varread0[refread_start0]
+            else:
+                try:
+                    # this should fail on indels without: -1 in ref index, +1 in read index
+                    varread_start0 = refread0_to_varread0[refread_start0-1]+1
+                except KeyError:
+                    alleles_per_loci[locus_pos1] = 'noisy segment: unexpected read alignment'
+                    continue
+            
+            try:
+                # Fail e.g. 1) deletion up to end -1 of read causes
+                # refread0_to_varread0[refread_end0-1]+1 to fail, just omitting -1 +1
+                # fixes this.
+                # Not encountered: if next variant is a deletion, the pos0 ending slice 
+                # will be at a position not aligned between ref and read, so -1 +1 also
+                # needed (did offsetting indels cause this?).
+                varread_end0 = refread0_to_varread0[refread_end0-1]+1
+            except KeyError:
+                varread_end0 = refread0_to_varread0[refread_end0]
+            
+            # Other failures outside of this should be due to noisy reads and can be
+            # ignored (i.e., store read as noisy).
+            this_piece_read = r.query_sequence[varread_start0:varread_end0]
+            this_piece_read_qualities = r.query_qualities[varread_start0:varread_end0]
+            # A) does ref segment == (naive) read segment?
+            variant_found = False
+            if this_piece_ref == this_piece_read:
+                # no variants here, record as so, then continue to next segement
+                if all([len(char) == 1 for char in var_chars]):
+                    alleles_per_loci[locus_pos1] = 'no mutation'
+                else:
+                    # revert position to pre-indel as in VCFs for recording
+                    alleles_per_loci[locus_pos1-1] = 'no mutation'
+                continue
+                
+            else:
+                # This bit applies the actual changes: which variant (allele) makes ref
+                # segment == var segment?
+                # For reads of a population, need to try each allele to see if any match
+                allele_found = False
+                for var_char in var_chars:
+                    # Test the region affected by latest varinat only (independent from
+                    # prior variants).
+                    # This work for insertions i.e. replace '' at start of ref segment
+                    # does the insertion at the beginning.
+                    this_piece_ref_with_var = this_piece_ref.replace(ref_char, var_char, 1)
+                    # Is mutated refseq like the read? (aligned bit of chromosome plus
+                    # leading unaligned bit after mutation i.e., variant present)
+                    # initial compare lengths.
+                    if len(this_piece_ref_with_var) != len(this_piece_read):
+                        # This variant not here, check next variant (allele)
+                        # Assume because this allele is absent but could also be because
+                        # of apparent mutation elsewhere in segment (noise because wasn't
+                        # called across all the reads in the 'pileup')
+                        continue
+                    else:
+                        # given equal length after 'mutating' ref, after omitting low
+                        # confidence positions, does ref segment with variant applied
+                        # equal read segment?
+                        this_piece_ref_with_var_qualpass = []
+                        this_piece_read_qual_pass = []
+                        for i,(char,qual) in enumerate(zip(this_piece_read, this_piece_read_qualities)):
+                            if qual >= 20:
+                                this_piece_read_qual_pass += [char]
+                                this_piece_ref_with_var_qualpass += [this_piece_ref_with_var[i]]
+                            else:
+                                # these will be invisible in comparison
+                                this_piece_read_qual_pass += ['-']
+                                this_piece_ref_with_var_qualpass += ['-']
+                        
+                        this_piece_read_qual_pass = ''.join(this_piece_read_qual_pass)
+                        this_piece_ref_with_var_qualpass = ''.join(this_piece_ref_with_var_qualpass)
+                        if this_piece_read_qual_pass == this_piece_ref_with_var_qualpass:
+                            # this is the variant here, record locus and allele of this variant
+                            allele_found = True
+                            if all([len(char) == 1 for char in var_chars]):
+                                alleles_per_loci[locus_pos1] = var_char
+                            else:
+                                # revert position to pre-indel as in VCFs for recording
+                                alleles_per_loci[locus_pos1-1] = var_char
+                            # pieces_this_read += [this_piece_read]
+                            # on to next segment
+                            break
+                        else:
+                            # this variant not here, check next variant (allele)
+                            # assume because this allele is absent but could also be
+                            # because of apparent mutation elsewhere in segment (noise
+                            # because wasn't called across all the reads in the 'pileup')
+                            continue
+                
+                # This bit is currently assuming noise in an earlier segment is only a
+                # problem for that segment: not later segements.
+                # Previously, whole read abandoned.
+                if not allele_found:
+                    if all([len(char) == 1 for char in var_chars]):
+                        alleles_per_loci[locus_pos1] = 'noisy segment: undetermined'
+                    else:
+                        # revert position to pre-indel as in VCFs for recording
+                        alleles_per_loci[locus_pos1-1] = 'noisy segment: undetermined'
+
+        return(alleles_per_loci)
+    def check_within_frags(self, spanning_frags, corrected_indel_alleles, these_reads, these_reads_bypos0_indel_offsets, minMappingQuality = 60):
+        '''Check coincidence of alleles on paired reads (fragements) from pooled gDNA samples'''
+        alleles_per_loci_per_frag = {}
+        for fragID in spanning_frags:    # break
+            r1 = these_reads[fragID, True]
+            r2 = these_reads[fragID, False]
+            # check alignment quality is adequate
+            if r1.mapq < minMappingQuality or r2.mapq < minMappingQuality:
+                alleles_per_loci_per_frag[fragID] = 'low quality alignment'
+                continue
+            
+            # 1) b) trim out read-aligned region of chromosome for attempting to apply all
+            # reported variants and recording which are present.
+            refseq1 = str(self.genome.sequence[r1.reference_start:r1.reference_end].tostring())
+            refseq2 = str(self.genome.sequence[r2.reference_start:r2.reference_end].tostring())
+            # 2) a) convert base-1 chromosome index of variant to base-0 read as aligned to
+            # chromosome forward strand ==> a position mapping dictionary chrm1_to_refread0.
+            chrm1_to_refread0_r1 = dict(zip(range(r1.reference_start+1,r1.reference_end+1),
+                                            range(r1.reference_end-r1.reference_start)))
+            refread0_to_chrm1_r1 = dict([(v,k) for k,v in chrm1_to_refread0_r1.items()])
+            varread0_to_chrm1_r1 = dict(
+                [(read0,chrm0+1) for read0,chrm0 in r1.aligned_pairs if \
+                None not in (read0,chrm0)])
+            chrm1_to_varread0_r1 = dict(
+                [(chrm0+1,read0) for read0,chrm0 in r1.aligned_pairs if \
+                None not in (read0,chrm0)])
+            varread0_to_refread0_r1 = dict(
+                [(read0,chrm1_to_refread0_r1[chrm0+1]) for read0,chrm0 in r1.aligned_pairs if \
+                None not in (read0,chrm0)])
+            refread0_to_varread0_r1 = dict(
+                [(chrm1_to_refread0_r1[chrm0+1],read0) for read0,chrm0 in r1.aligned_pairs if \
+                None not in (read0,chrm0)])
+            
+            chrm1_to_refread0_r2 = dict(zip(range(r2.reference_start+1,r2.reference_end+1),
+                                            range(r2.reference_end-r2.reference_start)))
+            refread0_to_chrm1_r2 = dict([(v,k) for k,v in chrm1_to_refread0_r2.items()])
+            varread0_to_chrm1_r2 = dict(
+                [(read0,chrm0+1) for read0,chrm0 in r2.aligned_pairs if \
+                None not in (read0,chrm0)])
+            chrm1_to_varread0_r2 = dict(
+                [(chrm0+1,read0) for read0,chrm0 in r2.aligned_pairs if \
+                None not in (read0,chrm0)])
+            varread0_to_refread0_r2 = dict(
+                [(read0,chrm1_to_refread0_r2[chrm0+1]) for read0,chrm0 in r2.aligned_pairs if \
+                None not in (read0,chrm0)])
+            refread0_to_varread0_r2 = dict(
+                [(chrm1_to_refread0_r2[chrm0+1],read0) for read0,chrm0 in r2.aligned_pairs if \
+                None not in (read0,chrm0)])
+            
+            # 2) b) collect polymorphic loci with alleles potentially in this read
+            # can be multiple alleles per locus
+            # confirm at least 2 polymorphic loci are spanned by this read
+            
+            these_pos0 = [pos0 for pos0,rIDs in these_reads_bypos0_indel_offsets.items() if \
+                                ((fragID, True) in rIDs) or ((fragID, False) in rIDs)]
+            if len(these_pos0) < 2:
+                print(
+                '*** problem with this read: spans {} variants ***'.format(
+                                                                len(these_pos0))
+                )
+            
+            # Collect the adjusted strings where indels occurred (omit the preceeding,
+            # identical character) for this read.
+            check_loci_pos1 = sorted(
+                [(pos1,these_allele_strings) for pos1,these_allele_strings in \
+                corrected_indel_alleles.items() if \
+                pos1-1 in these_pos0])
+            
+            # 5) apply SNPs and indels to aligned region of chromosome and compare with
+            # each query read sequence:
+            # Compile list of read segments the first of which is always like reference
+            # and starts list.
+            # Then check each subsequent for variants at start.
+            # Slicing at ORF0 position includes each ORF0 position at beginning of each
+            # piece.
+            # pieces_orig = [str(refseq[:chrm1_to_refread0[check_loci_pos1[0][0]]])]
+            # pieces_this_read = [str(refseq[:chrm1_to_refread0[check_loci_pos1[0][0]]])]
+            
+            # some noisy reads might still cause exceptions but need to double check which
+            # exceptions are due to noise/alignment ambiguity . . 
+            
+            check_loci_pos1_use = [(pos1,alleles) for pos1,alleles in check_loci_pos1 if \
+                                    pos1 in chrm1_to_refread0_r1]
+            alleles_per_loci_r1 = self.check_loci_in_read(check_loci_pos1_use, 
+                                                          refseq1, 
+                                                          refread0_to_varread0_r1, 
+                                                          chrm1_to_refread0_r1, 
+                                                          r1)
+            
+            check_loci_pos1_use = [(pos1,alleles) for pos1,alleles in check_loci_pos1 if \
+                                    pos1 in chrm1_to_refread0_r2]
+            alleles_per_loci_r2 = self.check_loci_in_read(check_loci_pos1_use, 
+                                                          refseq2, 
+                                                          refread0_to_varread0_r2, 
+                                                          chrm1_to_refread0_r2, 
+                                                          r2)
+            
+            # There shouldn't now be any 'empty' results: all polymorphic loci should
+            # report be either 'no mutation', 'noisy' or the allele.
+            alleles_per_loci_per_frag[fragID] = dict(alleles_per_loci_r1.items() + \
+                                                     alleles_per_loci_r2.items())
+
+        return(alleles_per_loci_per_frag)
+    def check_within_reads(self, spanning_reads, corrected_indel_alleles, these_reads, these_reads_bypos0_indel_offsets, minMappingQuality = 60):
+        '''
+        Check coincidence of alleles on single reads from pooled gDNA samples
+
+        Reads may be from paired-end fragments
+        '''
+        alleles_per_loci_per_read = {}
+        for fragID, is_read1 in spanning_reads:
+            r = these_reads[fragID, is_read1]
+            # Check alignment quality is adequate
+            if r.mapq < minMappingQuality:
+                alleles_per_loci_per_read[(fragID, is_read1)] = 'low quality alignment'
+                continue
+            
+            # 1) b) trim out read-aligned region of chromosome for attempting to apply
+            # all reported variants and recording which are present.
+            refseq = str(self.genome.sequence[r.reference_start:r.reference_end].tostring())
+            # 2) a) convert base-1 chromosome index of variant to base-0 read as
+            # aligned to chromosome forward strand ==> a position mapping dictionary
+            # chrm1_to_refread0.
+            #
+            # reference_start = 0-based leftmost coordinate == left end of slice
+            # reference_end = aligned reference position of the read on the reference genome
+            # reference_end = aend which points to one past the last aligned
+            # residue == right end of a (pos0) slice.
+            # r.reference_start,r.reference_end form a python slice as prepared by
+            # pySAM, not an inclusive list of indexes.
+            # range(5) == [0,1,2,3,4]
+            # range(range5[0]+1,range5[-1]+2) == [1,2,3,4,5]
+            # range(1,4)
+            # range(3) == [0,1,2,3,4][0:3] == [0,1,2]
+            #
+            # r.qstart not necessary here because this is 'ref read'; r.qstart is
+            # accounted for by using r.aligned_pairs below (I think... non-0 r.qstart not tested)
+            chrm1_to_refread0 = dict(zip(range(r.reference_start+1,r.reference_end+1),
+                                         range(r.reference_end-r.reference_start)))
+            refread0_to_chrm1 = dict([(v,k) for k,v in chrm1_to_refread0.items()])
+            # Using the pysam-supplied .aligned_pairs
+            # (22, 4015415),
+            # (23, None),         <== omit from dicts
+            # (24, 4015416),
+            varread0_to_chrm1 = dict(
+                    [(read0,chrm0+1) for read0,chrm0 in r.aligned_pairs if \
+                    None not in (read0,chrm0)])
+            chrm1_to_varread0 = dict(
+                    [(chrm0+1,read0) for read0,chrm0 in r.aligned_pairs if \
+                    None not in (read0,chrm0)])
+            varread0_to_refread0 = dict(
+                    [(read0,chrm1_to_refread0[chrm0+1]) for read0,chrm0 in r.aligned_pairs if \
+                    None not in (read0,chrm0)])
+            refread0_to_varread0 = dict(
+                    [(chrm1_to_refread0[chrm0+1],read0) for read0,chrm0 in r.aligned_pairs if \
+                    None not in (read0,chrm0)])
+            
+            # 2) b) collect polymorphic loci with alleles potentially in this read.
+            # Can be multiple alleles per locus.
+            # Confirm at least 2 polymorphic loci are spanned by this read.
+            these_pos0 = [pos0 for pos0,rIDs in these_reads_bypos0_indel_offsets.items() if (fragID, is_read1) in rIDs]
+            ### reads always span a maximum of two variants even when total to check is >>2
+            #print('len(these_pos0) == {}; len(these_reads_bypos0_indel_offsets) == {}'.format(len(these_pos0), len(these_reads_bypos0_indel_offsets)))
+            ### more than two screw up check_loci_in_read() but never seems to happen
+
+            if len(these_pos0) < 2:
+                print(
+                '*** problem with this read: spans {} variants ***'.format(
+                                                                len(these_pos0))
+                )
+            
+            # Collect the adjusted strings where indels occurred (omit the preceeding,
+            # identical character) for this read.
+            check_loci_pos1 = sorted(
+                [(pos1,these_allele_strings) for pos1,these_allele_strings in \
+                corrected_indel_alleles.items() if \
+                pos1-1 in these_pos0])
+            
+            #print('len(check_loci_pos1) == {}'.format(len(check_loci_pos1)))
+            
+            # 5) apply SNPs and indels to aligned region of chromosome and compare with
+            # each query read sequence:
+            # Compile list of read segments the first of which is always like reference
+            # and starts list.
+            # Then check each subsequent for variants at start.
+            # Slicing at ORF0 position includes each ORF0 position at beginning of each piece
+            # pieces_orig = [str(refseq[:chrm1_to_refread0[check_loci_pos1[0][0]]])]
+            # pieces_this_read = [str(refseq[:chrm1_to_refread0[check_loci_pos1[0][0]]])]
+            
+            # some noisy reads might still cause exceptions but need to double check which
+            # exceptions are due to noise/alignment ambiguity . . 
+            alleles_per_loci = self.check_loci_in_read(check_loci_pos1, 
+                                                       refseq, 
+                                                       refread0_to_varread0, 
+                                                       chrm1_to_refread0, 
+                                                       r)
+            # there shouldn't now be any 'empty' results: all polymorphic loci should
+            # report be either 'no mutation', 'noisy' or the allele.
+            alleles_per_loci_per_read[fragID, is_read1] = alleles_per_loci
+
+        return(alleles_per_loci_per_read)
+
+    def checkAlignments(self):
+        '''
+        parse BAM files checking for variants on same read or read pair (sequenced fragment)
+
+
+        These notes are 'draft' :-) 
+
+        |-----template_length,query_length---|
+        -R1---\
+        *============*======
+                     \---R2-   if r.is_read2, query_length; pos
+
+
+        if r.is_read1:  r.template_length + r.query_length == r.pnext - r.reference_start
+
+        really same as r.is_read1?
+        if r.is_read2:  r.template_length + r.query_length == r.pnext - r.reference_start
+
+        insert end position
+        r.reference_start + r.template_length
+
+        length of this read
+        r.query_length
+
+        length of other read
+        r.template_length - (r.pnext - r.reference_start)
+
+
+        Track each variant in a read from start to finish building a 1-to-1 mapping of
+        positions. This makes checking presence or absence variants much easier.
+
+        0) with potentially linked variants (pos,(r,q)) and many read/read pairs in hand.
+
+        1) a) collect single reads and fragments to be analysed based on spanning of at
+        least two clustered variants. Then iterate through reads:
+        1) b) trim out read-aligned region of chromosome for attempting to apply all
+        reported variants and recording which are present.
+
+        2) a) convert base-1 chromosome index of variant to base-0 read as aligned to
+        chromosome forward strand ==> a position mapping dictionary chrm1_to_refread0.
+        2) b) collect variants with alleles potentially in this read.
+
+        3) adjust method (position) of indels as reported: position is where indel
+        happened and one string is length zero.
+
+        4) make another mapping dict refread0_to_chrm1: chrm1_to_refread0 and 
+        refread0_to_chrm1 need to be updated as refread0 gets deletions (as varread0 
+        gets insertions)
+
+        5) apply SNPs and indels to query ORF sequence:
+          thisORFseq_variant, 
+          refread0_2_varread0, 
+          varread0_2_refread0 = applyVariantsGetMappings(thisORFseq, 
+                                                         chrm1_to_refread0, 
+                                                         check_variants)
+
+        Variants reported relative to ref read can be converted to position in variant 
+        read and vice versa.
+        '''
+
+        # NB:
+        # pysam is pos0
+        # VCFs are pos1
+
+        # really inserts because read pairs share ID
+        num_reads_by_pos1_indel_offsets = {}
+
+        # by VCF, by chromosome, by cluster, by [reads and/or fragment]
+        polymorphism_linkage_bypop = {}
+
+        # clusters[VCF][chromosome]
+
+        # assumes lists of VCFs and BAMs correspond by name: not checked
+        VCF2BAM = dict(zip(sorted(self.VCF_paths),sorted(self.alignment_paths)))
+
+        for VCF,chromosomes in self.clusters.items():
+            polymorphism_linkage_bypop[VCF] = {}
+            for chromosome,near_vars in chromosomes.items():
+                # Currently baga.CollectData.Genome only supports single chromosome
+                # genomes.
+                # This test should be run separately for each reference genome
+                # (chromosome) mapped against
+                if chromosome != self.genome.id:
+                    polymorphism_linkage_bypop[VCF][chromosome] = {}
+                    print(
+                    "Skipping chromosome {} present in BAM because "
+                    "it doesn't match supplied genome: {}".format(
+                        chromosome, self.genome.id))
+                    continue
+                
+                # 0) with potentially linked variants (pos,(r,q)) and many read/read
+                # pairs in hand . . .
+                print('Collecting variants for {} in {}'.format(chromosome, VCF))
+                ## lists to tuples for use as keys and +1 for indels
+                # # for use as key to check results at the end
+                near_vars_tuples = []
+                # for use in analysing sets of reads                
+                near_vars_indel_offsets = []
+                # for collecting all the required reads
+                to_get_reads_indel_offsets = []
+                corrected_indel_alleles = {}
+                # for getting distance beyond a potential deletion that read needs to span
+                # (not fully implemented yet?)
+                indel_max_allele_lengths = {'del':{},'ins':{}}
+                for these_vars in near_vars:
+                    these_vars_indel_offsets = []
+                    for pos1 in these_vars:
+                        these_allele_strings = self.pooled_variants[VCF][chromosome][pos1]['variants']
+                        longest_length = max(map(len,these_allele_strings))
+                        if longest_length > 1:
+                            to_get_reads_indel_offsets += [pos1+1]
+                            these_vars_indel_offsets += [pos1+1]
+                            corrected_indel_alleles[pos1+1] = [v[1:] for v in these_allele_strings]
+                            
+                            if len(these_allele_strings[0]) > 1:
+                                indel_max_allele_lengths['del'][pos1+1] = len(
+                                                                these_allele_strings[0]
+                                                                            )-1
+                            
+                            if len(these_allele_strings[0]) < longest_length:
+                                indel_max_allele_lengths['ins'][pos1+1] = longest_length-1
+                            
+                        else:
+                            to_get_reads_indel_offsets += [pos1]
+                            these_vars_indel_offsets += [pos1]
+                            corrected_indel_alleles[pos1] = these_allele_strings
+                    
+                    near_vars_indel_offsets += [these_vars_indel_offsets]
+                    near_vars_tuples += [tuple(these_vars)]
+                
+                # get the reads out of the BAM file
+                reads = _pysam.Samfile(VCF2BAM[VCF])
+                # all variants positions
+                these_reads_bypos0_indel_offsets = {}
+                these_reads = {}
+                # Fetch all reads spanning all variant positions for this sample
+                # => some variant positions will span reads from chromosomes with
+                # deletions (which should be indicated in called variants).
+                # -> i)  indels will be treated as occurring at +1 their reported
+                # positions which must be accounted for when collecting reads.
+                # -> ii) deletions will cause alignment length increase, insertions
+                # alignments to ref will decrease in length.
+                # => sometimes a fragment, identifiable by r.qname, appears twice in the
+                # over the region of interest as r.is_read1 and also as r.is_read1.
+                # -> therefore reads must be stored using fragment name (query_name) and
+                # is_read1 (yes or no, if no its read 2).
+                
+                for pos1 in to_get_reads_indel_offsets:
+                    # a pos0 slice from a pos1 index
+                    reads_iter = reads.fetch( chromosome, pos1-1, pos1)
+                    these_reads_bypos0_indel_offsets[pos1-1] = {}
+                    try:
+                        read_end_offset = indel_max_allele_lengths['del'][pos1]
+                    except KeyError:
+                        read_end_offset = 0
+                    
+                    for r in reads_iter:
+                        # filter reads that don't span potential deletions. Need all of
+                        # a potential deletion present within aligned region to replace
+                        # in ref read.
+                        # Rd:        ===========ddddd==
+                        # Rf:    -------------V--------    <== reads must not only span
+                        #                                      V but also beyond end of 
+                        #                                      ddddd like Rd here
+                        if pos1 + read_end_offset <= r.reference_end:
+                            # pos0 end slice == pos1 end inclusive and must be present in
+                            # read alignment.
+                            these_reads_bypos0_indel_offsets[pos1-1][(r.query_name,r.is_read1)] = r
+                            these_reads[(r.query_name,r.is_read1)] = r
+                    
+                    num_reads_by_pos1_indel_offsets[pos1] = len(
+                                                    these_reads_bypos0_indel_offsets[pos1-1])
+                
+                linkages = {}
+                for these_positions,these_positions_indel_offsets in zip(near_vars_tuples,
+                                                                         near_vars_indel_offsets):
+                    # 1) a) collect single reads and fragments to be analysed based on
+                    # spanning of at least two clustered variants.
+                    
+                    # if len(set(these_positions_indel_offsets) & \
+                           # set(indel_max_allele_lengths['ins'])):
+                        # print(
+                        # 'insertion at %s' % ','.join(map(str,
+                                                         # set(these_positions_indel_offsets) & \
+                                                         # set(indel_max_allele_lengths['ins'])
+                                                         # )))
+                    # elif len(set(these_positions_indel_offsets) & \
+                             # set(indel_max_allele_lengths['del'])):
+                        # print(
+                        # 'deletion at %s' % ','.join(map(str,
+                                                        # set(these_positions_indel_offsets) & \
+                                                        # set(indel_max_allele_lengths['del'])
+                                                        # )))
+                    
+                    # This assumes all variants are recorded in near_vars - additional low
+                    # confidence/noise will render reads unusable . . .
+                    # Not if e.g. SNP prevents recognition of mutated ref segment but
+                    # also != without the mutation.
+                    # Collect read pairs spanning at least two variants (potential linkage
+                    # info; either in a single read or both each end of a fragment)
+                    
+                    # sort locus and read info per fragment
+                    read_at_locus_per_frag = _defaultdict(list)
+                    for pos1 in these_positions_indel_offsets:
+                        for fragID, is_read1 in these_reads_bypos0_indel_offsets[pos1-1]:
+                            read_at_locus_per_frag[fragID] += [(pos1,is_read1)]
+                    
+                    read_at_locus_per_frag = dict(read_at_locus_per_frag)
+                    
+                    # collect all reads spanning two or more loci (read 1 or 2)
+                    spanning_reads = []
+                    spanning_frags = []
+                    for fragment, reads in read_at_locus_per_frag.items():
+                        read1s = set()
+                        read2s = set()
+                        for locus,isread1 in reads:
+                            if isread1:
+                                read1s.add(locus)
+                            else:
+                                read2s.add(locus)
+                        
+                        if len(read1s) > 1:
+                            spanning_reads += [(fragment,True)]
+                        
+                        if len(read2s) > 1:
+                            spanning_reads += [(fragment,False)]
+                        
+                        # Some of these fragments will include reads with two loci
+                        # themselves; 
+                        # Will need merging after analyses avoiding double counts of
+                        # linkage etc. Need to ensure each read spans a _different_
+                        # polymorphism if collecting a fragment.
+                        if len(read1s - read2s) >= 1 and len(read2s - read1s) >= 1:
+                            spanning_frags += [fragment]
+                    
+                    spanning_reads = set(spanning_reads)
+                    spanning_frags = set(spanning_frags)
+                    
+                    print('{}:\n\tpositions: {} ({} bp):\n'
+                          '\treads spanning >=2 pos {};\n'
+                          '\tread pairs spanning >=2 pos {};\n'
+                          '\twith >=2 in a read {}'.format(
+                                VCF,
+                                ','.join(map(str,these_positions)),
+                                these_positions[-1]-these_positions[0],
+                                len(spanning_reads),
+                                len(spanning_frags),
+                                len(set([a for a,b in spanning_reads]) & spanning_frags)))
+                    
+                    ## check for linkage of alleles spanned by single reads
+                    alleles_per_loci_per_read = self.check_within_reads(
+                                                        spanning_reads, 
+                                                        corrected_indel_alleles, 
+                                                        these_reads, 
+                                                        these_reads_bypos0_indel_offsets)
+                    
+                    ## check for linkage of alleles spanned by 2 reads of same fragments
+                    alleles_per_loci_per_frag = self.check_within_frags(
+                                                        spanning_frags,
+                                                        corrected_indel_alleles,
+                                                        these_reads,
+                                                        these_reads_bypos0_indel_offsets)
+                    
+                    ## check whether fragment-level counts and read-level counts include same variant
+                    ## merge results . . . not implemented yet <==============
+                    overlap = set(
+                        [a[0] for a in alleles_per_loci_per_read if isinstance(a,tuple)]) & \
+                        set(alleles_per_loci_per_frag)
+                    overlap2 = set(
+                        [a for a in alleles_per_loci_per_read if \
+                            isinstance(a,tuple) and \
+                            a[0] in alleles_per_loci_per_frag])
+                    if len(overlap) > 0:
+                        print(
+                        '*** overlap between within read and fragment linkage reports ***'
+                        )
+                        print('{}\n{}'.format(len(overlap),len(overlap2)))
+                        #print('{}\n{}\n{}'.format(overlap,overlap2,alleles_per_loci_per_frag))
+                    
+                    ## at this stage reads are saved with keys as just the fragment name (ID)
+                    ## if on a single read, or as tuple with is_read1 if on a fragment
+                    ## ==> should these have same type of key here? add is_read1 to single reads?
+                    linkages[these_positions] = dict(
+                                                  alleles_per_loci_per_read.items() + \
+                                                  alleles_per_loci_per_frag.items())
+                    
+                    
+                polymorphism_linkage_bypop[VCF][chromosome] = linkages
+
+        self.polymorphism_linkage_bypop = polymorphism_linkage_bypop
+
+
+    def compare_allele_freqs(self, reads, VCF, chromosome):
+        '''Count allele frequencies with selected reads for tabulation'''
+        some_freqs = []
+        num_reads = 0
+        for oligo,alleles in reads.items():
+            if isinstance(alleles,str):
+                # read not mapped with high enough quality (MQ = 60)
+                # ==> do not include in total read count
+                continue
+            
+            if 'noisy segment: undetermined' in alleles:
+                # alignment at one or other position has low position score or alignment is ambiguous
+                # ==> do not include in total read count
+                continue
+            
+            if isinstance(oligo,tuple):
+                fragID = oligo[0]
+            else:
+                fragID = oligo
+            
+            num_reads += 1
+            for pos1,allele in alleles.items():
+                # correct for differences in indel position reporting ... 4015416 includes insertions but is not at pos1+1 ... expected all indels to be pos1+1
+                if pos1 in self.pooled_variants[VCF][chromosome]:
+                    use_pos1 = pos1
+                else:
+                    use_pos1 = pos1 - 1
+                
+                # correct how indels are reported for comparisons to VCF info
+                these_alleles = self.pooled_variants[VCF][chromosome][use_pos1]['variants']
+                longest_length = max(map(len,these_alleles))
+                if longest_length > 1:
+                    these_alleles = [a[1:] for a in these_alleles]
+                            
+                if allele in these_alleles:
+                    some_freqs += [use_pos1]
+
+        some_freqs = _Counter(some_freqs)
+        for pos1,b in some_freqs.items():
+            freq_at_this_locus_in_reads = int(round(40*(b/float(num_reads))))
+            freq_at_this_locus_in_calls = len(
+                                           filter(
+                                            lambda x: x != 0, 
+                                            self.pooled_variants[VCF][chromosome][pos1]['GT']
+                                          ))
+            print('At {}, counted in reads: {}/40, called {}/40'.format(
+                                                           pos1,
+                                                           freq_at_this_locus_in_reads,
+                                                           freq_at_this_locus_in_calls))
+
+        return(some_freqs)
+
+    def tabulateResults(self, min_spanning_read_depth = 20):
+        '''prepare tables containing linkage information.
+
+        One table compares frequencies of each allele included (which checks accuracy of 
+        counting method). The column headers are:
+        "Chromosome position"
+        "Observed Frequencies"
+        "Called Frequencies"
+
+        The other table contains biological info i.e., which bit of chromosome, its function, 
+        groups of linked variants (only pairs in this case so row per pair). The column 
+        headers are:
+        "Variant pair positions"
+        "Total reads spanning pair"
+        "Reads variant at both positions"
+        "Reads variant at first position only"
+        "Reads variant at second position only"
+        "Annotations"
+        '''
+
+
+        no_variants = set(('no mutation','noisy segment: undetermined'))
+
+        tables_freqcheck = {}
+        tables_linkage = {}
+        linkages_undetermined = {}
+
+        some_unaccounted = {}
+        for VCF,chromosomes in self.polymorphism_linkage_bypop.items():
+            for chromosome, positions in chromosomes.items():
+                # Currently baga.CollectData.Genome only supports single chromosome
+                # genomes.
+                # This test should be run separately for each reference genome
+                # (chromosome) mapped against
+                if chromosome != self.genome.id:
+                    # not blanking for now - not sure why/if this was necessary
+                    # self.polymorphism_linkage_bypop[VCF][chromosome] = {}
+                    print(
+                    "Skipping chromosome {} present in BAM because "
+                    "it doesn't match supplied genome: {}. This analysis "
+                    "should be run separately for each reference genome "
+                    "(chromosome) mapped against".format(chromosome, self.genome.id))
+                    continue
+                
+                table_freqcheck = []
+                table_linkage = []
+                linkages_undetermined[VCF] = {}
+                for these_positions,reads in positions.items():
+                    # some summaries
+                    # (tests for > 2 variants close enough to be tested by e.g. 500 bp
+                    # insert fragments)
+                    no_polymorphisms = set()
+                    one_polymorphism = set()
+                    linked_polymorphism = {}
+                    low_quality_alignment = set()
+                    too_noisy_to_test_linkage = set()
+                    # "oligo" key is each str of fragemnt ID if only one read checked
+                    # or tuple of is, is_read1 if both reads in a pair were checked
+                    for oligo,alleles in reads.items():
+                        if alleles == 'low quality alignment':
+                            low_quality_alignment.add(oligo)
+                        elif len([v for v in alleles.values() if \
+                                            'noisy' not in v]) < 2:
+                            too_noisy_to_test_linkage.add(oligo)
+                        elif all([v == 'no mutation' for v in alleles.values() if \
+                                            'noisy' not in v]):
+                            no_polymorphisms.add(oligo)
+                        elif len([v for v in alleles.values() if \
+                                            v != 'no mutation' and \
+                                            'noisy' not in v]) == 1:
+                            one_polymorphism.add(oligo)
+                        else:
+                            linked_polymorphism[oligo] = dict(
+                                        [(pos1,v) for pos1,v in alleles.items() if \
+                                                v != 'no mutation' and \
+                                                'noisy' not in v]
+                                                         )
+                    
+                    print('Number of positions: {}'.format(len(these_positions)))
+                    if len(linked_polymorphism) > 0 and len(these_positions) > 2:
+                        print(max(map(len,linked_polymorphism.values())))
+                        if max(map(len,linked_polymorphism.values())) > 2:
+                            print('Three way linkage: not implemented')
+                    
+                    print('Pop: {}'.format(VCF))
+                    print('\treads: {}'.format(len(reads)))
+                    print('\tpositions: {}'.format(','.join(map(str,these_positions))))
+                    print('\tlinked: {}'.format(len(linked_polymorphism)))
+                    print('\tsingles: {}'.format(len(one_polymorphism)))
+                    print('\tno mutations: {}'.format(len(no_polymorphisms)))
+                    print('\t(not mapped: {}; too noisy: {})'.format(
+                                    len(low_quality_alignment), 
+                                    len(too_noisy_to_test_linkage)))
+                    
+                    #### linkage table ####
+                    # divide up read findings by pairs of loci ==> rows
+                    
+                    ## variants at this stage are not always just pairs, some of these frags have >2 <== WHY?
+                    ## i.e. 'by_pair' is a wrong assumption
+                    ## would actually be better to scale up to arbitrary number of adjacent variants
+                    
+                    by_cluster = _defaultdict(list)
+                    for loci in reads.values():
+                        if isinstance(loci,dict):
+                            variant_positions = tuple(sorted(loci))
+                            muts = map(loci.get,sorted(loci))
+                            by_cluster[variant_positions] += [muts]
+                        else:
+                            # could count unusable reads here also . . .
+                            pass
+                    
+                    ## minimum read depth limit applied here:
+                    by_cluster = dict([(cluster,combos) for cluster,combos in by_cluster.items() if \
+                                            len(combos) >= min_spanning_read_depth])
+                    
+                    for cluster,combos in by_cluster.items():
+                        # get ORF annotation(s) for this pair
+                        # Not implemented: would need baga.CollectData.Genome to retain more
+                        # information.
+                        ## could optionally provide a gbk or DL via accession for locus info?
+                        # these_features = {}
+                        # for p in pair:
+                            # for ORF,(s,e) in ORFslices['PAO1'].items():
+                                # if s < p <= e:
+                                    # these_features[p] = [ORF]
+                                    # break
+                                
+                                # these_features[p] = [-1]
+                        
+                        # annos_for_loci_affected = set(collect_ORF_anno(these_features))
+                        
+                        # annos = []
+                        # for anno in annos_for_loci_affected:
+                            # if len(anno) == 3:
+                                # this_annotation = '%s: %s (%s)' % tuple(anno)
+                            # elif len(anno) == 2:
+                                # # gene name not available
+                                # this_annotation = '%s: %s' % tuple(anno)
+                            # else:
+                                # this_annotation = anno
+                            
+                            # annos += [this_annotation]
+                        
+                        # if len(set(annos)) == 1:
+                            # annotation = annos[0]
+                        # else:
+                            # annotation = '; '.join(annos)
+                        
+                        annotation = 'not available'
+                        
+                        ABlinked = 0
+                        Aonly = 0
+                        Bonly = 0
+                        wild_type = 0
+                        # 1 or both variants noisy so linkage cannot be determined
+                        linkage_undetermined = 0
+                        
+                        #### this bit needs updating to handle more than just pairs . . .
+                        if len(cluster) > 2:
+                            e = 'More than two alleles per read or fragment not implemented! '\
+                            'Raise an issue at github.com/daveuu/baga if you need this feature. '\
+                            'Polymorphisms in your data are sufficiently close for >2 to be spanned '\
+                            'by single reads/fragments.'
+                            raise NotImplementedError(e)
+                        
+                        for a,b in combos:
+                            if a not in no_variants and b not in no_variants:
+                                ABlinked += 1
+                            elif 'noisy segment: undetermined' in (a,b):
+                                linkage_undetermined += 1
+                            elif a not in no_variants:
+                                Aonly += 1
+                            elif b not in no_variants:
+                                Bonly += 1
+                            else:
+                                wild_type += 0
+                        
+                        #print(ABlinked, Aonly, Bonly, wild_type, linkage_undetermined)
+                        table_linkage += [[ # "Variant pair pos"
+                                            ', '.join(map(str,sorted(cluster))), 
+                                            #  "Total infm reads spanning"
+                                            ABlinked + Aonly + Bonly + wild_type, 
+                                            # "variant at both"
+                                            ABlinked, 
+                                            # "variant at first"
+                                            Aonly, 
+                                            # "variant at second"
+                                            Bonly, 
+                                            # "Annotations"
+                                            annotation]]
+                        linkages_undetermined[VCF][tuple(sorted(cluster))] = linkage_undetermined
+                    
+                    #### frequency check table ####
+                    # How can mismatches be explained?
+                    # Reads with low alignment scores (<60), ambiguous indel alignments?
+                    # "Chromosome position", "Observed Frequencies", "Called Frequencies"
+                    some_freqs = self.compare_allele_freqs(reads, VCF, chromosome)
+                    for pos1,b in some_freqs.items():
+                        # correct for unchecked reads from total here?
+                        # i.e. -len(low_quality_alignment)-len(too_noisy_to_test_linkage)
+                        # correct for uncheckable reads from total read count
+                        freq_at_this_locus_in_reads = int(round(40*(b/float(len(reads) - \
+                                                          len(low_quality_alignment) - \
+                                                          len(too_noisy_to_test_linkage)))))
+                        freq_at_this_locus_in_calls = len(filter(lambda x: x != 0, 
+                                                                 pooled_variants[VCF]['NC_002516.2'][pos1]['GT']))
+                        table_freqcheck += [[ # "Chromosome position"
+                                              pos1, 
+                                              # "Observed Frequencies"
+                                              freq_at_this_locus_in_reads,
+                                              # "Called Frequencies"
+                                              freq_at_this_locus_in_calls]]
+                    
+                    if len(reads) != len(linked_polymorphism) + \
+                                     len(one_polymorphism) + \
+                                     len(no_polymorphisms) + \
+                                     len(low_quality_alignment) + \
+                                     len(too_noisy_to_test_linkage):
+                        print('SOME READS UNACCOUNTED FOR')
+                        some_unaccounted[VCF,these_positions] = sorted(set(reads) - (linked_polymorphism | \
+                                                                                     one_polymorphism | \
+                                                                                     linked_polymorphism | \
+                                                                                     low_quality_alignment | \
+                                                                                     too_noisy_to_test_linkage))
+                tables_freqcheck[VCF] = table_freqcheck
+                tables_linkage[VCF] = table_linkage
+
+        self.tables_freqcheck = tables_freqcheck
+        self.tables_linkage = tables_linkage
+
+    def writeTables(self, freq_table_name = 'freq_table.csv', 
+                          linkage_table_name = 'linkage_table.csv'):
+        '''make csv tables containing linkage information'''
+        # frequencies of each allele
+        headers_freqcheck = ["Sample",
+                             "Chromosome position", 
+                             "Observed Frequencies", 
+                             "Called Frequencies"]
+
+        # biological info i.e., which bit of chromosome, its function,
+        # groups of linked variants (only pairs in this case so row per pair)
+        headers_linkage = [ "Sample",
+                            "Variant pair positions", 
+                            "Total informative reads spanning pair",
+                            "Reads variant at both positions", 
+                            "Reads variant at first position only", 
+                            "Reads variant at second position only", 
+                            "Annotations"]
+
+        with open(freq_table_name, 'w') as fout:
+            print('Writing table of observed frequencies (reads counted) with frequencies '
+                  'provided in the VCFs to {}'.format(freq_table_name))
+            fout.write(','.join(headers_freqcheck)+'\n')
+            for VCF, clusters in self.tables_freqcheck.items():
+                sample = VCF.split(_os.path.sep)[-1]
+                for pos, observed_freqs, called_freqs in clusters:
+                    #print(sample, pos, observed_freqs, called_freqs)
+                    row = '"{}","{}",{},{},{},{},"{}"\n'.format(sample, pos, 
+                                                                        observed_freqs, 
+                                                                        called_freqs)
+                    fout.write(row)
+
+        with open(linkage_table_name, 'w') as fout:
+            print('Writing table of linkage status of nearby polymorphisms to '
+                  '{}'.format(linkage_table_name))
+            fout.write(','.join(headers_linkage)+'\n')
+            for VCF, clusters in self.tables_linkage.items():
+                sample = VCF.split(_os.path.sep)[-1]
+                for pos, total_reads, reads_w_both, reads_w_A, reads_w_B, annotation in clusters:
+                    #print(sample, pos, total_reads, reads_w_both, reads_w_A, reads_w_B, annotation)
+                    if sum([total_reads, reads_w_both, reads_w_A, reads_w_B]) == 0:
+                        print('Reads spanning polymorphisms at {} too noisy for inference ({})'.format(pos, sample))
+                        continue
+                    row = '"{}","{}",{},{},{},{},"{}"\n'.format(sample, pos, total_reads, 
+                                                                             reads_w_both, 
+                                                                             reads_w_A, 
+                                                                             reads_w_B, 
+                                                                             annotation)
+                    fout.write(row)
+
+    def doLinkageCheck(self, dist = 1000):
+        '''Call various methods to perform linkage testing'''
+
+
+        self.parsePooledVCF()
+        print('Collecting nearby variants')
+        self.collectAdjacentPolymorphisms(dist = dist)
+
+        for BAM in self.alignment_paths:
+            indexfile = _os.path.extsep.join([BAM,'bai'])
+            if not(_os.path.exists(indexfile) and _os.path.getsize(indexfile) > 0):
+                print('indexing {}'.format(BAM))
+                _pysam.index(BAM)
+
+        print('Checking read-reference alignments')
+        self.checkAlignments()
+
+        self.tabulateResults()
+
+        self.writeTables()
 
 if __name__ == '__main__':
     main()
