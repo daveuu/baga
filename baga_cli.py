@@ -1499,28 +1499,10 @@ if args.subparser == 'Repeats':
             # print('Loading repeats and genome: %s' % use_name_genome)
             # finder = baga.bagaload('baga.Repeats.Finder-%s' % use_name_genome)
         
-        Repeats.plotRepeats(use_name_genome, outdir = ['plots_repeats'], force = True)
+        Repeats.plotRepeats(use_name_genome, outdir = ['plots_repeats'])
     
     if args.summarise:
-        loaded = False
-        try:
-            ambiguous_ranges = baga.bagaload('baga.Repeats.filter_regions-{}'.format(use_name_genome))
-            loaded = True
-            
-        except IOError:
-            print('Could not load baga.Repeats.filter_regions-{}'.format(use_name_genome))
-            print('You probably need to find the repeats first with the --find option')
-        
-        if loaded:
-            total = 0
-            with open('baga.Repeats.filter_regions-{}.csv'.format(use_name_genome), 'w') as fout:
-                fout.write('"length (bp)","start","end"\n')
-                for s,e in ambiguous_ranges:
-                    print('{:,} bp from {:,} to {:,}'.format(e-s+1, s, e))
-                    total += e-s+1
-                    fout.write('"{}","{}","{}"\n'.format(e-s+1, s, e))
-            
-            print('\n{} repetitive, ambiguous regions spanning {:,} bp of chromosome\n'.format(len(ambiguous_ranges), total))
+        Repeats.summariseRepeats(use_name_genome)
 
 ### Structure ###
 

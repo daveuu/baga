@@ -2285,6 +2285,86 @@ def plotRepeats(genome_name, outdir = ['plots_repeats'], force = False):
                 else:
                     repeat_plotter = Repeats.Plotter(finder_info, plot_output_path)
                     repeat_plotter.doPlot(pair)
+def summariseRepeats(genome_name, force = False):
+    '''Summarise repeats in a csv file'''
+
+    # first load Repeats.Finder analysis results and related information
+
+    from baga import Repeats
+
+    filein = 'baga.Repeats.FinderInfo-{}.baga'.format(genome_name)
+    finder_info = Repeats.loadFinderInfo(filein)
+
+
+    # write to simple summary of regions for parsing
+    # baga.Repeats.filter_regions-<genome>.csv
+    # write to more detailed summary of regions indicating which repeats link to each other
+    # baga.Repeats.details-<genome>.csv
+
+    loaded = False
+    try:
+        import baga
+        ambiguous_ranges = baga.bagaload('baga.Repeats.filter_regions-{}'.format(genome_name))
+        loaded = True
+
+    except IOError:
+        print('Could not load baga.Repeats.filter_regions-{}'.format(genome_name))
+        print('You probably need to find the repeats first with the --find option')
+
+    if loaded:
+        total = 0
+        foutpath = 'baga.Repeats.filter_regions-{}.csv'.format(genome_name)
+        with open(foutpath, 'w') as fout:
+            fout.write('"length (bp)","start","end"\n')
+            for s,e in ambiguous_ranges:
+                print('{:,} bp from {:,} to {:,}'.format(e-s+1, s, e))
+                total += e-s+1
+                fout.write('{},{}\n'.format(s, e))
+        
+        print('\n{} repetitive, ambiguous regions spanning {:,} bp of chromosome\n'.format(len(ambiguous_ranges), total))
+        print('Simple summary for parsing written to: {}'.format(foutpath))
+
+
+    # numbering here isn't working . . through each group contained all related pairs . . .
+    plotted_last = False
+    plot_group = 1
+    #for groups in finder.homologous_groups_mapped:
+    foutpath = 'baga.Repeats.details-{}.csv'.format(genome_name)
+    with open(foutpath, 'w') as fout:
+        group_num = 0
+        fout.write('"region A start","region A end","region B start","region B end"\n')
+        for groups in finder_info['homologous_groups_mapped']:
+            
+            this_group = []
+            
+            for pair in groups:
+                # first check if this pair includes any of the 
+                # final selection of ambiguous regions (without
+                # the short regions)
+                report_A = False
+                report_B = False
+                sA, eA = pair['A']['start'], pair['A']['end']
+                sB, eB = pair['B']['start'], pair['B']['end']
+                for s,e in finder_info['ambiguous_ranges']:
+                    if (s < eA and e > sA):
+                        report_A = True
+                    if (s < eB and e > sB):
+                        report_B = True
+                
+                if report_A and report_B:
+                    this_group += [((sA, eA),(sB, eB))]
+            
+            if len(this_group):
+                group_num += 1
+                lens = [a for b in this_group for a in b]
+                lens = [a[1]-a[0] for a in lens]
+                mean_len = int(sum(lens) / float(len(lens)))
+                fout.write('Group {}, approx. {}bp:\n'.format(group_num,mean_len))
+                for (sA, eA),(sB, eB) in this_group:
+                    fout.write('{},{},{},{}\n'.format(sA, eA, sB, eB))
+                fout.write('\n')
+        
+        print('More detailed summary written to: {}'.format(foutpath))
 
 if __name__ == '__main__':
     main()
