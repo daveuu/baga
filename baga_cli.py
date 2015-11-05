@@ -209,6 +209,13 @@ group_check_or_get.add_argument('-c', "--check",
     choices = sorted(Dependencies.dependencies),
     nargs = '+')
 
+group_check_or_get.add_argument('-p', "--checkpackage", 
+    help = "check BAG Analyser has access to a python package dependency. Sometimes required if baga just installed a package and a fresh Python instance is required to check it",
+    type = str,
+    #choices = sorted(Dependencies.dependencies),
+    choices = sorted([name for name,info in Dependencies.dependencies.items() if \
+                info['checker']['function'] == Dependencies.check_python_package]))
+
 group_check_or_get.add_argument('-g', "--get", 
     help = "get (or explain how to get) a dependency for BAG Analyser",
     type = str,
@@ -964,6 +971,18 @@ if args.subparser == 'Dependencies':
                                             )
         return(result)
     
+    def checkpackage(name):
+        '''this calls a conventional --check for checking new python packages'''
+        import subprocess
+        cmd = [sys.argv[0], '--nosplash', 'Dependencies', '--check', name]
+        proc = subprocess.Popen(cmd, stdout = subprocess.PIPE, stderr = subprocess.PIPE )
+        o,e = proc.communicate()
+        #print(e)
+        if proc.returncode == 1:
+            return(False)
+        elif proc.returncode == 0:
+            return(True)
+    
     def checkget(checkgetthese):
         check_summary = []
         check_results = []
@@ -986,7 +1005,11 @@ if args.subparser == 'Dependencies':
                     except KeyError:
                         pass
                 
-                gotnow = check(name)
+                if Dependencies.dependencies[name]['checker']['function'] == Dependencies.check_python_package:
+                    gotnow = checkpackage(name)
+                else:                
+                    gotnow = check(name)
+                
                 if gotnow:
                     check_summary[-1] += "Installed successfully: found!"
                 else:
@@ -1019,6 +1042,15 @@ if args.subparser == 'Dependencies':
         
         if not all(check_results):
             sys.exit('\n\nOne or more dependencies are unavailable . . . \n')
+    
+    if args.checkpackage:
+        # call baga to do a conventional check on a python package
+        result = checkpackage(args.checkpackage)
+        if result:
+            print('\n{}: found!'.format(args.checkpackage))
+        else:
+            print('\n{0}: not found . . . \nTry "{1} Dependencies --get {0}"'.format(args.checkpackage, sys.argv[0]))
+            
     
     if args.checkget:
         check_summary,check_results = checkget(args.checkget)

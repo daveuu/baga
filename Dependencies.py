@@ -305,6 +305,13 @@ def check_no_error(path = '',
 
 
 def check_python_package(package, maj_version = False, system = False, package_path = 'local_packages'):
+    '''Check if a package can be imported from the locally installed collection
+    
+    Print the results to stderr so they can be collected separately if calling 
+    baga from the outside. Calling baga from baga is required when a package 
+    has just been installed because a running python instance does not seem to 
+    be able to detect newly installed packages.
+    '''
     if system:
         # try system installed <== currently not implemented in CLI nor tested here
         x = _sys.path.pop(0)
@@ -340,22 +347,41 @@ def check_python_package(package, maj_version = False, system = False, package_p
             try:
                 this_maj_version = int(v.split('.')[0].split('_')[0])
             except ValueError:
-                print('Could not check verions of this package: {} (either package does not report version in a conventional way (unknown) or this is a baga bug!)'.format(v))
+                result = 'Could not check verions of this package: {} (either '\
+                'package does not report version in a conventional way (unknown) '\
+                'or this is a baga bug! Please raise an issue at '\
+                'github.com/daveuu/baga.)'.format(v)
+                _sys.stderr.write(result+'\n')
+                #print(result)
         elif isinstance(v, tuple):
             this_maj_version = v[0]
         else:
-            print('Could not check verions of this package: {} (either package does not report version in a conventional way (unknown) or this is a baga bug!)'.format(v))
-        
+            result = 'Could not check verions of this package: {} (either package '\
+            'does not report version in a conventional way (unknown) or this is a '\
+            'baga bug! Please raise an issue at github.com/daveuu/baga.'.format(v)
+            _sys.stderr.write(result+'\n')
+            #print(result)
         if maj_version == this_maj_version:
-            print('Successfully imported {} required version {} from {}'.format(package, v, getattr(globals()['_'+package], '__file__')))
+            result = 'Successfully imported {} required version {} from {}'.format(package, 
+                                            v, getattr(globals()['_'+package], '__file__'))
+            _sys.stderr.write(result+'\n')
+            #print(result)
             return(True)
         elif maj_version > this_maj_version or maj_version < this_maj_version:
-            print('Successfully imported {} at version {} from {}'.format(package, v, getattr(globals()['_'+package], '__file__')))
-            print('baga is not tested with this version. Version {} is required which can be installed locally with the --get option'.format(maj_version))
+            result = 'Successfully imported {} at version {} from {}\n'.format(package, 
+                                            v, getattr(globals()['_'+package], '__file__'))
+            result += 'baga is not tested with this version. Version {} is required '\
+            'which can be installed locally with the --get option'.format(maj_version)
+            _sys.stderr.write(result+'\n')
             return(False)
     else:
         print('Successfully imported {} version {} from {}'.format(package, v, getattr(globals()['_'+package], '__file__')))
         print("baga's Dependencies module doesn't specify a version for this package so we'll assume it's OK")
+        result = 'Successfully imported {} version {} from {}'.format(package, 
+                                            v, getattr(globals()['_'+package], '__file__'))
+        result += "baga's Dependencies module doesn't specify a version for this package "\
+        "so we'll assume it's OK"
+        _sys.stderr.write(result+'\n')
         return(True)
 
 
