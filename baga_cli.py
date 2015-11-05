@@ -160,7 +160,6 @@ splash = '\n{title}:\n\n{subtitle}\n\nVersion {version_num} ({version_date})\n\n
         email = email,
         blurb = blurb)
 
-print(splash)
 
 ## get options from command line and decide what to do
 
@@ -177,6 +176,12 @@ parser = argparse.ArgumentParser(
 
 parser.add_argument('--version', action='version', 
                     version='%(prog)s {} ({})'.format(version_num, version_date))
+
+parser.add_argument('--nosplash',
+    help = "Supress printing of start-up splash info.",
+    action = 'store_true',
+    default = False)
+
 
 # group = parser.add_mutually_exclusive_group()
 # group.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
@@ -870,6 +875,10 @@ parser_AssembleReads.add_argument('-m', "--max_memory",
     type = int)
 
 args = parser.parse_args()
+
+if not args.nosplash:
+    print(splash)
+
 
 
 
