@@ -1981,14 +1981,14 @@ class Plotter:
 
         # make paths for each isolate plot lane 
         lane_num = 0
-        colour = ('60', '60', '60', '%')
-
         # establish lane plot area (always single for percent ID at duplicate regions)
         plot_spacing = 3
         lane_upper_y = lower_y - (lane_num + 1) * y_per_lane + plot_spacing
         lane_lower_y = lower_y - lane_num * y_per_lane - plot_spacing
         lane_plot_height = lane_lower_y - lane_upper_y
-        #print(i, lane_lower_y, lane_lower_y)
+
+        # plot filled area for percent identity
+        colour = ('80', '80', '80', '%')
         commands = ['M %s %s' % (
                                     plotpositions_x[0] + plotstart_x, 
                                     lane_lower_y
@@ -2013,6 +2013,32 @@ class Plotter:
                             )
 
         self.dwg.add(plot_path)
+
+        # add a darker line to aid visualisation through highlights
+        linecolour = ('50', '50', '50', '%')
+        commands = ['M %s %s' % (
+                                    plotpositions_x[0] + plotstart_x, 
+                                    lane_lower_y - lane_plot_height * plotdepths[0]
+                                    )]
+
+        for n,d in enumerate(plotdepths[1:]):
+            # because everything is upside down in SVG minus goes up on page
+            commands += ['L %s %s' % (
+                                        plotpositions_x[n+1] + plotstart_x,
+                                        lane_lower_y - lane_plot_height * d
+                                        )]
+        # don't end with 'z' because don't want path 'closed'
+
+        plot_path = self.dwg.path(
+                            d=' '.join(commands), stroke = self.rgb(*linecolour), 
+                            stroke_linecap='round', stroke_width= '2', 
+                            fill = 'none'
+                            )
+
+        self.dwg.add(plot_path)
+
+
+
 
         # plot y-axis
         axis_horizontal_offset = 5
@@ -2085,12 +2111,12 @@ class Plotter:
         textanc = 'middle'
         isolatelabel = self.dwg.text(label, 
                                     insert = (
-                                        plotstart_x - label_horizontal_offset * 4, 
-                                        lane_lower_y - (lower_y - upper_y) * 1.3
+                                        plotstart_x - label_horizontal_offset * 4.5, 
+                                        lane_lower_y - (lower_y - upper_y) * 1.4
                                     ), 
                                     fill='black', font_family=use_fontfamily, 
                                     text_anchor=textanc, 
-                                    font_size = font_size, baseline_shift='-50%')
+                                    font_size = '{}pt'.format(int(font_size[:-2])*1.4), baseline_shift='-50%')
 
         self.dwg.add(isolatelabel)
 
@@ -2143,7 +2169,7 @@ class Plotter:
         # draw ambiguous (high identity) regions
         # first indicate regions for exclusion due to high identity anywhere
         # pale green
-        colour = ('20', '90', '20', '%')
+        colour = ('2', '25', '100', '%')
         for chrm_s,chrm_e in self.finder_info['ambiguous_ranges']:
             if chrm_s < pair[seq_label]['end'] and chrm_e > pair[seq_label]['start']:
                 
@@ -2169,16 +2195,16 @@ class Plotter:
                                         lane_lower_y
                                         )]
                 plot_path = self.dwg.path(
-                                    d=' '.join(commands), stroke = self.rgb(*colour), 
+                                    d=' '.join(commands), stroke = 'none', #self.rgb(*colour), 
                                     stroke_linecap='round', stroke_width= '3', 
                                     fill = self.rgb(*colour), fill_rule='evenodd',
-                                    fill_opacity = 0.25
+                                    fill_opacity = 0.45
                                     )
                 
                 self.dwg.add(plot_path)
 
         # first indicate regions with high identity in the current plot
-        colour = ('80', '10', '10', '%')
+        colour = ('100', '2', '36', '%')
         for chrm_s,chrm_e in pair[seq_label]['ambiguous_ranges']:
                 
                 s = self.chrom2plot_x(chrm_s, pair, seq_label)
@@ -2201,10 +2227,10 @@ class Plotter:
                                         lane_lower_y
                                         )]
                 plot_path = self.dwg.path(
-                                    d=' '.join(commands), stroke = self.rgb(*colour), 
+                                    d=' '.join(commands), stroke = 'none', #self.rgb(*colour), 
                                     stroke_linecap='round', stroke_width= '3', 
                                     fill = self.rgb(*colour), fill_rule='evenodd',
-                                    fill_opacity = 0.25
+                                    fill_opacity = 0.36
                                     )
                 
                 self.dwg.add(plot_path)
