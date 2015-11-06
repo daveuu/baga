@@ -2043,15 +2043,21 @@ class Aligner:
                            num_padding_positions = 5000, 
                            pID_window = 100, 
                            pID_step = 10, 
-                           path_to_omit_sequences = False):
+                           path_to_omit_sequences = False,
+                           min_pID_aligned = 0.9):
         
-        '''
+        '''Align contigs to reference chromosome regions
+
         Provided with a dict of chromosome range tuples to contig file paths, 
         align each range to the contigs using seq-align as a subprocess to do 
         a Needleman-Wunch gapped pairwise globl alignment.
+
         path_to_omit_sequences can be a fasta file of contigs that should be ignored if
         encountered (e.g. contigs from unmapped reads to subtract from assemblies
-        that include reads from regions of interest)
+        that include reads from regions of interest).
+
+        min_pID_aligned the minimum percent identity required at one or more windows 
+        along the alignment.
         '''
 
         if path_to_omit_sequences:
@@ -2059,15 +2065,22 @@ class Aligner:
         else:
             unmapped_read_contigs = set()
 
-        # the minimum percent identity required at one or more windows along the alignment
-        min_pID_aligned = 0.9
-
         aligned = {}
         for (s,e),contigfile in sorted(assemblies_by_region.items()):
             if e - s > 200:
                 print((s,e),e-s,contigfile)
                 ref_chrom_region = _Seq(self.genome.sequence[s-num_padding_positions:e+num_padding_positions].tostring())
                 ref_region_id = 'ref_{:07d}_{:07d}'.format(s-num_padding_positions,e+num_padding_positions)
+                try:
+                    num_contigs = 0
+                    for n,rec in enumerate(_SeqIO.parse(contigfile,'fasta')):
+                        num_contigs += 1
+                except IOError:
+                    print('WARNING: cannot access {}'.format(contigfile))
+                    print('This assembly may have failed . . .')
+                    continue
+                
+                print('Found {} contigs in {} for analysis.'.format(num_contigs, contigfile))
                 for n,rec in enumerate(_SeqIO.parse(contigfile,'fasta')):
                     if str(rec.seq) not in unmapped_read_contigs:
                         print('Aligning novel contig: {}'.format(rec.id))
