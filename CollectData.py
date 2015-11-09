@@ -67,19 +67,19 @@ class Genome:
         database. Requires accession number of entry e.g. 'FM209186' for 
         Pseudomonas aeruginosa LESB58 and your email address so NCBI can contact 
         you in the event of a problem. Uses BioPython's Bio.Entrez module.
-        
+
         Option 2: provide "local_path" and "format" as either "genbank" or "baga".
-        
+
         If format = "genbank": Load an annotated genome sequence from a local 
         genbank file. For example, one downloaded previously from 
         ftp://ftp.ncbi.nih.gov/genomes/Bacteria/
-        
+
         If format = "baga": Reload a genome that was previously processed with 
         either of the two options above for use with the Bacterial and Archaeal 
         Genome Analyser.
-        
+
         Option 3:
-        
+
         Just provide "accession" to autoload a locally saved genome.
         '''
         
@@ -89,6 +89,7 @@ class Genome:
         e += ["accession = {}, user_email = {}, local_path = {}, format = {}".format(accession, user_email, local_path, format)]
         assert ((accession) or (local_path and format)), '\n'.join(e)
         
+
         def extractLoci(seq_record):
             '''
             Extract some ORF information from genbank record 
@@ -135,19 +136,151 @@ class Genome:
                 del ORF_ranges[ORF]
             
             return(ORF_ranges, large_mobile_element_ranges)
-        
-        def getFromEntrez(accession, user_email):
+
+        def DL(url, verbose = True):
+            req = _urllib2.urlopen(url)
+            CHUNK = 16 * 1024 * 32
+            data = _StringIO()
+            c = 0
+            for chunk in iter(lambda: req.read(CHUNK), ''):
+                c += CHUNK
+                if verbose:
+                    print("{:,} bytes".format(c))
+                data.write(chunk)
+            
+            if verbose:
+                print('Download complete . . .')
+            data.seek(0)
+            return(data)
+
+        def getFromEntrez(search_id, user_email):
+            '''
+            download a genome sequence given a search ID
+            
+            search_id is recommended to be a refseq or genbank accession number
+            or other unambiguous ID that will return a single result
+            '''
+            
+            if '.' in search_id:
+                search_id_unversioned,requested_ver = search_id.split('.')
+            else:
+                search_id_unversioned,requested_ver = search_id,None
+            
+            if '_' in search_id_unversioned:
+                search_id_is_refseq = True
+            else:
+                search_id_is_refseq = False
+            
             _Entrez.email = user_email
-            handle = _Entrez.efetch(db = "nuccore", rettype = "gb", retmode = "text", id = accession)
+            handle = _Entrez.esearch(db = "assembly", term = search_id_unversioned)
+            result = _Entrez.read(handle)
+            e = 'Your search ID: "{}" returned {} assembly results '\
+            'from ncbi.nlm.nih.gov/assembly but a single result is required.'.format(
+                    search_id, len(result['IdList']))
+            assert len(result['IdList']) == 1, e
+            Assembly_ID = result['IdList'][0]
+            handle = _Entrez.esummary(db = "assembly", id = Assembly_ID)
+            info = _Entrez.read(handle)['DocumentSummarySet']['DocumentSummary'][0]
+            print('Found: {} ({})'.format(info['Organism'],info['AssemblyStatus']))
+            
+            # collect download links
             try:
-                seq_record = _SeqIO.read(handle, "genbank")
-            except ValueError as error_message:
-                print("There was a problem with the genome (accession: {}) downloaded from NCBI via Entrez: {}. Retry because Entrez can be unreliable, or try loading from a .gbk file downloaded manually from e.g., ftp://ftp.ncbi.nih.gov/genomes/Bacteria/".format(accession, error_message))
-            handle.close()
-            self.ORF_ranges, self.large_mobile_element_ranges = extractLoci(seq_record)
-            self.sequence = _array('c', seq_record.seq)
-            self.id = seq_record.id
-        
+                genbank_ftp = _re.findall(
+                        '<FtpPath type="GenBank">([^<]+)</FtpPath>', 
+                        info['Meta'])[0]
+                print('Found Genbank link:\n{}'.format(genbank_ftp))
+            except IndexError:
+                genbank_ftp = False
+                print('GenBank link not found')
+            
+            try:
+                refseq_ftp = _re.findall(
+                        '<FtpPath type="RefSeq">([^<]+)</FtpPath>', 
+                        info['Meta'])[0]
+                print('Found RefSeq link:\n{}'.format(refseq_ftp))
+            except IndexError:
+                refseq_ftp = False
+                print('RefSeq link not found')
+            
+            e = 'Failed to retrieve FTP download links from MetaData:\n{}'.format(info['Meta'])
+            assert genbank_ftp or refseq_ftp, e
+            
+            if refseq_ftp:
+                use_link = refseq_ftp
+            elif genbank_ftp:
+                use_link = genbank_ftp
+            
+            # collect accessions and versions
+            refseq_ass_acc = info[u'AssemblyAccession']
+            e = 'No RefSeq assembly found for {}. You can double check at http://www.ncbi.nlm.nih.gov/assembly'.format(search_id)
+            assert refseq_ass_acc[:3] == 'GCF'
+            genbank2refseq = {}
+            genbank2version = {}
+            refseq2genbank = {}
+            refseq2version = {}
+            data = DL('ftp://ftp.ncbi.nlm.nih.gov/genomes/ASSEMBLY_REPORTS/All/{}.assembly.txt'.format(
+                    refseq_ass_acc), verbose = False)
+            ID_info = data.readlines()
+            
+            for line in ID_info:
+                if line[0] != '#' and len(line) > 0:
+                    cells = line.split('\t')
+                    genbank_acc, gb_ver = cells[4].split('.')
+                    refseq_acc, rs_ver = cells[6].split('.')
+                    genbank2refseq[genbank_acc] = refseq_acc
+                    genbank2version[genbank_acc] = gb_ver
+                    refseq2genbank[refseq_acc] = genbank_acc
+                    refseq2version[refseq_acc] = rs_ver
+            
+            if search_id_is_refseq:
+                use_name = search_id_unversioned + '.' + refseq2version[search_id_unversioned]
+                if requested_ver is None:
+                    print('Found version {} of RefSeq accession {}'.format(
+                            search_id_unversioned, refseq2version[search_id_unversioned]))
+                elif requested_ver != refseq2version[search_id_unversioned]:
+                    print('RefSeq accession {} version {} was requested, '\
+                    'but version {} is the current version and will be used instead'.format(
+                            search_id_unversioned, requested_ver, 
+                            refseq2version[search_id_unversioned]))
+            else:
+                use_refseq = genbank2refseq[search_id_unversioned]
+                print('Will use RefSeq accession {} (latest version {}) which '\
+                'corresponds to provided GenBank accession {}'.format(
+                        use_refseq, refseq2version[use_refseq], search_id_unversioned))
+                
+                use_name = use_refseq + '.' + refseq2version[use_refseq]
+            
+            ### could collect other replicons in this genome . . .
+            if len(refseq2version) > 1:
+                print('(this is 1 of {} replicons in this genome)'.format(len(refseq2version)))
+            else:
+                print('(this is the only replicon in this genome)')
+            
+            # download checksums
+            data = DL(use_link + '/md5checksums.txt', verbose = False)
+            checksum = [l.split('  ./') for l in data.readlines() if '_genomic.gbff.gz' in l][0][0]
+            # download sequences and annotations
+            use_link += '/' + use_link.split('/')[-1] + '_genomic.gbff.gz'
+            print('Downloading from:\n{}'.format(use_link))
+            data = DL(use_link, verbose = True)
+            hasher = _md5()
+            buff = data.read(65536)
+            while len(buff) > 0:
+                hasher.update(buff)
+                buff = data.read(65536)
+            
+            e = '. . . checksum fail!'
+            assert hasher.hexdigest() == checksum, e
+            print('. . . checksum {} passed!'.format(checksum))
+            data.seek(0)
+            archive = _gzip.GzipFile(mode="rb", fileobj = data)
+            records = list(_SeqIO.parse(archive, 'genbank'))
+            for seq_record in records:
+                if use_name == seq_record.id:
+                    self.ORF_ranges, self.large_mobile_element_ranges = extractLoci(seq_record)
+                    self.sequence = _array('c', seq_record.seq)
+                    self.id = seq_record.id
+
         def loadFrombaga(local_path):
             with _tarfile.open(local_path, "r:gz") as tar:
                 for member in tar:
@@ -160,12 +293,17 @@ class Genome:
                         contents = _array('c', contents.getvalue())
                     
                     setattr(self, member.name, contents)
-        
+
         def loadFromGBK(local_path):
             seq_record = _SeqIO.read(local_path, "genbank")
             self.ORF_ranges, self.large_mobile_element_ranges = extractLoci(seq_record)
             self.sequence = _array('c', seq_record.seq)
             self.id = seq_record.id
+        
+        
+        
+        
+        
         
         if accession and user_email:
             getFromEntrez(accession, user_email)
