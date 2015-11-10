@@ -197,7 +197,7 @@ class Finder:
                     # remove contiguous blocks which lost contiguity before others (must be at least one other same length as this_block though)
                     block_to_homoblocks[tuple(this_block)] = [b for b in sorted(map(sorted, homoblocks.values())) if len(b) == len(this_block)]
                     if len(block_to_homoblocks[tuple(this_block)]) == 1:
-                        print('ERROR: no contiguous homologous blocks retained (except self) after removing short ones')
+                        print('ERROR1: no contiguous homologous blocks retained (except self: {}) after removing short ones'.format(','.join(this_block)))
                     
                     # halt merging
                     merging = False
@@ -221,7 +221,7 @@ class Finder:
                 block_to_homoblocks[tuple(this_block)] = [b for b in sorted(map(sorted, homoblocks.values())) if len(b) == len(this_block)]
                 # halt merging
                 if len(block_to_homoblocks[tuple(this_block)]) == 1:
-                    print('ERROR: no contiguous homologous blocks retained (except self) after removing short ones')
+                    print('ERROR2: no contiguous homologous blocks retained (except self: {}) after removing short ones'.format(','.join(this_block)))
                 
                 merging = False
                 
@@ -284,7 +284,7 @@ class Finder:
         for a,b in block_to_homoblocks.items():
             if len(b) > 1:
                 if self.ORFs_ordered.index(b[0][0]) + 1 == self.ORFs_ordered.index(b[1][0]):
-                    print(b)
+                    print('A tandem repeated: {}'.format(b))
                     tandems += [b]
 
         for t in tandems:
@@ -293,11 +293,14 @@ class Finder:
                     print(block_to_homoblocks[tuple(o)])
                 else:
                     print(tuple(o))
+                    print('A tandem repeat: {}'.format('+'.join(o)))
                     block_to_homoblocks[tuple(o)] = t
 
         homologous_groups = set()
         for this,those in sorted(block_to_homoblocks.items()):
-            homologous_groups.add(tuple(sorted(map(tuple,those))))
+            # innermost sort ensures loci are in chromomosome order, 
+            # not loci label order
+            homologous_groups.add(tuple(sorted(map(lambda x: tuple(sorted(x, key = self.genome.ORF_ranges.get)),those))))
             # if len(those) > 0:
                 # for these in those:
                     # if this != tuple(these):
@@ -306,78 +309,6 @@ class Finder:
         self.homologous_groups = sorted(homologous_groups)
 
         self.block_to_homoblocks = block_to_homoblocks
-    def getAlnFromVULGAR(self, sA_info, sB_info, vulgar, protein = 'yes'):
-        '''convert VULGAR output of exonerate to aligned sequences'''
-
-        (sA, eA, strandA) = sA_info
-        (sB, eB, strandB) = sB_info
-
-        bits = vulgar.rstrip().split(' ')[1:]
-        Aid, sAaln, eAaln, Astrnd_aln, Bid, sBaln, eBaln, Bstrnd_aln, score = bits[:9]
-        sAaln, eAaln, sBaln, eBaln = map(int, [sAaln, eAaln, sBaln, eBaln])
-        alninfo = bits[9:]
-
-        if '-' in (Astrnd_aln, Bstrnd_aln):
-            # not alignable if exonerate had to resort to reverse strand
-            return('X','X')
-            
-        if strandA == 1:
-            seqA = self.genome_genbank_record.seq[sA:eA]
-        else:
-            seqA = self.genome_genbank_record.seq[sA:eA].reverse_complement()
-
-        if strandB == 1:
-            seqB = self.genome_genbank_record.seq[sB:eB]
-        else:
-            seqB = self.genome_genbank_record.seq[sB:eB].reverse_complement()
-
-        if protein in (True, 'yes'):
-            seqA = seqA.translate()
-            seqB = seqB.translate()
-
-        Aalnd = []
-        Balnd = []
-        Ai = 0
-        Bi = 0
-        for e in range(0,len(alninfo),3):  #break
-            #print(vulgar[e])
-            forA = int(alninfo[e+2])
-            forB = int(alninfo[e+1])
-            if alninfo[e] == 'M' or alninfo[e] == 'C':
-                Aalnd += list(seqA[sAaln:eAaln][Ai:Ai+forA])
-                Balnd += list(seqB[sBaln:eBaln][Bi:Bi+forB])
-                Ai += forA
-                Bi += forB
-            elif alninfo[e] == 'G' or alninfo[e] == 'F':
-                if forB == 0:
-                    Balnd += list(seqB[sBaln:eBaln][Bi:Bi+forA])
-                    Aalnd += ['-'] * forA
-                    Bi += forA
-                else:
-                    Aalnd += list(seqA[sAaln:eAaln][Ai:Ai+forB])
-                    Balnd += ['-'] * forB
-                    Ai += forB
-
-        return(''.join(Aalnd), ''.join(Balnd))
-    def make_non_alignment(self, sA_info, sB_info):
-
-        (sA, eA, strandA) = sA_info
-        (sB, eB, strandB) = sB_info
-
-        if strandA == 1:
-            A = str(self.genome_genbank_record.seq[sA:eA])
-        else:
-            A = str(self.genome_genbank_record.seq[sA:eA].reverse_complement())
-
-        if strandB == 1:
-            B = str(self.genome_genbank_record.seq[sB:eB])
-        else:
-            B = str(self.genome_genbank_record.seq[sB:eB].reverse_complement())
-
-        A += '-' * (eB - sB)
-        B = '-' * (eA - sA) + B
-
-        return(A,B)
     def getORFsInTandemRepeats(self):
         ORFs_in_tandem_repeats = set()
         for groups in self.homologous_groups:
@@ -499,8 +430,11 @@ class Finder:
             loci_ranges = []
             for i,locus in enumerate(repeated_loci[::strand]):
                 start, end = ORF_ranges[locus][:2]
-                # adjust non-intact coding regions with partial codons
-                #if (e-s) % 3 == 0:
+                ## ensure all coding regions are whole codons
+                ## sometimes incomplete codons get through in
+                ## annotated pseudogenes or errors
+                ends_codon_diff = (end - start) % 3
+                end = end - ends_codon_diff
                 if strand == -1:
                     start, end = reverseRange(start, end, genome_sequence)
                 
@@ -513,6 +447,7 @@ class Finder:
                 loci_ranges += [start, end]
             
             return(loci_ranges, ORF_overlaps)
+
 
         def do_extension(genome_use_A, 
                          genome_use_B, 
@@ -566,7 +501,7 @@ class Finder:
             # for each group, align pairwise combinations of homologous, contiguous blocks
             alignment_combos = {}
             for n,repeated_loci_A in enumerate(groups[:-1]):
-                print('A: {}'.format('-'.join(repeated_loci_A)))
+                print('A: {}'.format(' - '.join(repeated_loci_A)))
                 strandA = self.genome.ORF_ranges[repeated_loci_A[0]][2]
                 # print(repeated_loci_A, strandA)
                 genome_use_A = genome_strands[strandA]
@@ -576,6 +511,7 @@ class Finder:
                                                                       self.genome.ORF_ranges, 
                                                                       genome_use_A,
                                                                       strandA)
+                # print(loci_ranges_use_A, ORF_overlaps_A)
                 for repeated_loci_B in groups[(n+1):]:
                     print('vs. B: {}'.format(' - '.join(repeated_loci_B)))
                     strandB = self.genome.ORF_ranges[repeated_loci_B[0]][2]
@@ -587,6 +523,7 @@ class Finder:
                                                                           self.genome.ORF_ranges, 
                                                                           genome_use_B,
                                                                           strandB)
+                    # print(loci_ranges_use_B, ORF_overlaps_B)
                     if len(repeated_loci_B) > 1:
                         # resolve any overlapping ORFs
                         # compare num AAs per homologous ORFs
@@ -634,14 +571,13 @@ class Finder:
                                         new_preORFA_end = preORFA_end - num_gaps_preB
                                         # print('b. New inter-ORF: {}-{}'.format(new_preORFA_end, 
                                                                                # post_A_start))
-                                        loci_ranges_updated_A += [new_preORFA_end, post_A_start]
+                                        loci_ranges_updated_A += [new_preORFA_end, postORFA_start]
                                     else:
                                         # print('UNEXPECTED ALIGNMENT AT OVERLAP: '
                                         # 'could not detect early start or late stop '
                                         # 'so just removing overlap to the nearest '
                                         # 'codon in the next ORF without inserting inter-ORF zone')
-                                        ends_codon_diff = (postORFA_end - preORFA_end) % 3
-                                        loci_ranges_updated_A += [preORFA_end, preORFA_end + ends_codon_diff]
+                                        loci_ranges_updated_A += [preORFA_end , postORFA_end]
 
                                 else:
                                     loci_ranges_updated_A += [preORFA_end, postORFA_start]
@@ -667,10 +603,9 @@ class Finder:
                                     else:
                                         # print('UNEXPECTED ALIGNMENT AT OVERLAP: '
                                         # 'could not detect early start or late stop '
-                                        # 'so removing overlap without inserting inter-ORF zone')
-                                        #loci_ranges_updated_B += [preORFB_end, preORFB_end]
-                                        ends_codon_diff = (postORFB_end - preORFB_end) % 3
-                                        loci_ranges_updated_B += [preORFB_end, preORFB_end + ends_codon_diff]
+                                        # 'so just removing overlap to the nearest '
+                                        # 'codon in the next ORF without inserting inter-ORF zone')
+                                        loci_ranges_updated_B += [preORFB_end, preORFB_end]
                                 else:
                                     loci_ranges_updated_B += [preORFB_end, postORFB_start]
                                 
@@ -679,21 +614,20 @@ class Finder:
                                 # add current ORF ranges
                                 loci_ranges_updated_A += [preORFA_end, postORFA_start]
                                 loci_ranges_updated_B += [preORFB_end, postORFB_start]
-                            
+                        
                         loci_ranges_updated_A += [postORFA_end]
                         loci_ranges_updated_B += [postORFB_end]
                         # check updated versions are complete and without overlaps
-                        assert len(loci_ranges_updated_A) == len(loci_ranges_use_A)
-                        assert loci_ranges_updated_A == sorted(loci_ranges_updated_A)
-                        assert len(loci_ranges_updated_B) == len(loci_ranges_use_B)
-                        assert loci_ranges_updated_B == sorted(loci_ranges_updated_B)
+                        e1 = 'odd number of ORF-inter-ORF boundaries'
+                        e2 = 'overlap correction failed'
+                        assert len(loci_ranges_updated_A) == len(loci_ranges_use_A), e1
+                        assert loci_ranges_updated_A == sorted(loci_ranges_updated_A), e2
+                        assert len(loci_ranges_updated_B) == len(loci_ranges_use_B), e1
+                        assert loci_ranges_updated_B == sorted(loci_ranges_updated_B), e2
                     else:
                         loci_ranges_updated_A = list(loci_ranges_use_A)
                         loci_ranges_updated_B = list(loci_ranges_use_B)
                     
-                    ## ensure all coding regions are whole codons
-                    ## sometimes incomplete codons get through in
-                    ## annotated pseudogenes or errors
                     loci_ranges_updated_A_fixed = []
                     loci_ranges_updated_B_fixed = []
                     for i in range(len(loci_ranges_updated_A)/2):
