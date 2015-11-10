@@ -57,6 +57,8 @@ class Finder:
         '''
         
         self.genome = genome
+        e = 'This chromosome object contains no ORF information: Repeats finding not possible'
+        assert len(genome.ORF_ranges) > 0, e
         self.ORFs_ordered = sorted(genome.ORF_ranges, key = genome.ORF_ranges.get)
 
     def parseBamForDoubleHits(self, filename):
@@ -173,11 +175,7 @@ class Finder:
         merging = False
         block_to_homoblocks = {}  ## need to add singletons
         for n,thisORF in enumerate(self.ORFs_with_hits_ordered):
-            #n += 1
-            #thisORF = ORFs_with_hits_ordered[n]
-            #if thisORF in ('PLES_29041', 'PLES_29011', 'PLES_28981'): break
-            #if thisORF == 'PLES_58641': break
-            print('\n>>Checking %s (%s) for adjacent ORFs with homologs within the genome' % (thisORF,n))
+            # print('\n>>Checking %s (%s) for adjacent ORFs with homologs within the genome' % (thisORF,n))
             if n + 1 == len(self.ORFs_with_hits_ordered):
                 thisORFnearestWithHit, dist_to_next = False, False
             else:
@@ -228,16 +226,8 @@ class Finder:
                 merging = False
                 
             else:
-                # try:
-                    # print('%s (%s, %s) is adjacent to %s which has a paralog to check' % (thisORF, ORFgene[locus_tag2ORFfeatID[thisORF]], ORFproduct[locus_tag2ORFfeatID[thisORF]], thisORFnearestWithHit))
-                # except KeyError:
-                    # if thisORF in locus_tag2ORFfeatID:
-                        # print('%s (%s) is adjacent to %s which has a paralog to check' % (thisORF, ORFproduct[locus_tag2ORFfeatID[thisORF]], thisORFnearestWithHit))
-                    # else:
-                        # print('%s is adjacent to %s which has a paralog to check' % (thisORF, thisORFnearestWithHit))
-                
                 # did find an adjacent ORF within maxdist with a homolog elsewhere (and not self i.e., not tandem repeat): are homologs part of a homologous block?
-                print('%s hits (para)logs %s' % (thisORF, ', '.join(self.ORF_hits[thisORF])))
+                # print('%s hits (para)logs %s' % (thisORF, ', '.join(self.ORF_hits[thisORF])))
                 
                 if not merging:
                     # assuming these share homology to adjacent blocks elsewhere . . .
@@ -308,74 +298,14 @@ class Finder:
         homologous_groups = set()
         for this,those in sorted(block_to_homoblocks.items()):
             homologous_groups.add(tuple(sorted(map(tuple,those))))
-            if len(those) > 0:
-                for these in those:
-                    if this != tuple(these):
-                        print('%s => %s\n' % ('+'.join(this), '+'.join(these)))
+            # if len(those) > 0:
+                # for these in those:
+                    # if this != tuple(these):
+                        # print('%s => %s\n' % ('+'.join(this), '+'.join(these)))
 
         self.homologous_groups = sorted(homologous_groups)
 
         self.block_to_homoblocks = block_to_homoblocks
-    def NeedlemanWunch_align(self, sA_info, sB_info, \
-                             model = 'affine:global', exhaustive = 'no', protein = 'no', \
-                             exe_exonerate = ['external_programs','exonerate-2.2.0-x86_64', 'bin','exonerate']):
-        
-        '''
-        Call exonerate as a subprocess to do a Needleman-Wunch-like gapped pairwaise globl alignment
-        http://www.ebi.ac.uk/~guy/exonerate/exonerate.man.html
-        '''
-
-        # optionally over-ride default external executable for this method, 
-        # if set upstream
-        if hasattr(self, '_exe_exonerate'):
-            exe_exonerate = _os.path.sep.join(self._exe_exonerate)
-        else:
-            exe_exonerate = _os.path.sep.join(exe_exonerate)
-
-        (sA, eA, strandA) = sA_info
-        (sB, eB, strandB) = sB_info
-
-        if strandA == 1:
-            seqA = self.genome_genbank_record.seq[sA:eA]
-        else:
-            seqA = self.genome_genbank_record.seq[sA:eA].reverse_complement()
-
-        if strandB == 1:
-            seqB = self.genome_genbank_record.seq[sB:eB]
-        else:
-            seqB = self.genome_genbank_record.seq[sB:eB].reverse_complement()
-
-        if protein in (True, 'yes'):
-            seqA = seqA.translate()
-            seqB = seqB.translate()
-
-        _SeqIO.write(_SeqRecord(seqA, id = 'A'), 'A.fa', 'fasta')
-        _SeqIO.write(_SeqRecord(seqB, id = 'B'), 'B.fa', 'fasta')
-
-        cmd = [exe_exonerate, 
-               '--model', model, 
-               '--verbose', '0', 
-               '--exhaustive', exhaustive, 
-               #'--refine', 'full',
-               # report the single best alignment, however bad it is
-               '--showvulgar', 'yes', 
-               '--showalignment', 'no', 
-               '-n', '1', 
-               '-s', '0',
-               'A.fa', 'B.fa']
-
-        try:
-            aln = _subprocess.check_output(cmd).split('\n')[0]
-            if _os.path.exists('A.fa'):
-                _os.unlink('A.fa')
-            if _os.path.exists('B.fa'):
-                _os.unlink('B.fa')
-
-        except _subprocess.CalledProcessError as e:
-            print("Exonerate pairwise alignment of duplicated regions failed:\n"), e.output
-            aln = ''
-
-        return(aln)
     def getAlnFromVULGAR(self, sA_info, sB_info, vulgar, protein = 'yes'):
         '''convert VULGAR output of exonerate to aligned sequences'''
 
@@ -429,54 +359,6 @@ class Finder:
                     Ai += forB
 
         return(''.join(Aalnd), ''.join(Balnd))
-    def NeedlemanWunch_seqalign(self, sA_info, sB_info, protein = 'no'):
-        
-        '''
-        Call seq-align as a subprocess to do a Needleman-Wunch gapped pairwise globl alignment
-        '''
-        (sA, eA, strandA) = sA_info
-        (sB, eB, strandB) = sB_info
-
-        if strandA == 1:
-            #seqA = self.genome_genbank_record.seq[sA:eA]
-            seqA = _Seq(self.genome.sequence[sA:eA].tostring())
-        else:
-            #seqA = self.genome_genbank_record.seq[sA:eA].reverse_complement()
-            seqA = _Seq(self.genome.sequence[sA:eA].tostring()).reverse_complement()
-
-        if strandB == 1:
-            #seqB = self.genome_genbank_record.seq[sB:eB]
-            seqB = _Seq(self.genome.sequence[sB:eB].tostring())
-        else:
-            #seqB = self.genome_genbank_record.seq[sB:eB].reverse_complement()
-            seqB = _Seq(self.genome.sequence[sB:eB].tostring()).reverse_complement()
-
-        if protein in (True, 'yes'):
-            seqA = seqA.translate()
-            seqB = seqB.translate()
-
-        # seqA = _Seq('cgcacgatttgtagtcccgtgtctgcatggacatagcca')
-        # seqB = _Seq('aacacaaacaacacaccgggcctagtagagagttggcggcgcc')
-        # seqA = _Seq('AMKINVFYAEEEESRCSRPFIISPSLVVGLREQRNLKLDSKKASLV')
-        # seqB = _Seq('AMKIIKIKNVFYAESRCSRPFIISPSLVVGVQRREQRNLKLDSKKASLV')
-        seqrecords = [_SeqRecord(seqA, id = 'A'), _SeqRecord(seqB, id = 'B')]
-        out_handle = _StringIO()
-        _SeqIO.write(seqrecords, out_handle, 'fasta')
-        cmd = [self.exe_aligner]
-        cmd += ['--stdin']
-        # because expected to deteriorate?
-        # cmd += ['--freeendgap']
-        proc = _subprocess.Popen(
-            cmd, stdout = _subprocess.PIPE,
-            stdin = _subprocess.PIPE)
-
-        proc.stdin.write(out_handle.getvalue())
-        proc.stdin.close()
-        result = proc.stdout.read()
-        proc.wait()
-        A, B = result.split('\n')[:2]
-        return(A, B)
-
     def make_non_alignment(self, sA_info, sB_info):
 
         (sA, eA, strandA) = sA_info
@@ -516,7 +398,11 @@ class Finder:
         self.ORFs_in_tandem_repeats = ORFs_in_tandem_repeats
 
 
-    def align_blocks(self, extend_len = 200, max_extensions = 10, min_pID = 0.95, num_terminal_window_steps = 5):
+    def align_blocks(self, extend_len = 200,
+                                max_extensions = 10,
+                                min_pID = 0.95,
+                                num_terminal_window_steps = 5):
+        
         '''
         Align homologous blocks using the Needleman Wunch pairwise global alignment
         
@@ -524,309 +410,403 @@ class Finder:
             extend_len: initial extension length
             max_extensions: maximum extension iterations
             min_pID: min percent ID over . . .
-            num_terminal_window_steps: . . . this numer of moving window steps, 
+            num_terminal_window_steps: . . . this number of moving window steps, 
         to continue extension
         '''
 
-        unexpecteds = []
+        ## add rRNA loci? <== just copy a version of this removing all the AA stuff
+
+        def countGaps(seq_str, from_end = False):
+            if from_end:
+                seq_str = seq_str[::-1]
+            
+            num_gaps = 0
+            for char in seq_str:
+                if char == '-':
+                    num_gaps += 1
+                else:
+                    break
+            return(num_gaps)
+
+        def alignNW(seqrecords, exe_aligner = self.exe_aligner):
+            '''Needleman-Wunsch alignment using seqalign
+            
+            seqrecords must be a list of two BioPython SeqRecord instances
+            '''
+            out_handle = _StringIO()
+            _SeqIO.write(seqrecords, out_handle, 'fasta')
+            cmd = [exe_aligner]
+            cmd += ['--stdin']
+            # because expected to deteriorate?
+            # cmd += ['--freeendgap']
+            proc = _subprocess.Popen(
+                cmd, stdout = _subprocess.PIPE,
+                stdin = _subprocess.PIPE)
+            
+            proc.stdin.write(out_handle.getvalue())
+            proc.stdin.close()
+            result = proc.stdout.read()
+            proc.wait()
+            A, B = result.split('\n')[:2]
+            # put aligned amino acids into a SeqRecord
+            A = _SeqRecord(_Seq(A), id = 'A')
+            B = _SeqRecord(_Seq(B), id = 'B')
+            return([A,B])
+
+        def alignNW_Nuc_as_AA(nuc_A_seq, nuc_B_seq):
+            A_nuc, B_nuc = _SeqRecord(nuc_A_seq, id = 'A'), _SeqRecord(nuc_B_seq, id = 'B')
+            A_aa, B_aa = _SeqRecord(nuc_A_seq.translate(), id = 'A'), _SeqRecord(nuc_B_seq.translate(), id = 'B')
+            A_aa, B_aa = alignNW([A_aa, B_aa])
+            # align nucleotides as codons to aligned amino acids
+            alnd = self.Nuc2AA([A_nuc, B_nuc], [A_aa, B_aa])
+            return(alnd['A'], alnd['B'])
+
+        # for inter-ORF nucleotides:
+        # alignNW(seqrecords)
+        # for ORFs
+        # alignNW_NUC_as_AA(nuc_A_seq, nuc_B_seq)
+
+        def collectForAligning(repeated_loci_ranges, genome_seq):
+            repeated_locus_types = []
+            repeated_locus_strings = []
+            for i in range(len(repeated_loci_ranges)-1):
+                start = repeated_loci_ranges[i]
+                end = repeated_loci_ranges[i+1]
+                repeated_locus_strings += [genome_seq[start:end]]
+                # ORFs and inter-ORFs alternate
+                if i % 2 == 0:
+                    repeated_locus_types += ['ORF']
+                else:
+                    repeated_locus_types += ['inter']
+            
+            return({'types':repeated_locus_types,'seqs':repeated_locus_strings})
+
+
+        def reverseRange(start, end, sequence):
+            '''given start and end ordinates and sequence, return equivalents on reverse strand'''
+            return(len(sequence) - end, len(sequence) - start)
+
+        # forward = _Seq('TGGCCAAAGACACCATCGTGCTGCGCGAATC')
+        # reverse = forward.reverse_complement()
+        # s, e = 12, 19
+        # str(reverse[slice(*reverseRange(s,e,forward))]) == str(forward[s:e].reverse_complement())
+
+        def collectLociRanges(repeated_loci, 
+                              ORF_ranges, 
+                              genome_sequence, 
+                              strand):
+            ORF_overlaps = []
+            loci_ranges = []
+            for i,locus in enumerate(repeated_loci[::strand]):
+                start, end = ORF_ranges[locus][:2]
+                # adjust non-intact coding regions with partial codons
+                #if (e-s) % 3 == 0:
+                if strand == -1:
+                    start, end = reverseRange(start, end, genome_sequence)
+                
+                if i > 0 and start < loci_ranges[-1]:
+                    # this ORF start is prior to previous ORF end
+                    # record overlaps for pair-specific correction
+                    # record index of first one
+                    ORF_overlaps += [i-1]
+                
+                loci_ranges += [start, end]
+            
+            return(loci_ranges, ORF_overlaps)
+
+        def do_extension(genome_use_A, 
+                         genome_use_B, 
+                         extensionA_start, 
+                         extensionB_start, 
+                         extend_len,
+                         max_extensions,
+                         direction = 1):
+            
+            extensionA_end = int(extensionA_start)
+            extensionB_end = int(extensionB_start)
+            for extend_num in range(max_extensions):
+                # collect next chunk
+                extensionA_end += (extend_len * direction)
+                # print(extensionA_start,extensionA_end,extend_len)
+                # allow for extending at start
+                ext_start_use, ext_end_use = sorted([extensionA_start,extensionA_end])
+                SeqRecA = _SeqRecord(genome_use_A[ext_start_use:ext_end_use], id = 'A')
+                extensionB_end += (extend_len * direction)
+                # print(extensionB_start,extensionB_end,extend_len)
+                ext_start_use, ext_end_use = sorted([extensionB_start,extensionB_end])
+                SeqRecB = _SeqRecord(genome_use_B[ext_start_use:ext_end_use], id = 'B')
+                # align next chunk
+                SeqRecA_alnd,SeqRecB_alnd = alignNW([SeqRecA,SeqRecB])
+                # print(str(SeqRecA_alnd.seq))
+                # print(str(SeqRecB_alnd.seq))
+                pIDs = self.get_percent_ID(SeqRecA_alnd.seq,SeqRecB_alnd.seq, window = 100, step = 20)
+                # if end of extended bit is high ID, extend and test again until pID drops off
+                mean_pID = sum([pID for pos,pID in pIDs][::direction][-num_terminal_window_steps:])/float(num_terminal_window_steps)
+                print('mean pID: {:.0%}, min pID: {:.0%} after {:,} bp'.format(mean_pID,min_pID,(extend_num+1)*extend_len))
+                if mean_pID < min_pID:
+                    # extension divergent enough be at end of duplication
+                    print('end of extension at ends of contiguities')
+                    break
+                
+                if extend_num == max_extensions-1:
+                    # should have broken by now: no more iterations
+                    # add this aligned bit anyway
+                    print('WARNING: extended %s x %s bp but regions not yet divergent enough' % (max_extensions, extend_len))
+            
+            return(str(SeqRecA_alnd.seq), extensionA_end, str(SeqRecB_alnd.seq), extensionB_end)
+
+
+        genome_strands = {}
+        genome_strands[1] = _Seq(self.genome.sequence.tostring())
+        genome_strands[-1] = genome_strands[1].reverse_complement()
 
         homologous_groups_alnd = []
         for g_n,groups in enumerate(self.homologous_groups):
+            print('\n\nHomologous Group {}'.format(g_n))
+            # for each group, align pairwise combinations of homologous, contiguous blocks
             alignment_combos = {}
-            for n,group1_forward in enumerate(groups[:-1]):
-                strandA = self.genome.ORF_ranges[group1_forward[0]][2]
-                group1 = group1_forward[::strandA]
-                for group2_forward in groups[(n+1):]:   # break
-                    strandB = self.genome.ORF_ranges[group2_forward[0]][2]
-                    group2 = group2_forward[::strandB]
-                    #print(group1,group2)
-                    alndA = []
-                    alndB = []
-                    delimitersA = []
-                    delimitersB = []
-                    # same strand
-                    # pre alignment: before first ORF
-                    if strandA == 1:
-                        sA = self.genome.ORF_ranges[group1[0]][0] - extend_len
-                        eA = self.genome.ORF_ranges[group1[0]][0]
+            for n,repeated_loci_A in enumerate(groups[:-1]):
+                print('A: {}'.format('-'.join(repeated_loci_A)))
+                strandA = self.genome.ORF_ranges[repeated_loci_A[0]][2]
+                # print(repeated_loci_A, strandA)
+                genome_use_A = genome_strands[strandA]
+                # collect ranges for these loci
+                # locus|inter-locus|locus etc
+                loci_ranges_use_A, ORF_overlaps_A = collectLociRanges(repeated_loci_A,
+                                                                      self.genome.ORF_ranges, 
+                                                                      genome_use_A,
+                                                                      strandA)
+                for repeated_loci_B in groups[(n+1):]:
+                    print('vs. B: {}'.format(' - '.join(repeated_loci_B)))
+                    strandB = self.genome.ORF_ranges[repeated_loci_B[0]][2]
+                    # print(repeated_loci_B, strandB)
+                    genome_use_B = genome_strands[strandB]
+                    # collect ranges for these loci
+                    # locus|inter-locus|locus etc
+                    loci_ranges_use_B, ORF_overlaps_B = collectLociRanges(repeated_loci_B,
+                                                                          self.genome.ORF_ranges, 
+                                                                          genome_use_B,
+                                                                          strandB)
+                    if len(repeated_loci_B) > 1:
+                        # resolve any overlapping ORFs
+                        # compare num AAs per homologous ORFs
+                        # identify if length difference of prior or subsequent homologous ORFs are closest to overlap length
+                        loci_ranges_updated_A = [loci_ranges_use_A[0]]
+                        loci_ranges_updated_B = [loci_ranges_use_B[0]]
+                        for i in range(len(repeated_loci_A)-1):
+                            # i is this ORF, i+1 is next
+                            preORFA_start, preORFA_end = loci_ranges_use_A[(i)*2:(i)*2+2]
+                            preORFB_start, preORFB_end = loci_ranges_use_B[(i)*2:(i)*2+2]
+                            postORFA_start, postORFA_end = loci_ranges_use_A[(i+1)*2:(i+1)*2+2]
+                            postORFB_start, postORFB_end = loci_ranges_use_B[(i+1)*2:(i+1)*2+2]
+                            if i in ORF_overlaps_A or i in ORF_overlaps_B:
+                                # align ORFs
+                                preORFA_aln, preORFB_aln = alignNW_Nuc_as_AA(
+                                                                genome_use_A[preORFA_start:preORFA_end], 
+                                                                genome_use_B[preORFB_start:preORFB_end])
+                                num_gaps_preA = countGaps(preORFA_aln.seq, from_end = True)
+                                num_gaps_preB = countGaps(preORFB_aln.seq, from_end = True)
+                                
+                                postORFA_aln, postORFB_aln = alignNW_Nuc_as_AA(
+                                                                genome_use_A[postORFA_start:postORFA_end], 
+                                                                genome_use_B[postORFB_start:postORFB_end])
+                                
+                                num_gaps_postA = countGaps(postORFA_aln.seq, from_end = False)
+                                num_gaps_postB = countGaps(postORFB_aln.seq, from_end = False)
+                                overlap_nuc_len_A = preORFA_end - postORFA_start
+                                overlap_nuc_len_B = preORFB_end - postORFB_start
+                                if overlap_nuc_len_A > 0:
+                                    print('Overlap in A of {} between ORFs {} and {}'.format(overlap_nuc_len_A, i, i+1))
+                                    print('Caused {} gaps in B pre-ORF; {} gaps in B post-ORF'.format(num_gaps_preB, num_gaps_postB))
+                                    ## create new ranges including inter-ORF
+                                    if num_gaps_postB > 0 and num_gaps_preB > 0:
+                                        e = 'ORF overlaps in both repeats: still to implement. '\
+                                             'Please raise an issue at github.com/daveuu/baga'
+                                        raise NotImplementedError(e)
+                                    if num_gaps_postB > 0:
+                                        # early start in post-ORF A
+                                        new_postORFA_start = postORFA_start + num_gaps_postB
+                                        # print('a. New inter-ORF: {}-{}'.format(preORFA_end, 
+                                                                               # new_postORFA_start))
+                                        loci_ranges_updated_A += [preORFA_end, new_postORFA_start]
+                                    elif num_gaps_preB > 0:
+                                        # late end in pre-ORF A
+                                        new_preORFA_end = preORFA_end - num_gaps_preB
+                                        # print('b. New inter-ORF: {}-{}'.format(new_preORFA_end, 
+                                                                               # post_A_start))
+                                        loci_ranges_updated_A += [new_preORFA_end, post_A_start]
+                                    else:
+                                        # print('UNEXPECTED ALIGNMENT AT OVERLAP: '
+                                        # 'could not detect early start or late stop '
+                                        # 'so just removing overlap to the nearest '
+                                        # 'codon in the next ORF without inserting inter-ORF zone')
+                                        ends_codon_diff = (postORFA_end - preORFA_end) % 3
+                                        loci_ranges_updated_A += [preORFA_end, preORFA_end + ends_codon_diff]
+
+                                else:
+                                    loci_ranges_updated_A += [preORFA_end, postORFA_start]
+                                        
+                                if overlap_nuc_len_B > 0:
+                                    print('Overlap in B of {} between ORFs {} and {}'.format(overlap_nuc_len_B, i, i+1))
+                                    print('Caused {} gaps in A pre-ORF; {} gaps in A post-ORF'.format(num_gaps_preA, num_gaps_postA))
+                                    ## create new ranges including inter-ORF
+                                    if num_gaps_postA > 0 and num_gaps_preA > 0:
+                                        e = ('ORF overlaps in both repeats: still to implement. '\
+                                             'Please raise an issue at github.com/daveuu/baga')
+                                        raise NotImplementedError(e)
+                                    if num_gaps_postA > 0:
+                                        # early start in post-ORF B
+                                        new_postORFB_start = postORFB_start + num_gaps_postA
+                                        # print('c. New inter-ORF: {}-{}'.format(preORFB_end, new_postORFB_start))
+                                        loci_ranges_updated_B += [preORFB_end, new_postORFB_start]
+                                    elif num_gaps_preA > 0:
+                                        # late end in pre-ORF B
+                                        new_preORFB_end = preORFB_end - num_gaps_preA
+                                        # print('d. New inter-ORF: {}-{}'.format(new_preORFB_end, postORFB_start))
+                                        loci_ranges_updated_B += [new_preORFB_end, postORFB_start]
+                                    else:
+                                        # print('UNEXPECTED ALIGNMENT AT OVERLAP: '
+                                        # 'could not detect early start or late stop '
+                                        # 'so removing overlap without inserting inter-ORF zone')
+                                        #loci_ranges_updated_B += [preORFB_end, preORFB_end]
+                                        ends_codon_diff = (postORFB_end - preORFB_end) % 3
+                                        loci_ranges_updated_B += [preORFB_end, preORFB_end + ends_codon_diff]
+                                else:
+                                    loci_ranges_updated_B += [preORFB_end, postORFB_start]
+                                
+                            else:
+                                # no overlaps: nothing to adjust
+                                # add current ORF ranges
+                                loci_ranges_updated_A += [preORFA_end, postORFA_start]
+                                loci_ranges_updated_B += [preORFB_end, postORFB_start]
+                            
+                        loci_ranges_updated_A += [postORFA_end]
+                        loci_ranges_updated_B += [postORFB_end]
+                        # check updated versions are complete and without overlaps
+                        assert len(loci_ranges_updated_A) == len(loci_ranges_use_A)
+                        assert loci_ranges_updated_A == sorted(loci_ranges_updated_A)
+                        assert len(loci_ranges_updated_B) == len(loci_ranges_use_B)
+                        assert loci_ranges_updated_B == sorted(loci_ranges_updated_B)
                     else:
-                        sA = self.genome.ORF_ranges[group1[0]][1]
-                        eA = self.genome.ORF_ranges[group1[0]][1] + extend_len
+                        loci_ranges_updated_A = list(loci_ranges_use_A)
+                        loci_ranges_updated_B = list(loci_ranges_use_B)
                     
-                    if strandB == 1:
-                        sB = self.genome.ORF_ranges[group2[0]][0] - extend_len
-                        eB = self.genome.ORF_ranges[group2[0]][0]
+                    ## ensure all coding regions are whole codons
+                    ## sometimes incomplete codons get through in
+                    ## annotated pseudogenes or errors
+                    loci_ranges_updated_A_fixed = []
+                    loci_ranges_updated_B_fixed = []
+                    for i in range(len(loci_ranges_updated_A)/2):
+                        s,e = loci_ranges_updated_A[(i*2):(i*2)+2]
+                        ends_codon_diff = (e - s) % 3
+                        loci_ranges_updated_A_fixed += [s, e - ends_codon_diff]
+                        s,e = loci_ranges_updated_B[(i*2):(i*2)+2]
+                        ends_codon_diff = (e - s) % 3
+                        loci_ranges_updated_B_fixed += [s, e - ends_codon_diff]
+                    
+                    loci_ranges_updated_A = loci_ranges_updated_A_fixed
+                    loci_ranges_updated_B = loci_ranges_updated_B_fixed
+                    
+                    ## now do the actual aligning
+                    repeated_seqs2aln_A = collectForAligning(loci_ranges_updated_A, genome_use_A)
+                    repeated_seqs2aln_B = collectForAligning(loci_ranges_updated_B, genome_use_B)
+                    Aseq_all_alnd = []
+                    Bseq_all_alnd = []
+                    for i,(Aseq,Bseq) in enumerate(zip(repeated_seqs2aln_A['seqs'],
+                                                       repeated_seqs2aln_B['seqs'])):
+                        if repeated_seqs2aln_A['types'][i] == 'ORF':
+                            Aseq_aln, Bseq_aln = alignNW_Nuc_as_AA(Aseq, Bseq)
+                        else:
+                            # inter-ORF
+                            Aseq_aln, Bseq_aln = alignNW([_SeqRecord(Aseq, id = 'A'), 
+                                                          _SeqRecord(Bseq, id = 'B')])
+                        
+                        Aseq_all_alnd += [str(Aseq_aln.seq)]
+                        Bseq_all_alnd += [str(Bseq_aln.seq)]
+                    
+                    ## now extend alignments at each end
+                    if len(self.ORFs_in_tandem_repeats.intersection(
+                            repeated_loci_A + repeated_loci_B)) > 0:
+                        print('Not extending tandem repeats')
                     else:
-                        sB = self.genome.ORF_ranges[group2[0]][1]
-                        eB = self.genome.ORF_ranges[group2[0]][1] + extend_len
-                    
-                    delimitersA += [(sA,eA)]
-                    delimitersB += [(sB,eB)]
-                    #aln_raw = self.NeedlemanWunch_align((sA,eA,strandA), (sB,eB,strandB), model = 'affine:global', exhaustive = 'yes', protein = 'no')
-                    A,B = self.NeedlemanWunch_seqalign((sA,eA,strandA), (sB,eB,strandB), protein = 'no')
-                    
-                    # if 'vulgar' in aln_raw:
-                        # A,B = self.getAlnFromVULGAR((sA,eA,strandA), (sB,eB,strandB), aln_raw, protein = 'no')
-                        # if (A, B) == ('X','X'):
-                            # # no alignment here, make alignment with A and B matching all gaps for percent identity i.e. zero
-                            # A, B = self.make_non_alignment((sA, eA, strandA), (sB, eB, strandB))
-                        # check for near-100% identity at beginning and extend further as necessary
-                        #elif len(self.ORFs_in_tandem_repeats.intersection(group1 + group2)) == 0:
-                    if len(self.ORFs_in_tandem_repeats.intersection(group1 + group2)) == 0:
-                            # only if ORFs not in known tandem repeats
-                        pIDs = self.get_percent_ID(A, B, window = 100, step = 20)
-                        # if beginning of extended bit is high ID, extend and test again until pID drops off
-                        for extend_multiplier in range(2,max_extensions):  #break
-                            if sum([pID for pos,pID in pIDs][:num_terminal_window_steps])/num_terminal_window_steps > min_pID:
-                                # print('extending beginning of contiguity: %s bp' % (extend_multiplier * extend_len))
-                                # on reverse strand its like extending at the end WRT getting the target sequence out of the chromosome sequence
-                                if strandA == 1:
-                                    sA = self.genome.ORF_ranges[group1[0]][0] - extend_len * extend_multiplier
-                                else:
-                                    eA = self.genome.ORF_ranges[group1[0]][1] + extend_len * extend_multiplier
-                                
-                                if strandB == 1:
-                                    sB = self.genome.ORF_ranges[group2[0]][0] - extend_len * extend_multiplier
-                                else:
-                                    eB = self.genome.ORF_ranges[group2[0]][1] + extend_len * extend_multiplier
-                                
-                                A ,B = self.NeedlemanWunch_seqalign((sA,eA,strandA), (sB,eB,strandB), protein = 'no')
-                                    #aln_raw = self.NeedlemanWunch_align((sA,eA,strandA), (sB,eB,strandB), model = 'affine:global', exhaustive = 'yes', protein = 'no')
-                                    # if 'vulgar' in aln_raw:
-                                        # A, B = self.getAlnFromVULGAR((sA, eA, strandA), (sB, eB, strandB), aln_raw, protein = 'no')
-                                        # if (A, B) == ('X','X'):
-                                            # # no alignment here, make alignment with A and B matching all gaps for percent identity i.e. zero
-                                            # A, B = self.make_non_alignment((sA, eA, strandA), (sB, eB, strandB))
-                                pIDs = self.get_percent_ID(A, B, window = 100, step = 20)
-                                    # else:
-                                        # # unexpected: previously alignable but not after extension . . .
-                                        # # print('no alignment!?')
-                                        # unexpecteds += [g_n]
-                                        # break
-                            else:
-                                # divergence at end of this contiguous block is wider than set by min_pID
-                                # so end of block reached: stop extension
-                                # update extended iterators, include the final extension as pID fall-off is somewhere within
-                                delimitersA[-1] = (sA,eA)
-                                delimitersB[-1] = (sB,eB)
-                                # print('end of extension at start of contiguities')
-                                break
-                    #else:
-                        # no alignment here, make alignment with A and B matching all gaps for percent identity i.e. zero
-                     #   A, B = self.make_non_alignment((sA, eA, strandA), (sB, eB, strandB))
-                    
-                    ## end of pre-ORF alignment and extension
-                    
-                    ## now align each ORF and inter-ORF gap
-                    
-                    alndA += [A]
-                    alndB += [B]
-                    for o in range(len(group1)):
-                        # first align ORFs as coding
-                        sA = self.genome.ORF_ranges[group1[o]][0]
-                        eA = self.genome.ORF_ranges[group1[o]][1]
-                        sB = self.genome.ORF_ranges[group2[o]][0]
-                        eB = self.genome.ORF_ranges[group2[o]][1]
-                        
-                        delimitersA += [(sA,eA)]
-                        delimitersB += [(sB,eB)]
-                        
-                        #aln_raw = self.NeedlemanWunch_align((sA,eA,strandA), (sB,eB,strandB), model = 'affine:global', exhaustive = 'yes', protein = 'yes')
-                        #A,B = self.getAlnFromVULGAR((sA, eA, strandA), (sB, eB, strandB), aln_raw, protein = 'yes')
-                        A, B = self.NeedlemanWunch_seqalign((sA,eA,strandA), (sB,eB,strandB), protein = 'yes')
-                        
-                        # collect unaligned nucleotides
-                        #Anuc = self.genome_genbank_record[sA:eA]
-                        #Anuc.id = 'A'
-                        Anuc = _SeqRecord(_Seq(self.genome.sequence[sA:eA].tostring()), id = 'A')
-                        if strandA == -1:
-                            Anuc.seq = Anuc.seq.reverse_complement()
-                        
-                        #Bnuc = self.genome_genbank_record[sB:eB]
-                        #Bnuc.id = 'B'
-                        Bnuc = _SeqRecord(_Seq(self.genome.sequence[sB:eB].tostring()), id = 'B')
-                        if strandB == -1:
-                            Bnuc.seq = Bnuc.seq.reverse_complement()
-                        
-                        # put aligned amino acids into a SeqRecord
-                        A_aa = _SeqRecord(_Seq(A), id = 'A')
-                        B_aa = _SeqRecord(_Seq(B), id = 'B')
-                        
-                        # align nucleotides as codons to aligned amino acids
-                        alnd = self.Nuc2AA([Anuc, Bnuc], [A_aa, B_aa])
-                        
-                        alndA += [str(alnd['A'].seq)]
-                        alndB += [str(alnd['B'].seq)]
-                        
-                        # then align post-ORF as non-coding to reach next ORF or off the end
-                        
-                        if o + 1 != len(group1):
-                            # if not the last one, just to next ORF
-                            if strandA == 1:
-                                sA = eA
-                                eA = self.genome.ORF_ranges[group1[o + 1]][0]
-                            else:
-                                eA = sA
-                                sA = self.genome.ORF_ranges[group1[o + 1]][1]
+                        ## extend at end
+                        # check for near-100% identity at end and extend further as necessary
+                        # but not if ORFs in tandem repeats because:
+                        # alignments will be to other parts of repeat, not extending contiguities
+                        # last one, extend to get to end of duplication
+                        # get current (non-extended percent identity)
+                        pIDs = self.get_percent_ID(Aseq_all_alnd[-1], Bseq_all_alnd[-1], window = 100, step = 20)
+                        mean_pID = sum([pID for pos,pID in pIDs][::1][-num_terminal_window_steps:])/float(num_terminal_window_steps)
+                        if mean_pID > min_pID:
+                            # end of existing alignment not divergent enough to end it: extend
+                            print('extending at end')
+                            extensionA_start = int(loci_ranges_updated_A[-1])
+                            extensionB_start = int(loci_ranges_updated_B[-1])
+                            SeqRecA_alnd_seq, extensionA_end, SeqRecB_alnd_seq, extensionB_end = do_extension(genome_use_A, 
+                                                                                                              genome_use_B, 
+                                                                                                              extensionA_start, 
+                                                                                                              extensionB_start, 
+                                                                                                              extend_len,
+                                                                                                              max_extensions,
+                                                                                                              direction = 1)
                             
-                            if strandB == 1:
-                                sB = eB
-                                eB = self.genome.ORF_ranges[group2[o + 1]][0]
-                            else:
-                                eB = sB
-                                sB = self.genome.ORF_ranges[group2[o + 1]][1]
-                            
-                            if sA > eA or sB > eB:
-                                # ORF overlaps: no inter-ORF to align.
-                                # and not the last ORF pair so no extension to do.
-                                # Need to trim end of last aligned ORFs so
-                                # alignment can map back to chromosome.
-                                # Find amount to trim allowing for gaps
-                                if sA > eA:
-                                    # print('ORF overlap: %s (%s..%s)' % (sA - eA, sA, eA))
-                                    ORF_overlap = sA - eA
-                                    c = 0
-                                    for n,i in enumerate(alndA[-1][::-1]):
-                                        #print(n,i)
-                                        if i != '-':
-                                            c += 1
-                                            #print(c)
-                                        if c == ORF_overlap:
-                                            break
-                                    
-                                    #print(alndA[-1][-(n+1):])
-                                    # trim end of last alignment to remove overlap
-                                    alndA[-1] = alndA[-1][:-(n+1)]
-                                
-                                if sB > eB:
-                                    # print('ORF overlap: %s (%s..%s)' % (sB - eB, sB, eB))
-                                    ORF_overlap = sB - eB
-                                    c = 0
-                                    for n,i in enumerate(alndB[-1][::-1]):
-                                        #print(n,i)
-                                        if i != '-':
-                                            c += 1
-                                            #print(c)
-                                        if c == ORF_overlap:
-                                            break
-                                    
-                                    #print(alndB[-1][-(n+1):])
-                                    # trim end of last alignment to remove overlap
-                                    alndB[-1] = alndB[-1][:-(n+1)]
-                                
-                                # Then continue to next ORF pair
-                                continue
-                                
-                            delimitersA += [(sA, eA)]
-                            delimitersB += [(sB, eB)]
-                            
-                            #aln_raw = self.NeedlemanWunch_align((sA,eA,strandA), (sB,eB,strandB), model = 'affine:global', exhaustive = 'yes', protein = 'no')
-                            A, B = self.NeedlemanWunch_seqalign((sA,eA,strandA), (sB,eB,strandB), protein = 'no')
-                            
-                            # if 'vulgar' in aln_raw:
-                                # A, B = self.getAlnFromVULGAR((sA, eA, strandA), (sB, eB, strandB), aln_raw, protein = 'no')
-                                # if (A, B) == ('X', 'X'):
-                                    # # no alignment here, make alignment with A and B matching all gaps for percent identity i.e. zero
-                                    # A, B = self.make_non_alignment((sA, eA, strandA), (sB, eB, strandB))
-                            # else:
-                                # # no alignment here, make alignment with A and B matching all gaps for percent identity i.e. zero
-                                # A, B = self.make_non_alignment((sA, eA, strandA), (sB, eB, strandB))
-                            
-                            alndA += [A]
-                            alndB += [B]
-                            
-                        elif len(self.ORFs_in_tandem_repeats.intersection(group1 + group2)) == 0:
-                            # check for near-100% identity at end and extend further as necessary
-                            # but not if ORFs in tandem repeats because:
-                            # alignments will be to other parts of repeat, not extending contiguities
-                            # last one, extend to get to end of duplication
-                            # get current (non-extended percent identity)
-                            pIDs = self.get_percent_ID(alndA[-1], alndA[-1], window = 100, step = 20)
-                            for extend_multiplier in range(1, max_extensions + 1):
-                                # if end of extended bit is high ID, extend and test again until pID drops off
-                                if sum([pID for pos,pID in pIDs][-num_terminal_window_steps:])/num_terminal_window_steps < min_pID:
-                                    # currently the end of the alignment is divergent enough be at end of duplication
-                                    # save and continue
-                                    if extend_multiplier > 1:
-                                        # only if some extending was done
-                                        delimitersA += [(sA,eA)]
-                                        delimitersB += [(sB,eB)]
-                                        alndA += [A]
-                                        alndB += [B]
-                                        # print('end of extension at ends of contiguities')
-                                    else:
-                                        # print('no extension at ends of contiguities required')
-                                        pass
-                                    break
-                                else:
-                                    # print('extending end of contiguity: %s bp' % (extend_multiplier * extend_len))
-                                    # on reverse strand its like extending at the beginning WRT getting the target sequence out of the chromosome sequence
-                                    if strandA == 1:
-                                        sA = delimitersA[-1][-1]
-                                        eA = self.genome.ORF_ranges[group1[o]][1] + extend_len * extend_multiplier
-                                    else:
-                                        eA = delimitersA[-1][0]
-                                        sA = self.genome.ORF_ranges[group1[o]][0] - extend_len * extend_multiplier
-                                    
-                                    if strandB == 1:
-                                        sB = delimitersB[-1][-1]
-                                        eB = self.genome.ORF_ranges[group2[o]][1] + extend_len * extend_multiplier
-                                    else:
-                                        eB = delimitersB[-1][0]
-                                        sB = self.genome.ORF_ranges[group2[o]][0] - extend_len * extend_multiplier
-                                    
-                                    A,B = self.NeedlemanWunch_seqalign((sA,eA,strandA), (sB,eB,strandB), protein = 'no')
-                                    #aln_raw = self.NeedlemanWunch_align((sA,eA,strandA), (sB,eB,strandB), model = 'affine:global', exhaustive = 'yes', protein = 'no')
-                                    pIDs = self.get_percent_ID(A, B, window = 100, step = 20)
-                                    # if 'vulgar' in aln_raw:
-                                        # A, B = self.getAlnFromVULGAR((sA, eA, strandA), (sB, eB, strandB), aln_raw, protein = 'no')
-                                        # if (A, B) == ('X','X'):
-                                            # # no alignment here, make alignment with A and B matching all gaps for percent identity i.e. zero
-                                            # A, B = self.make_non_alignment((sA, eA, strandA), (sB, eB, strandB))
-                                        # # get pIDs for last extension
-                                        # pIDs = self.get_percent_ID(A, B, window = 100, step = 20)
-                                    # else:
-                                        # if extend_multiplier == 1:
-                                            # # first extension did not align: no homology immediatley after ORFs
-                                            # A, B = self.make_non_alignment((sA, eA, strandA), (sB, eB, strandB))
-                                            # pIDs = self.get_percent_ID(A, B, window = 100, step = 20)
-                                        # else:
-                                            # # unexpected: previously alignable but not after further extension . . .
-                                            # # print('no alignment!?')
-                                            # unexpecteds += [g_n]
-                                            # break
-                                
-                                if extend_multiplier == max_extensions:
-                                    # should have broken by now
-                                    # print('WARNING: extended %s x %s bp but regions not yet divergent enough' % (extend_multiplier, extend_len))
-                                    delimitersA += [(sA,eA)]
-                                    delimitersB += [(sB,eB)]
-                                    alndA += [A]
-                                    alndB += [B]
+                            Aseq_all_alnd += [SeqRecA_alnd_seq]
+                            Bseq_all_alnd += [SeqRecB_alnd_seq]
+                            # update last position
+                            loci_ranges_updated_A[-1] = extensionA_end
+                            loci_ranges_updated_B[-1] = extensionB_end
+                        else:
+                            print('already divergent at end ({:.0%}), not extending'.format(mean_pID))
+                        
+                        ## extend at end
+                        # need to reverse sequences
+                        pIDs = self.get_percent_ID(Aseq_all_alnd[0], Bseq_all_alnd[0], window = 100, step = 20)
+                        mean_pID = sum([pID for pos,pID in pIDs][::-1][-num_terminal_window_steps:])/float(num_terminal_window_steps)
+                        if mean_pID > min_pID:
+                            # end of existing alignment not divergent enough to end it: extend
+                            print('extending at beginning')
+                            extensionA_start = int(loci_ranges_updated_A[0])
+                            extensionB_start = int(loci_ranges_updated_B[0])
+                            SeqRecA_alnd_seq, extensionA_end, SeqRecB_alnd_seq, extensionB_end = do_extension(genome_use_A, 
+                                                                                                              genome_use_B, 
+                                                                                                              extensionA_start, 
+                                                                                                              extensionB_start, 
+                                                                                                              extend_len,
+                                                                                                              max_extensions,
+                                                                                                              direction = -1)
+                            Aseq_all_alnd.insert(0, SeqRecA_alnd_seq)
+                            Bseq_all_alnd.insert(0, SeqRecB_alnd_seq)
+                            # update first position
+                            loci_ranges_updated_A[0] = extensionA_end
+                            loci_ranges_updated_B[0] = extensionB_end
+                        else:
+                            print('already divergent at start ({:.0%}), not extending'.format(mean_pID))
                     
+                    ## now store for next stage
                     # keep sequences in 5-3 orientation as aligned
-                    A = ''.join(alndA)
-                    B = ''.join(alndB)
+                    A = ''.join(Aseq_all_alnd)
+                    B = ''.join(Bseq_all_alnd)
                     
                     # but store ordinates reversed for -ve strand
                     if strandA == 1:
-                        delimitersA = delimitersA[0][0], delimitersA[-1][-1]
+                        delimitersA = loci_ranges_updated_A[0], loci_ranges_updated_A[-1]
                     else:
                         # from start last aligned ORF pair member (with extension) to end of first aligned pair member
-                        delimitersA = delimitersA[-1][0], delimitersA[0][-1]
+                        delimitersA = reverseRange(loci_ranges_updated_A[0], loci_ranges_updated_A[-1], genome_use_A)
                     
                     if strandB == 1:
-                        delimitersB = delimitersB[0][0], delimitersB[-1][-1]
+                        delimitersB = loci_ranges_updated_B[0], loci_ranges_updated_B[-1]
                     else:
                         # from start last aligned ORF pair member (with extension) to end of first aligned pair member
-                        delimitersB = delimitersB[-1][0], delimitersB[0][-1]
+                        delimitersB = reverseRange(loci_ranges_updated_B[0], loci_ranges_updated_B[-1], genome_use_B)
                     
                     # delimiter relative position determine strand
-                    alignment_combos[group1,group2] = ((delimitersA, A),(delimitersB, B))
+                    alignment_combos[repeated_loci_A, repeated_loci_B] = ((delimitersA, A),(delimitersB, B))
             
             homologous_groups_alnd += [alignment_combos]
 
         self.homologous_groups_alnd = homologous_groups_alnd
+
     def get_percent_ID(self, A, B, window = 100, step = 20):
         pID_per_window = []
         for i in range(0, len(A)-window, step):
@@ -904,13 +884,12 @@ class Finder:
 
         strand = aligned_seq['strand']
 
-        if aligned_seq['start'] > aligned_seq['end']:
-            print(
-            'NOT IMPLEMENTED:\n\
-            plotting reverse strand in this way using aln_pos0_2_chrm_pos0()'
-            )
-            # plot reverse complement strand of genome for easier comparison?
-            return(False)
+        e =  'The start is after end in the aligned sequence range. '\
+        'Reverse strand ranges should be be ascending as if on forward strand. '\
+        'Reverse complement is then calculated. Start is {:,}, end is {:,}, '\
+        'strand is {}'.format(
+        aligned_seq['start'], aligned_seq['end'], strand)
+        assert aligned_seq['start'] < aligned_seq['end'], e
 
         pIDs_by_chrmpos0 = {}
 
@@ -929,26 +908,28 @@ class Finder:
                     chromchar = self.genome.sequence[alnd_chrom_pos0]
                 else:
                     #chromchar = self.genome_genbank_record.seq[alnd_chrom_pos0:alnd_chrom_pos0+1].reverse_complement()[0]
-                    chromchar = _Seq(self.genome.sequence[alnd_chrom_pos0:alnd_chrom_pos0+1].tostring()).reverse_complement()[0]
+                    chromchar = _Seq(
+                            self.genome.sequence[alnd_chrom_pos0:alnd_chrom_pos0+1].\
+                            tostring()).reverse_complement()[0]
                 
                 #print(char, chromchar)
-                if char != chromchar:
-                    mismatch = True
-                    print('x')
-                    break
+                e = 'mismatch detected when assigning percent identity between '\
+                'duplications to chromosome positions . . . :-(\nReference '\
+                'chromosome used for plotting may not match that used for '\
+                "aligning duplicate region pairs? (else there's a bug)\n"\
+                'x at {}: {}={}\n{}'.format(aln_pos0, char, chromchar,aligned_seq['seq_str'])
+                assert char == chromchar, e
+                #print(strand,alnd_chrom_pos0,aln_pos0,char,chromchar,aligned_seq['start'],aligned_seq['end'])
                 try:
                     # account for width of window
                     # within which percent ID calculated
                     pIDs_by_chrmpos0[alnd_chrom_pos0 + (window / 2 * strand)] = pIDs[aln_pos0]
+                    #print('> at {}: {}={}'.format(aln_pos0, char, chromchar))
                 except KeyError:
                     pass
             
-                alnd_chrom_pos0 += strand   ############ this needs to decrement if strand == -1
+                alnd_chrom_pos0 += strand   # this needs to decrements if strand == -1
 
-        if mismatch:
-            print('WARNING: mismatch detected when assigning percent identity between duplications to chromosome positions . . . :-(')
-            print("Reference chromosome used for plotting may not match that used for aligning duplicate region pairs? (else there's a bug)")
-            assert mismatch == False
 
         return(pIDs_by_chrmpos0)
 
@@ -960,44 +941,36 @@ class Finder:
             # one pairwise: two homologs
             # three pairwise: three homologs
             these_pairwise = []
-            #print(g_n+1, len(self.homologous_groups_alnd))
             for ORFs, ORFs_info in group.items():
-                
                 ORFsA, ORFsB = ORFs
-                (sA, eA), A = ORFs_info[0]
-                (sB, eB), B = ORFs_info[1]
-                # print(ORFsA, self.genome.ORF_ranges[ORFsA[0]][:2], sA, eA)
-                # print(ORFsB, self.genome.ORF_ranges[ORFsB[0]][:2], sB, eB)
-                
                 aligned_A = {}
                 aligned_B = {}
-                
                 # start and end are base-0 chromosome sequence Python slices
                 (aligned_A['start'], aligned_A['end']), aligned_A['seq_str'] = ORFs_info[0]
                 (aligned_B['start'], aligned_B['end']), aligned_B['seq_str'] = ORFs_info[1]
-                
                 # strands of each region
                 aligned_A['strand'] = self.genome.ORF_ranges[ORFsA[0]][2]
                 aligned_B['strand'] = self.genome.ORF_ranges[ORFsB[0]][2]
-                
                 # percent identity over aligned region
                 pIDs = dict(self.get_percent_ID(aligned_A['seq_str'], aligned_B['seq_str'], window = 100, step = 20))
-                
                 # map the pIDs to from alinmnet to chromosome
+                # print('A: {} {} {}'.format(aligned_A['start'], aligned_A['end'], aligned_A['strand']))
+                # print('B: {} {} {}'.format(aligned_B['start'], aligned_B['end'], aligned_B['strand']))
+                #print('A: {}'.format(aligned_A['seq_str']))
                 aligned_A['aln_pos0_2_chrm_pos0_pIDs'] = self.aln_pos0_2_chrm_pos0_pIDs(aligned_A, pIDs, window = 100)
+                #print('B: {}'.format(aligned_B['seq_str']))
                 aligned_B['aln_pos0_2_chrm_pos0_pIDs'] = self.aln_pos0_2_chrm_pos0_pIDs(aligned_B, pIDs, window = 100)
-                
                 # store
                 aligned = {}
                 aligned['A'] = aligned_A
                 aligned['B'] = aligned_B
                 aligned['pIDs'] = pIDs
-                
                 these_pairwise += [aligned]
             
             homologous_groups_mapped += [these_pairwise]
 
         self.homologous_groups_mapped = homologous_groups_mapped
+
     def makeRanges(self, disjoint_consecs):
         ranges = []
         s = disjoint_consecs[0]
@@ -1010,6 +983,7 @@ class Finder:
 
         ranges += [(s,disjoint_consecs[-1]+1)]
         return(tuple(ranges))
+
     def identify_ambiguous_regions(self, 
                     minimum_percent_identity = 0.98, 
                     window = 100, step = 20):
@@ -1037,6 +1011,7 @@ class Finder:
                             ambiguous_ranges += [(s * step, e * step)]
                     
                     pair[label]['ambiguous_ranges'] = ambiguous_ranges
+
     def merge_ambiguous_regions(self, minimum_repeat_length = 400):
         '''
         combine all of the pairwise alignment-specific ambiguous regions genome-wide
@@ -1099,6 +1074,7 @@ class Finder:
             # repeats
             add(self.homologous_groups_mapped, 'homologous_groups_mapped')
             add(self.ambiguous_ranges, 'ambiguous_ranges')
+
     def findRepeats(self, minimum_percent_identity = 0.95, 
                           minimum_repeat_length = 400,
                           exe_bwa = False, 
@@ -1166,11 +1142,11 @@ class Finder:
         except OSError:
             pass
 
-        if not _os.path.isfile(genome_fna) or _os.path.getsize(genome_fna) == 0:
-            print('Writing genome to FASTA')
-            _SeqIO.write(_SeqRecord(_Seq(self.genome.sequence.tostring()), id = self.genome.id),
-                        genome_fna,
-                        'fasta')
+
+        print('Writing genome to FASTA')
+        _SeqIO.write(_SeqRecord(_Seq(self.genome.sequence.tostring()), id = self.genome.id),
+                    genome_fna,
+                    'fasta')
 
         #### align ORFs to chromosome ####
         cmd = [self.exe_bwa, 'index', genome_fna]
@@ -1180,6 +1156,7 @@ class Finder:
         except OSError:
             print('Problem running BWA at {}. Please use Dependencies module to install locally or check system path'.format(cmd[0]))
 
+
         # collect ORF sequences
         recs = []
         for ID,(s,e,strand,gene_name) in self.genome.ORF_ranges.items():
@@ -1187,6 +1164,7 @@ class Finder:
                 recs += [_SeqRecord(_Seq(self.genome.sequence[s:e].tostring()), id = ID)]
             else:
                 recs += [_SeqRecord(_Seq(self.genome.sequence[s:e].tostring()).reverse_complement(), id = ID)]
+
 
         _SeqIO.write(recs, genome_fna_ORFs, 'fasta')
 
@@ -1277,6 +1255,7 @@ class Finder:
                 print('Followed too many one-way ORF alignments . . . ')
                 raise
 
+
         #### get contiguous blocks and their homologs (other blocks) ####
         self.orderORFHits()
         self.getHomologousContiguousBlocks()
@@ -1285,10 +1264,11 @@ class Finder:
         self.getORFsInTandemRepeats()
         # min_pID is used to find an initial set of repeatitive and possibly 
         # divergent regions and should be lower than the eventual minimum
-        # threshold
-        self.align_blocks(min_pID = 0.95)
+        # threshold: different to minimum_percent_identity which is used for final
+        # selection of ambiguous regions below
+        self.align_blocks(min_pID = 0.85, max_extensions = 15)
         self.map_alignments_to_chromosome()
-        self.homologous_groups_mapped
+
 
         #### identify 98% (default) identical regions
         self.identify_ambiguous_regions(minimum_percent_identity = minimum_percent_identity)
