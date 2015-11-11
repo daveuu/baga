@@ -2044,7 +2044,8 @@ class Aligner:
                            pID_window = 100, 
                            pID_step = 10, 
                            path_to_omit_sequences = False,
-                           min_pID_aligned = 0.9):
+                           min_pID_aligned = 0.9,
+                           single_assembly = False):
         
         '''Align contigs to reference chromosome regions
 
@@ -2068,34 +2069,40 @@ class Aligner:
         aligned = {}
         for (s,e),contigfile in sorted(assemblies_by_region.items()):
             if e - s > 200:
-                print((s,e),e-s,contigfile)
+                # print((s,e),e-s,contigfile)
                 ref_chrom_region = _Seq(self.genome.sequence[s-num_padding_positions:e+num_padding_positions].tostring())
                 ref_region_id = 'ref_{:07d}_{:07d}'.format(s-num_padding_positions,e+num_padding_positions)
+                if single_assembly:
+                    use_contigfile = _os.path.sep.join(contigfile.split(_os.path.sep)[:-2] + ['multi_region', 'contigs.fasta'])
+                else:
+                    use_contigfile = contigfile
                 try:
                     num_contigs = 0
-                    for n,rec in enumerate(_SeqIO.parse(contigfile,'fasta')):
+                    for n,rec in enumerate(_SeqIO.parse(use_contigfile,'fasta')):
                         num_contigs += 1
                 except IOError:
-                    print('WARNING: cannot access {}'.format(contigfile))
+                    print('WARNING: cannot access {}'.format(use_contigfile))
                     print('This assembly may have failed . . .')
                     continue
                 
-                print('Found {} contigs in {} for analysis.'.format(num_contigs, contigfile))
-                for n,rec in enumerate(_SeqIO.parse(contigfile,'fasta')):
+                print('Found {} contigs in {} for analysis.'.format(num_contigs, use_contigfile))
+                for n,rec in enumerate(_SeqIO.parse(use_contigfile,'fasta')):
                     if str(rec.seq) not in unmapped_read_contigs:
-                        print('Aligning novel contig: {}'.format(rec.id))
+                        print('Aligning novel contig: {} to chromosome region {}-{} bp'.format(rec.id, s, e))
                         use_seq = rec
                         #ref_alnd,contig_alnd = self.seqalign(ref_chrom_region, rec.seq, 'smith_waterman')
                         ref_alnd,contig_alnd = self.seqalign(ref_chrom_region, rec.seq, 'needleman_wunsch')
+                        print(ref_alnd,contig_alnd)
                         pIDs = dict(self.get_percent_ID(ref_alnd, contig_alnd, window = pID_window, step = pID_step))
                         #ref_alnd_rc,contig_alnd_rc = self.seqalign(ref_chrom_region, rec.seq.reverse_complement(), 'smith_waterman')
                         ref_alnd_rc,contig_alnd_rc = self.seqalign(ref_chrom_region, rec.seq.reverse_complement(), 'needleman_wunsch')
+                        print(ref_alnd,contig_alnd)
                         pIDs_rc = dict(self.get_percent_ID(ref_alnd_rc, contig_alnd_rc, window = pID_window, step = pID_step))
                         retained = False
                         if sum(pIDs.values()) > sum(pIDs_rc.values()):
                             if max(pIDs.values()) >= min_pID_aligned:
                                 # only print if contains a pID_window bp window with > 90% identity
-                                fout = _os.path.sep.join(contigfile.split(_os.path.sep)[:-1]) + '_contig{:02d}.fna'.format(n+1)
+                                fout = _os.path.sep.join(use_contigfile.split(_os.path.sep)[:-1]) + '_contig{:02d}.fna'.format(n+1)
                                 seqs = []
                                 seqs += [_SeqRecord(seq = _Seq(ref_alnd), 
                                                     id = ref_region_id)]
@@ -2107,7 +2114,7 @@ class Aligner:
                         else:
                             if max(pIDs_rc.values()) >= min_pID_aligned:
                                 # only print if contains a pID_window bp window with > 90% identity
-                                fout = _os.path.sep.join(contigfile.split(_os.path.sep)[:-1]) + '_contig{:02d}_rc.fna'.format(n+1)
+                                fout = _os.path.sep.join(use_contigfile.split(_os.path.sep)[:-1]) + '_contig{:02d}_rc.fna'.format(n+1)
                                 seqs = []
                                 seqs += [_SeqRecord(seq = _Seq(ref_alnd_rc), 
                                                     id = ref_region_id)]

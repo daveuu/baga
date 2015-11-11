@@ -105,8 +105,16 @@ class DeNovo:
             exe = [], 
             output_folder = ['assemblies','SPAdes'],
             mem_num_gigs = 8, 
-            max_cpus = -1):
+            max_cpus = -1,
+            single_assembly = False):
         '''
+        de novo assembly of short reads using SPAdes
+
+        By default, the provided short reads in dictionary: self.paths_to_reads
+        will be assembled separately, unless single_assembly set to True in 
+        which case each set of paired read fastq files will be used in a 
+        single assembly.
+
         http://spades.bioinf.spbau.ru/release3.6.1/manual.html
         relevent inputs:
         -o <output_dir> Specify the output directory. Required option.
@@ -147,62 +155,9 @@ class DeNovo:
             from baga import Dependencies
             use_exe = _get_exe_path('spades')
 
-        start_time = _time.time()
-        # prepare commandline and launch each SPAdes assembly
-        contigs = {}
-        for cnum, (pairname, files) in enumerate(self.read_files.items()):
-            # allow use of tuples or dicts by converting dicts to lists
-            if isinstance(files, dict):
-                use_files = []
-                for k,v in sorted(files.items()):
-                    use_files += [v]
-            else:
-                use_files = files
-            
-            this_output_path = _os.path.sep.join(output_folder + [pairname])
-            if not _os.path.exists(this_output_path):
-                _os.makedirs(this_output_path)
-            
-            if isinstance(use_exe, list):
-                # allow for use of prepended executable with script to run
-                cmd = list(use_exe)
-            else:
-                # or just executable
-                cmd = [use_exe]
-            
-            cmd += ['--pe1-1', use_files[0]]
-            cmd += ['--pe1-2', use_files[1]]
-            try:
-                # use unpaired reads if available
-                cmd += ['--pe1-s', use_files[2]]
-            except IndexError:
-                pass
-            try:
-                # add a second library if provided
-                if isinstance(self.read_files2[pairname], dict):
-                    # if a dict supplied, make it a list
-                    use_files2 = []
-                    for k,v in sorted(self.read_files2[pairname].items()):
-                        use_files2 += [v]
-                else:
-                    use_files2 = self.read_files2[pairname]
-                cmd += ['--pe2-1', use_files2[0]]
-                cmd += ['--pe2-2', use_files2[1]]
-                try:
-                    cmd += ['--pe2-s', use_files2[2]]
-                except IndexError:
-                    pass
-            except AttributeError:
-                pass
-            cmd += ['-o', this_output_path]
-            cmd += ['--threads', str(max_processes)]
-            cmd += ['--memory', str(mem_num_gigs)]
-            cmd += ['--careful']
-            print(' '.join(cmd))
-            # allow for failed SPAdes runs (possibly caused by small fastq files) <== but also check they were actually built properly
-            thetime = _time.asctime( _time.localtime(_time.time()) )
-            print('about to launch SPAdes . . .')
+        def run_SPAdes(cmd):
             proc = _subprocess.Popen(cmd, stdout=_subprocess.PIPE, stderr=_subprocess.PIPE)
+            # allow for failed SPAdes runs (possibly caused by small fastq files) <== but also check they were actually built properly
             try:
                 stdout_value, stderr_value = proc.communicate()
                 checkthese = []
@@ -224,7 +179,7 @@ class DeNovo:
                 
                 # with open('___SPAdes_{}_good_{}.log'.format(cnum, thetime), 'w') as fout:
                     # fout.write(stdout_value)
-                contigs[pairname] = _os.path.sep.join([this_output_path,'contigs.fasta'])
+                path2contigs = _os.path.sep.join([this_output_path,'contigs.fasta'])
             except _subprocess.CalledProcessError as e:
                 print('SPAdes probably did not complete: error returned ({})'.format(proc.returncode))
                 print('Error: {}'.format(e))
@@ -234,11 +189,125 @@ class DeNovo:
                     fout.write('\n' + str(e.returncode) + '\n')
                     fout.write(_os.path.sep.join([this_output_path,'contigs.fasta']))
                 
-                contigs[pairname] = None
+                path2contigs = None
             
-            if len(self.read_files) > 1:
-                # report durations, time left etc
-                _report_time(start_time, cnum, len(self.read_files))
+            return(path2contigs)
+
+        if isinstance(use_exe, list):
+            # allow for use of prepended executable with script to run
+            cmd = list(use_exe)
+        else:
+            # or just executable
+            cmd = [use_exe]
+
+        contigs = {}
+        if single_assembly:
+            print('Combining reads aligned at multiple regions into single assembly')
+            if isinstance(use_exe, list):
+                # allow for use of prepended executable with script to run
+                cmd = list(use_exe)
+            else:
+                # or just executable
+                cmd = [use_exe]
+            for cnum, (pairname, files) in enumerate(self.read_files.items()):
+                # allow use of tuples or dicts by converting dicts to lists
+                if isinstance(files, dict):
+                    use_files = []
+                    for k,v in sorted(files.items()):
+                        use_files += [v]
+                else:
+                    use_files = files
+                
+                cmd += ['--pe{}-1'.format(cnum+1), use_files[0]]
+                cmd += ['--pe{}-2'.format(cnum+1), use_files[1]]
+                try:
+                    # use unpaired reads if available
+                    cmd += ['--pe{}-s'.format(cnum+1), use_files[2]]
+                except IndexError:
+                    pass
+                try:
+                    # add a second library if provided
+                    if isinstance(self.read_files2[pairname], dict):
+                        # if a dict supplied, make it a list
+                        use_files2 = []
+                        for k,v in sorted(self.read_files2[pairname].items()):
+                            use_files2 += [v]
+                    else:
+                        use_files2 = self.read_files2[pairname]
+                    cmd += ['--pe{}-1'.format(cnum+2), use_files2[0]]
+                    cmd += ['--pe{}-2'.format(cnum+2), use_files2[1]]
+                    try:
+                        cmd += ['--pe{}-s'.format(cnum+2), use_files2[2]]
+                    except IndexError:
+                        pass
+                except AttributeError:
+                    pass
+            
+            this_output_path = _os.path.sep.join(output_folder + ['multi_region'])
+            if not _os.path.exists(this_output_path):
+                _os.makedirs(this_output_path)
+            
+            cmd += ['-o', this_output_path]
+            cmd += ['--threads', str(max_processes)]
+            cmd += ['--memory', str(mem_num_gigs)]
+            cmd += ['--careful']
+            thetime = _time.asctime( _time.localtime(_time.time()) )
+            print('about to launch SPAdes . . . at {}'.format(thetime))
+            print(' '.join(cmd))
+            contigs['multi_region'] = run_SPAdes(cmd)
+        else:
+            start_time = _time.time()
+            # prepare commandline and launch each SPAdes assembly
+            contigs = {}
+            for cnum, (pairname, files) in enumerate(self.read_files.items()):
+                # allow use of tuples or dicts by converting dicts to lists
+                if isinstance(files, dict):
+                    use_files = []
+                    for k,v in sorted(files.items()):
+                        use_files += [v]
+                else:
+                    use_files = files
+                
+                cmd += ['--pe1-1', use_files[0]]
+                cmd += ['--pe1-2', use_files[1]]
+                try:
+                    # use unpaired reads if available
+                    cmd += ['--pe1-s', use_files[2]]
+                except IndexError:
+                    pass
+                try:
+                    # add a second library if provided
+                    if isinstance(self.read_files2[pairname], dict):
+                        # if a dict supplied, make it a list
+                        use_files2 = []
+                        for k,v in sorted(self.read_files2[pairname].items()):
+                            use_files2 += [v]
+                    else:
+                        use_files2 = self.read_files2[pairname]
+                    cmd += ['--pe2-1', use_files2[0]]
+                    cmd += ['--pe2-2', use_files2[1]]
+                    try:
+                        cmd += ['--pe2-s', use_files2[2]]
+                    except IndexError:
+                        pass
+                except AttributeError:
+                    pass
+                
+                this_output_path = _os.path.sep.join(output_folder + [pairname])
+                if not _os.path.exists(this_output_path):
+                    _os.makedirs(this_output_path)
+                
+                cmd += ['-o', this_output_path]
+                cmd += ['--threads', str(max_processes)]
+                cmd += ['--memory', str(mem_num_gigs)]
+                cmd += ['--careful']
+                thetime = _time.asctime( _time.localtime(_time.time()) )
+                print('about to launch SPAdes . . . at {}'.format(thetime))
+                print(' '.join(cmd))
+                contigs[pairname] = run_SPAdes(cmd)
+                if len(self.read_files) > 1:
+                    # report durations, time left etc
+                    _report_time(start_time, cnum, len(self.read_files))
 
         self.paths_to_contigs = contigs
 

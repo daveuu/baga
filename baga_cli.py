@@ -508,10 +508,10 @@ parser_Structure.add_argument('-C', "--collect",
     help = "extract short reads aligned to regions of putative rearrangements found using '--find', write to a .fastq file, assemble each of them using SPAdes and align contigs back to reference chromosome. Requires --reads_name, optionally with --include_samples to limit to specific samples and --collect_range to specify a range to collect reads for if not those already found by '--find'. Alternatively use --checkinfos_path to specify samples with corresponding 'baga.Structure.CheckerInfo-<sample_name>__<genome_name>.baga'.",
     action = 'store_true')
 
-parser_Structure.add_argument('-R', "--collect_range", 
-    help = "extract short reads aligned at specified region, write to a .fastq file, assemble de novo using SPAdes and align contigs back to reference chromosome. --num_padding_positions will be set to zero.",
+parser_Structure.add_argument('-R', "--collect_ranges", 
+    help = "extract short reads aligned at specified region or regions, write to a .fastq file, assemble de novo using SPAdes and align contigs back to reference chromosome. --num_padding_positions will be set to zero. If more than one region set e.g., --collect_ranges 10000 20000 80000 90000, the reads in range 10000-20000 bp and 80000-90000 bp along with unmapped and poorly mapped reads will be assembled together.",
     type = int,
-    nargs = 2,
+    nargs = '+',
     metavar = 'CHROMOSOME_POSITION')
 
 parser_Structure.add_argument('-F', "--force", 
@@ -1515,7 +1515,7 @@ if args.subparser == 'Structure':
     if not(args.check or args.plot or args.plot_range or args.summarise or args.collect):
         parser_Structure.error('Need at least one of --check/-c, --plot/-p or --plot_range/-r or --summarise/-s or --collect/-C')
     
-    if args.check or args.plot or args.plot_range or args.collect or args.collect_range:
+    if args.check or args.plot or args.plot_range or args.collect or args.collect_rangess:
         # collect BAMs
         if args.reads_name:
             # baga pipeline information provided
@@ -1688,7 +1688,7 @@ if args.subparser == 'Structure':
     elif args.reads_name and not args.genome_name:
         parser.error('--genome_name/-g is required with --reads_name/-n. (The baga CollectData-processed genome used with the AlignReads option)')
     
-    if args.summarise or args.collect or args.collect_range:
+    if args.summarise or args.collect or args.collect_rangess:
         # both tasks share some requirements: deal with these first
         
         if args.reads_name:
@@ -1786,7 +1786,7 @@ if args.subparser == 'Structure':
                     for start, end in info['suspect_regions']['rearrangements_extended']:
                         fout.write('"{}","{}","rearrangements2",{},{}\n'.format(genome_name, sample, start, end))
         
-        if args.collect or args.collect_range:
+        if args.collect or args.collect_rangess:
             use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
             assert all([use_path_genome,use_name_genome]), 'Could not locate genome given: {}'.format(args.genome_name)
             genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
@@ -1819,10 +1819,18 @@ if args.subparser == 'Structure':
                                         genome_name)
                 assert genome_name == collector.reads.references[0], e
                 
-                if args.collect_range:
-                    use_regions = [args.collect_range]
+                if args.collect_ranges:
+                    single_assembly = True
+                    # ensure pairs of start-end ranges given
+                    e = 'Odd number of ranges provided. Required: start-end, '\
+                    'start-end integers as --collect_ranges start end start end'
+                    assert len(args.collect_ranges) % 2 == 0, e
+                    e = 'Ranges must be non-overlapping and in ascending order'
+                    assert sorted(args.collect_ranges) == args.collect_ranges, e
+                    use_regions = zip(args.collect_ranges[::2],args.collect_ranges[1::2])
                     use_num_padding_positions = 0
                 else:
+                    single_assembly = False
                     # join main rearrangement zones with extended regions if found
                     # to get contiguous blocks for investigation
                     all_regions = sorted(
@@ -1888,7 +1896,7 @@ if args.subparser == 'Structure':
                         reads_path_unmapped[output_folder] = r1_out_path_um, r2_out_path_um, rS_out_path_um
                 
                 reads = AssembleReads.DeNovo(paths_to_reads = reads_paths, paths_to_reads2 = reads_path_unmapped)
-                reads.SPAdes(output_folder = ['read_collections', genome_name], mem_num_gigs = use_mem_gigs)
+                reads.SPAdes(output_folder = ['read_collections', genome_name], mem_num_gigs = use_mem_gigs, single_assembly = single_assembly)
                 # a dict of paths to contigs per region
                 aligner = Structure.Aligner(genome)
                 unmappedfasta = os.path.sep.join(['read_collections', 
@@ -1897,7 +1905,7 @@ if args.subparser == 'Structure':
                                                   'contigs.fasta'])
                 if os.path.exists(unmappedfasta) and os.path.getsize(unmappedfasta) > 0:
                     # provide dict of range tuples
-                    aligner.alignRegions(assemblies_by_region, use_num_padding_positions, path_to_omit_sequences = unmappedfasta)
+                    aligner.alignRegions(assemblies_by_region, use_num_padding_positions, path_to_omit_sequences = unmappedfasta, single_assembly = single_assembly)
                 else:
                     print('WARNING: no assembled unmapped and poorly mapped reads found at:\n{}'.format(unmappedfasta))
                     try:
@@ -1910,10 +1918,12 @@ if args.subparser == 'Structure':
                                                                 r2_size,
                                                                 unmappedfasta.replace('contigs.fasta','')))
                     except IOError:
-                        print('WARNING: could not find unmapped and poorly aligned reads at:\n{}\n{}\n'
-                        'this is unexpected but conceivable.'.format('a','b'))
+                        print('WARNING: could not find unmapped and poorly '\
+                        'aligned reads at:\n{}\n{}\nthis is unexpected but '\
+                        'conceivable (if ALL reads really did map to reference!).'.format(
+                                r1_out_path_um,r2_out_path_um))
                     print('proceeding with alignment of assembled putatively rearranged regions to reference nonetheless')
-                    aligner.alignRegions(assemblies_by_region, use_num_padding_positions)
+                    aligner.alignRegions(assemblies_by_region, use_num_padding_positions, single_assembly = single_assembly)
 
 ### Call Variants ###
 
