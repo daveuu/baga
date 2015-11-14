@@ -529,17 +529,19 @@ parser_Structure.add_argument('-m', "--max_memory",
     help = "maximum memory to use in gigabytes for each assembly. If not specified, total available at launch time will be used.",
     type = int)
 
-parser_CallVariants = subparser_adder.add_parser('CallVariants',
-                formatter_class = argparse.RawDescriptionHelpFormatter,
-                description = textwrap.fill('Call variants with Genome Analysis \
-Tool Kit (GATK) from each of a group of read sets previously aligned to a \
-genome via the PrepareReads option.',
-                                            text_width,
-                                            replace_whitespace = False),
-                epilog = textwrap.fill('Groups of read sets from the \
-AlignReads option are loaded by providing the name supplied previously.\n\n\
-Example usage: %(prog)s --reads_name ERR953490plus5others \
---calleach --calljoint --hardfilter\n', 
+parser_CallVariants = subparser_adder.add_parser(
+        'CallVariants',
+        formatter_class = argparse.RawDescriptionHelpFormatter,
+        description = textwrap.fill(
+                'Call variants with Genome Analysis Tool Kit (GATK) from each '\
+                'of a group of read sets previously aligned to a genome via the '\
+                'PrepareReads option.',
+                 text_width,
+                 replace_whitespace = False),
+        epilog = textwrap.fill('Groups of read sets from the AlignReads option '\
+                'are loaded by providing the name supplied previously.\n\n'\
+                'Example usage: %(prog)s --reads_name ERR953490plus5others '\
+                '--calleach --calljoint --hardfilter\n', 
 text_width, replace_whitespace = False))
 
 parser_CallVariants.add_argument('-r', "--reads_name", 
@@ -606,21 +608,22 @@ parser_CallVariants.add_argument('-J', "--JRE_1_7_path",
 
 
 
-parser_ApplyFilters = subparser_adder.add_parser('ApplyFilters',
+parser_FilterVariants = subparser_adder.add_parser('FilterVariants',
                 formatter_class = argparse.RawDescriptionHelpFormatter,
                 description = textwrap.fill('Apply filters determined by \
-the Repeats and Structure options on variant calls. VCF files will be \
+the Repeats and Structure options on variant calls and report tables of \
+effects of filters on different classes of variants. VCF files will be \
 copied with updated information marking certain variants to be excluded. \
 Vaiants can be inferred using the CallVariants option.',
                                             text_width,
                                             replace_whitespace = False),
                 epilog = textwrap.fill('Filter regions and VCF files are \
-loaded by providing the read set names (or VCF filenames, to be implemented).\n\n\
+loaded by providing the read set names or VCF filenames.\n\n\
 Example usage: %(prog)s --reads_name ERR953490plus5others \
 --genome FM209186 --filters genome_repeats rearrangements\n', 
 text_width, replace_whitespace = False))
 
-mutually_exclusive_group = parser_ApplyFilters.add_mutually_exclusive_group(required=True)
+mutually_exclusive_group = parser_FilterVariants.add_mutually_exclusive_group(required=True)
 
 mutually_exclusive_group.add_argument('-n', "--reads_name", 
     help = "name of read datasets group if processed by PrepareReads and AlignReads options. Should match --reads_name option used previously",
@@ -632,33 +635,34 @@ mutually_exclusive_group.add_argument('-p', "--vcfs_path",
     type = str,
     nargs = '+')
 
-parser_ApplyFilters.add_argument('-g', "--genome_name", 
+parser_FilterVariants.add_argument('-g', "--genome_name", 
     help = "name of genome obtained by the CollectData option",
     type = str,
     required = True)
 
-parser_ApplyFilters.add_argument('-f', "--filters", 
+parser_FilterVariants.add_argument('-f', "--filters", 
     help = "names of filters to apply. One or more of: genome_repeats provided by the Repeats option; rearrangements provided by the Structure option.",
     type = str,
     nargs = '+',
     # these choices must correspond to known_filters in CallVariants.Filter.__init__()
     # or to other_filters which are listed by variant calling program, currently just GATK
     choices = ['genome_repeats','rearrangements','GATK'],
-    required = True)
+    required = True,
+    metavar = 'FILTER_NAME')
 
-parser_ApplyFilters.add_argument('-s', "--include_samples", 
+parser_FilterVariants.add_argument('-s', "--include_samples", 
     help = "restrict filtering to these samples. If omitted, plots for all samples are produced.",
     type = str,
     nargs = '+')
 
-parser_ApplyFilters.add_argument('-r', "--report", 
+parser_FilterVariants.add_argument('-r', "--report", 
     help = "summarise the effect of filters. Only choice currently implemented is cumulative effect on total variants.",
     type = str,
     nargs = '+',
     choices = ['cumulative'],
     metavar = 'REPORT_TYPE')
 
-parser_ApplyFilters.add_argument('-i', "--path_to_rearrangements_info", 
+parser_FilterVariants.add_argument('-i', "--path_to_rearrangements_info", 
     help = "optionally supply path to where rearrangement filter information is for all samples (if not in current directory; they look like baga.Structure.CheckerInfo-<samplename>__<genomename>.baga). These must be generated using the 'Structure --check' option and are each generated from the same .bam alignment file as the corresponding, supplied VCF files.",
     type = str)
 
@@ -2032,10 +2036,10 @@ if using any of:
             caller.saveLocal(alns_name)
     
 
-### Apply Filters ###
+### Filter Variants ###
 
-if args.subparser == 'ApplyFilters':
-    print('\n-- Apply Filters (part of the Variant Calling module) --\n')
+if args.subparser == 'FilterVariants':
+    print('\n-- Filter Variants (part of the Variant Calling module) --\n')
     
     ## to apply variants, provide one reads group name
     if args.reads_name:
