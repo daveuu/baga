@@ -97,8 +97,8 @@ def dictify_vcf_header(header):
 def sortVariantsKeepFilter(header, colnames, variantrows):
     '''
     Given a VCF file contents divided up by CallVariants.parseVCF(), return a 
-    dict for tabulation of variants sorted by filters described in the VCF 
-    header.
+    dict for tabulation of variants in which each is marked with appropriate 
+    filters as described in the VCF header.
     Per sample filters stored in INFO columns must be described in header 
     ##INFO entries and have Descriptions starting "FILTER:".
     '''
@@ -184,13 +184,92 @@ def sortVariantsKeepFilter(header, colnames, variantrows):
     allfilters = FILTERfilters | INFOfilters
 
     return(variants, allfilters)
+def sortAmongBetweenReference(variants, sample_size):
+    '''Separate "among sample" and "to reference" variants
+
+    Takes a dictionary produced by .sortVariantsKeepFilter() as input, returns two 
+    of the same shape in a single dictionary
+    '''
+    variant_freqs = _Counter()
+    for sample, chromosomes in variants.items():
+        # print('==> checking {}'.format(sample))
+        for chromosome, positions in chromosomes.items():
+            # iterate through variants by position
+            for position, ((reference,query),filters) in sorted(positions.items()):
+                variant_freqs[chromosome,position,query] += 1
+
+    # sort by frequency
+    among = set()
+    to_ref = set()
+    for info,freq in variant_freqs.items():
+        if freq < sample_size:
+            among.add(info)
+        else:
+            to_ref.add(info)
+
+    print('among: {}; to reference: {}'.format(len(among),len(to_ref)))
+
+    # divide up
+    variants_among = {}
+    variants_to_ref = {}
+    for sample, chromosomes in variants.items():
+        variants_among[sample] = {}
+        variants_to_ref[sample] = {}
+        for chromosome, positions in chromosomes.items():
+            variants_among[sample][chromosome] = {}
+            variants_to_ref[sample][chromosome] = {}
+            # iterate through variants by position
+            for position, ((reference,query),filters) in sorted(positions.items()):
+                if (chromosome,position,query) in among:
+                    variants_among[sample][chromosome][position] = ((reference,query),filters)
+                elif (chromosome,position,query) in to_ref:
+                    variants_to_ref[sample][chromosome][position] = ((reference,query),filters)
+                else:
+                    raise Exception('dividing variants between and among failed!')
+
+    return({'among':variants_among, 'to_reference':variants_to_ref})
+
+def to_by_position_filtered(variants, filters_applied, summarise = True):
+    '''Sort variants by position and divide into non-filtered and filtered'''
+    by_position = _defaultdict(_Counter)
+    by_position_filtered = _defaultdict(_Counter)
+    for sample, chromosomes in variants.items():
+        for chromosome, positions in chromosomes.items():
+            # iterate through variants by position
+            for position, ((reference,query),filters) in sorted(positions.items()):
+                if len(filters & filters_applied) == 0:
+                    # retain variants without any filters flagged (of those we are interested in)
+                    by_position[chromosome][(position,reference,query,None)] += 1
+                else:
+                    for f in filters & filters_applied:
+                        # also retain those with a filter flag, seperately for each filter
+                        by_position_filtered[chromosome][(position,reference,query,f)] += 1
+
+    if summarise:
+        for f1 in sorted(filters_applied):
+            print('-- {} --'.format(f1))
+            these = []
+            for position,reference,query,f2 in sorted(by_position_filtered[chromosome]):
+                if f1 == f2:
+                    these += ['{}: {} => {}, {}'.format(position,reference,query,f2)]
+            
+            print('Total: {}'.format(len(these)))
+            print('\n'.join(these))
+
+    return(by_position,by_position_filtered)
 
 def reportCumulative(filter_order, reference_id, VCFs, VCFs_indels = False):
-    '''Generate simple table of cumulative effects of filters applied to a VCF file'''
+    '''Generate simple table of cumulative effects of filters applied to a VCF file
+
+    This function parses VCF files already created by BAGA with various filters 
+    applied and writes the total of each class of variant (SNP, indel) removed
+    by each filter to a .csv file.
+    '''
     # cumulative affect of filters
 
     ## build table column names
     colnames = ["Cumulative filters applied"]
+    # dataset == reads_names
     for dataset in sorted(VCFs):
         for v in ['SNPs', 'InDels']:
             colnames += ["{} {}".format(v, dataset)]
@@ -225,7 +304,7 @@ def reportCumulative(filter_order, reference_id, VCFs, VCFs_indels = False):
 
     collect_baga_filters = [f for f in filter_order if 'GATK' not in f]
     from glob import glob as _glob
-    # find actual VCFs . . find the VCFs with suffices that match the requested filters
+    # find actual VCFs . . find the VCFs with suffixes that match the requested filters
     VCFs_use = {}
     for dataset,varianttypes in sorted(VCFs.items()):
         VCFs_use[dataset] = {}
@@ -242,76 +321,64 @@ def reportCumulative(filter_order, reference_id, VCFs, VCFs_indels = False):
                     # OK if additional filters included in a VCF
                     VCFs_use[dataset][varianttype] = checkthis
 
+    ### need to know (i) how many samples per dataset which may span VCF files or may not . . .
 
     # build table
 
     cumulative_filters = set()
 
-    rows = []
+    variant_groups = ('all', 'among', 'to_reference')
+    rows = {group_name:list() for group_name in variant_groups}
+
     for filters in filters_applied_ordered:
         cumulative_filters.update(filters)
-        try:
-            this_row = [filter_names[filters]]
-        except KeyError:
-            this_row = ['None']
+        
+        this_row = {}
+        for group_name in variant_groups:
+            try:
+                this_row[group_name] = [filter_names[filters]]
+            except KeyError:
+                this_row[group_name] = ['None']
         
         # must be saved as sets to only count variants once each
-        #totals_by_type = dict(zip(variant_type_order, [set()] * len(variant_type_order)))
         totals_by_type = {}
-        for varianttype in variant_type_order:
-            totals_by_type[varianttype] = set()
+        for group_name in variant_groups:
+            totals_by_type[group_name] = {}
+            for varianttype in variant_type_order:
+                totals_by_type[group_name][varianttype] = set()
         
         for dataset,varianttypes in sorted(VCFs_use.items()):
-            print(dataset)
+            print('dataset: {}'.format(dataset))
             for varianttype in variant_type_order:
                 filename = varianttypes[varianttype]
                 header, header_section_order, these_colnames, variantrows = parseVCF(filename)
                 variants, allfilters = sortVariantsKeepFilter(header, these_colnames, variantrows)
-                by_position, by_position_filtered = to_by_position_filtered(variants, cumulative_filters)
-                print(varianttype, len(by_position[reference_id]))
-                this_row += [len(by_position[reference_id])]
-                totals_by_type[varianttype].update([info[0] for info in by_position[reference_id]])
-                print(totals_by_type[varianttype])
+                # divide variants into those among sample only, those between sample
+                # and reference
+                variants_divided = sortAmongBetweenReference(variants, sample_size = len(these_colnames[9:]))
+                variants_divided['all'] = variants
+                # cumulative filters applied here
+                for group_name in variant_groups:
+                    by_position, by_position_filtered = to_by_position_filtered(
+                            variants_divided[group_name], cumulative_filters)
+                    
+                    print('{} {}'.format(len(by_position[reference_id]), varianttype))
+                    this_row[group_name] += [len(by_position[reference_id])]
+                    totals_by_type[group_name][varianttype].update([info[0] for info in by_position[reference_id]])
         
-        this_row += [len(totals_by_type[varianttype]) for varianttype in variant_type_order]
-        
-        rows += [this_row]
+        # add totals for variant class in columns corresponding to variant_type_order
+        for group_name in variant_groups:
+            this_row[group_name] += [len(totals_by_type[group_name][varianttype]) for varianttype in variant_type_order]
+            rows[group_name] += [this_row[group_name]]
 
-    outfilename = 'Table_of_cumulative_variant_totals_with_filters.csv'
-    print('Printing to {}'.format(outfilename))
-    with open(outfilename, 'w') as fout:
-        fout.write(','.join(['"{}"'.format(c) for c in colnames])+'\n')
-        for row in rows:
-            fout.write(','.join(['"{}"'.format(row[0])]+[str(c) for c in row[1:]])+'\n')
+    for group_name in variant_groups:
+        outfilename = 'Table_of_cumulative_variant_totals_with_filters_{}.csv'.format(group_name)
+        print('Printing to {}'.format(outfilename))
+        with open(outfilename, 'w') as fout:
+            fout.write(','.join(['"{}"'.format(c) for c in colnames])+'\n')
+            for row in rows[group_name]:
+                fout.write(','.join(['"{}"'.format(row[0])]+[str(c) for c in row[1:]])+'\n')
 
-
-def to_by_position_filtered(variants, filters_applied, summarise = True):
-    by_position = _defaultdict(_Counter)
-    by_position_filtered = _defaultdict(_Counter)
-    for sample, chromosomes in variants.items():
-        for chromosome, positions in chromosomes.items():
-            # iterate through variants by position
-            for position, ((reference,query),filters) in sorted(positions.items()):
-                if len(filters & filters_applied) == 0:
-                    # retain variants without any filters flagged (of those we are interested in)
-                    by_position[chromosome][(position,reference,query,None)] += 1
-                else:
-                    for f in filters & filters_applied:
-                        # also retain those with a filter flag, seperately for each filter
-                        by_position_filtered[chromosome][(position,reference,query,f)] += 1
-
-    if summarise:
-        for f1 in sorted(filters_applied):
-            print('-- {} --'.format(f1))
-            these = []
-            for position,reference,query,f2 in sorted(by_position_filtered[chromosome]):
-                if f1 == f2:
-                    these += ['{}: {} => {}, {}'.format(position,reference,query,f2)]
-            
-            print('Total: {}'.format(len(these)))
-            print('\n'.join(these))
-
-    return(by_position,by_position_filtered)
 
 # hard coded information for known filter types
 known_filters = {}
