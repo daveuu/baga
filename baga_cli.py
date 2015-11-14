@@ -1790,7 +1790,7 @@ if args.subparser == 'Structure':
                     for start, end in info['suspect_regions']['rearrangements_extended']:
                         fout.write('"{}","{}","rearrangements2",{},{}\n'.format(genome_name, sample, start, end))
         
-        if args.collect or args.collect_rangess:
+        if args.collect or args.collect_ranges:
             use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
             assert all([use_path_genome,use_name_genome]), 'Could not locate genome given: {}'.format(args.genome_name)
             genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
@@ -1811,7 +1811,7 @@ if args.subparser == 'Structure':
                 use_mem_gigs = int(baga.get_available_memory())
             
             for (sample, genome_name), info in sorted(checker_info.items()):
-                path_to_fastq_folder = os.path.sep.join(['read_collections',genome_name])
+                path_to_fastq_folder = os.path.sep.join(['read_collections', genome_name])
                 if not os.path.exists(path_to_fastq_folder):
                     os.makedirs(path_to_fastq_folder)
                 
@@ -1824,6 +1824,8 @@ if args.subparser == 'Structure':
                 assert genome_name == collector.reads.references[0], e
                 
                 if args.collect_ranges:
+                    # single assembly of reads aligned to one or more ranges in reference
+                    # versus separate assemblies of multiple ranges i.e., those with putative rearrangements
                     single_assembly = True
                     # ensure pairs of start-end ranges given
                     e = 'Odd number of ranges provided. Required: start-end, '\
@@ -1868,7 +1870,7 @@ if args.subparser == 'Structure':
                         print('Nothing found at {}. Doing assembly.'.format(path_to_bad_unmapped_contigs))
                     
                     reads = AssembleReads.DeNovo(paths_to_reads = reads_path_unmapped)
-                    reads.SPAdes(output_folder = ['read_collections',genome_name], mem_num_gigs = use_mem_gigs)
+                    reads.SPAdes(output_folder = ['read_collections', genome_name], mem_num_gigs = use_mem_gigs)
                 
                 # assemble read from each region with poorly/unmapped
                 reads_paths = {}
@@ -1910,6 +1912,7 @@ if args.subparser == 'Structure':
                 if os.path.exists(unmappedfasta) and os.path.getsize(unmappedfasta) > 0:
                     # provide dict of range tuples
                     aligner.alignRegions(assemblies_by_region, use_num_padding_positions, path_to_omit_sequences = unmappedfasta, single_assembly = single_assembly)
+                    aligner.reportAlignments()
                 else:
                     print('WARNING: no assembled unmapped and poorly mapped reads found at:\n{}'.format(unmappedfasta))
                     try:
@@ -1928,6 +1931,7 @@ if args.subparser == 'Structure':
                                 r1_out_path_um,r2_out_path_um))
                     print('proceeding with alignment of assembled putatively rearranged regions to reference nonetheless')
                     aligner.alignRegions(assemblies_by_region, use_num_padding_positions, single_assembly = single_assembly)
+                    aligner.reportAlignments()
 
 ### Call Variants ###
 

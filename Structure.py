@@ -2039,6 +2039,20 @@ class Aligner:
             
 
 
+
+    def countEndGaps(self, seq, pre = True):
+        if pre:
+            use = seq
+        else:
+            use = reversed(seq)
+        num_gaps = 0
+        for c in use:
+            if c == '-':
+                num_gaps += 1
+            else:
+                break
+
+        return(num_gaps)
     def alignRegions(self, assemblies_by_region, 
                            num_padding_positions = 5000, 
                            pID_window = 100, 
@@ -2072,8 +2086,11 @@ class Aligner:
                 # print((s,e),e-s,contigfile)
                 ref_chrom_region = _Seq(self.genome.sequence[s-num_padding_positions:e+num_padding_positions].tostring())
                 ref_region_id = 'ref_{:07d}_{:07d}'.format(s-num_padding_positions,e+num_padding_positions)
+                aligned[ref_region_id] = {}
                 if single_assembly:
-                    use_contigfile = _os.path.sep.join(contigfile.split(_os.path.sep)[:-2] + ['multi_region', 'contigs.fasta'])
+                    # contigfile == .../<sample>__<genome>_<start>-<end>+<padding>/contigs.fasta
+                    use_contigfile = '_'.join(contigfile.split('_')[:-1] + ['multi_region']) + _os.path.sep + 'contigs.fasta'
+                    # use_contigfile == .../<sample>__<genome>_multi_region/contigs.fasta
                 else:
                     use_contigfile = contigfile
                 try:
@@ -2092,17 +2109,17 @@ class Aligner:
                         use_seq = rec
                         #ref_alnd,contig_alnd = self.seqalign(ref_chrom_region, rec.seq, 'smith_waterman')
                         ref_alnd,contig_alnd = self.seqalign(ref_chrom_region, rec.seq, 'needleman_wunsch')
-                        print(ref_alnd,contig_alnd)
+                        #print(ref_alnd,contig_alnd)
                         pIDs = dict(self.get_percent_ID(ref_alnd, contig_alnd, window = pID_window, step = pID_step))
                         #ref_alnd_rc,contig_alnd_rc = self.seqalign(ref_chrom_region, rec.seq.reverse_complement(), 'smith_waterman')
                         ref_alnd_rc,contig_alnd_rc = self.seqalign(ref_chrom_region, rec.seq.reverse_complement(), 'needleman_wunsch')
-                        print(ref_alnd,contig_alnd)
+                        #print(ref_alnd,contig_alnd)
                         pIDs_rc = dict(self.get_percent_ID(ref_alnd_rc, contig_alnd_rc, window = pID_window, step = pID_step))
                         retained = False
                         if sum(pIDs.values()) > sum(pIDs_rc.values()):
                             if max(pIDs.values()) >= min_pID_aligned:
                                 # only print if contains a pID_window bp window with > 90% identity
-                                fout = _os.path.sep.join(use_contigfile.split(_os.path.sep)[:-1]) + '_contig{:02d}.fna'.format(n+1)
+                                fout = _os.path.sep.join(use_contigfile.split(_os.path.sep)[:-1]) + '_{}_vs_contig{:02d}.fna'.format(ref_region_id,n+1)
                                 seqs = []
                                 seqs += [_SeqRecord(seq = _Seq(ref_alnd), 
                                                     id = ref_region_id)]
@@ -2111,10 +2128,11 @@ class Aligner:
                                 _SeqIO.write(seqs, fout, 'fasta')
                                 print('Writing: {}'.format(fout))
                                 retained = True
+                                aligned[ref_region_id]['contig{:02d}'.format(n+1)] = (ref_alnd, contig_alnd)
                         else:
                             if max(pIDs_rc.values()) >= min_pID_aligned:
                                 # only print if contains a pID_window bp window with > 90% identity
-                                fout = _os.path.sep.join(use_contigfile.split(_os.path.sep)[:-1]) + '_contig{:02d}_rc.fna'.format(n+1)
+                                fout = _os.path.sep.join(use_contigfile.split(_os.path.sep)[:-1]) + '_{}_vs_contig{:02d}_rc.fna'.format(ref_region_id,n+1)
                                 seqs = []
                                 seqs += [_SeqRecord(seq = _Seq(ref_alnd_rc), 
                                                     id = ref_region_id)]
@@ -2123,10 +2141,178 @@ class Aligner:
                                 _SeqIO.write(seqs, fout, 'fasta')
                                 print('Writing: {}'.format(fout))
                                 retained = True
+                                # only thr contig is reverse complemented here
+                                aligned[ref_region_id]['contig{:02d}_rc'.format(n+1)] = (ref_alnd_rc, contig_alnd_rc)
                         if not retained:
                             print('No alignment with a percent identity >= {:.0%} over a window of {} bp'.format(min_pID_aligned, pID_window))
                     else:
                         print('Omitting contig from unmapped/poorly mapped reads: {}'.format(rec.id))
+            
+            print(ref_region_id,len(aligned[ref_region_id]))
+            if len(aligned[ref_region_id]) == 0:
+                del aligned[ref_region_id] 
+
+        # retain info useful for summarising
+        self.aligned = aligned
+        self.aligned_from_single_assembly = single_assembly
+        # use_contigfile == .../<sample>__<genome>_multi_region/contigs.fasta
+        s, x = use_contigfile.split(_os.path.sep)[-2].split('__')
+        g = x.split('_')[0]
+        self.aligned_to_sample = s
+        self.aligned_to_genome = g
+        self.path_to_alignments = _os.path.sep.join(use_contigfile.split(_os.path.sep)[:-2])
+    def reportAlignments(self):
+        '''
+        Summarise variants in alignments of contigs to reference chromosome regions
+
+        Only SNPs are supported: indels are reported for each inserted or deleted 
+        positions treating gaps as an additional character
+
+        Generate a pseudo multiple alignment including each aligned contig and the 
+        referance region. Write out variants to a table as a comma separated values 
+        text file.
+        '''
+
+        assert hasattr(self, 'aligned'), '"aligned" attribute not found. .alignRegions not run?'
+
+        if len(self.aligned) == 0:
+            print('No alignments to report')
+
+        print(self.aligned_from_single_assembly, self.aligned_to_sample, self.aligned_to_genome, self.path_to_alignments)
+
+        variants_by_contig = {}
+        alnd_range_by_contig = {}
+        aligned_regions = {}
+        for ref_region_id, alnd_contigs in self.aligned.items():
+            these_aligned_regions = []
+            print(ref_region_id, len(alnd_contigs))
+            ref_region_start = int(ref_region_id.split('_')[1])
+            ref_region_end = int(ref_region_id.split('_')[2])
+            ref_region_len = ref_region_end - ref_region_start
+            variants_by_contig[ref_region_id] = {}
+            alnd_range_by_contig[ref_region_id] = {}
+            for contig_id, (ref_alnd_seq, contig_alnd_seq) in alnd_contigs.items():
+                print(contig_id)
+                ref_pre_gaps = self.countEndGaps(ref_alnd_seq, pre = True)
+                ref_post_gaps = self.countEndGaps(ref_alnd_seq, pre = False)
+                contig_pre_gaps = self.countEndGaps(contig_alnd_seq, pre = True)
+                contig_post_gaps = self.countEndGaps(contig_alnd_seq, pre = False)
+                pre_gaps = max(ref_pre_gaps,contig_pre_gaps)
+                post_gaps = max(ref_post_gaps,contig_post_gaps)
+                print(ref_pre_gaps,ref_post_gaps,contig_pre_gaps,contig_post_gaps,pre_gaps,post_gaps)
+                alnd_len = len(ref_alnd_seq)
+                query_insertions = '-' in ref_alnd_seq[pre_gaps:alnd_len-post_gaps]
+                assert str(ref_alnd_seq[ref_pre_gaps:alnd_len-ref_post_gaps]) == self.genome.sequence[ref_region_start:ref_region_end].tostring()
+                
+                these_variants = {}
+                refpos0 = ref_region_start
+                alnpos0 = 0
+                for ref in str(ref_alnd_seq[pre_gaps:alnd_len-post_gaps]):
+                    if ref != contig_alnd_seq[pre_gaps:][alnpos0]:
+                        print(alnpos0, refpos0, ref, contig_alnd_seq[pre_gaps:][alnpos0], self.genome.sequence[refpos0])
+                        these_variants[refpos0] = (ref, contig_alnd_seq[pre_gaps:][alnpos0])
+                    
+                    alnpos0 += 1
+                    if ref != '-':
+                        refpos0 += 1
+                
+                variants_by_contig[ref_region_id][contig_id] = these_variants
+                alnd_range_by_contig[ref_region_id][contig_id] = (ref_region_start + contig_pre_gaps, ref_region_end - contig_post_gaps)
+                
+                ref_sequence_ends_trimmed = []
+                contig_sequence_ends_trimmed = []
+                for ref,cont in zip(ref_alnd_seq[ref_pre_gaps:len(ref_alnd_seq)-ref_post_gaps], 
+                        contig_alnd_seq[ref_pre_gaps:len(ref_alnd_seq)--ref_post_gaps]):
+                    if '-' == ref:
+                        print('WARNING: deletions in reference/insertions in sample are '\
+                        'not supported: a gap in reference chromsome region was omitted')
+                    else:
+                        ref_sequence_ends_trimmed += [ref]
+                        contig_sequence_ends_trimmed += [cont]
+                e = '{} vs {} - {} == {}'.format(len(ref_sequence_ends_trimmed), 
+                        ref_region_end, ref_region_start, ref_region_end - ref_region_start)
+                assert len(ref_sequence_ends_trimmed) == ref_region_end - ref_region_start, e
+                these_aligned_regions += [(
+                        _SeqRecord(_Seq(''.join(ref_sequence_ends_trimmed)), id = ref_region_id), 
+                        _SeqRecord(_Seq(''.join(contig_sequence_ends_trimmed)), id = contig_id))]
+            
+            aligned_regions[ref_region_id] = these_aligned_regions
+
+
+        if self.aligned_from_single_assembly:
+            alnfilename_variants = '{}/{}__{}_multi_region_alnd_variants.csv'.format(
+                    self.path_to_alignments, self.aligned_to_sample, 
+                    self.aligned_to_genome)
+            alnfilename_summary = '{}/{}__{}_multi_region_alnd_summary.csv'.format(
+                    self.path_to_alignments, self.aligned_to_sample, 
+                    self.aligned_to_genome)
+            with open(alnfilename_variants, 'w') as foutvar, \
+                    open(alnfilename_variants, 'w') as foutsumm:
+                foutvar.write('"assembly start","assembly end","contig","position",'\
+                        '"reference","variant"\n')
+                foutsumm.write('"assembly start","assembly end","contig name",'\
+                        '"contig start","contig end","aligned length (bp)",'\
+                        '"total variants"\n')
+                for ref_region_id, alnd_contigs in alnd_range_by_contig.items():
+                    # ref_0000100_0000200
+                    ref_start, ref_end = map(int,ref_region_id[4:].split('_'))
+                    alnfilename_msa = '{}/{}__{}_multi_region_{}.fna'.format(
+                            self.path_to_alignments, self.aligned_to_sample, 
+                            self.aligned_to_genome, ref_region_id[4:])
+                    # write reference once then each aligned contig sequence
+                    with open(alnfilename_msa, 'w') as foutalnd:
+                        _SeqIO.write(aligned_regions[ref_region_id][0][0], foutalnd, 'fasta')
+                        for ref_aligned,contig_aligned in aligned_regions[ref_region_id]:
+                            _SeqIO.write(contig_aligned, foutalnd, 'fasta')
+                    for contig_id, (contig_start, contig_end) in alnd_contigs.items():
+                        print('{} to {} is {} to {}'.format(ref_region_id, contig_id, contig_start+1, contig_end))
+                        these_variants = variants_by_contig[ref_region_id][contig_id]
+                        foutsumm.write('{}, {}, "{}", {}, {}, {}\n'.format(
+                                ref_start+1, ref_end, contig_id, contig_start+1, 
+                                contig_end, contig_end - contig_start, len(these_variants)))
+                        for refpos0,(ref_char,alnd_char) in these_variants.items():
+                            # assembly start, assembly end, contig, refpos1, ref_char, aligned_char
+                            # base-1 counts, position inclusive ranges i.e., not Python slices
+                            foutvar.write('{},{},"{}",{},"{}","{}"\n'.format(
+                                    ref_start+1, ref_end, contig_id, refpos0+1, ref_char, alnd_char))
+        else:
+            for ref_region_id, alnd_contigs in alnd_range_by_contig.items():
+                # ref_0000100_0000200
+                ref_start, ref_end = map(int,ref_region_id[4:].split('_'))
+                # write reference once then each aligned contig sequence
+                alnfilename_msa = '{}/{}__{}_{}_multi_alnd.fna'.format(
+                        self.path_to_alignments, self.aligned_to_sample, 
+                        self.aligned_to_genome, ref_region_id[4:])
+                with open(alnfilename_msa, 'w') as foutalnd:
+                    _SeqIO.write(aligned_regions[ref_region_id][0][0], foutalnd, 'fasta')
+                    for ref_aligned,contig_aligned in aligned_regions[ref_region_id]:
+                        _SeqIO.write(aligned_regions[ref_region_id][0][1], foutalnd, 'fasta')
+                alnfilename_variants = '{}/{}__{}_{}_alnd_variants.csv'.format(
+                        self.path_to_alignments, self.aligned_to_sample, 
+                        self.aligned_to_genome, region_id[4:])
+                alnfilename_summary = '{}/{}__{}_{}_alnd_summary.csv'.format(
+                        self.path_to_alignments, self.aligned_to_sample, 
+                        self.aligned_to_genome, ref_region_id[4:])
+                with open(alnfilename_variants, 'w') as foutvar, open(alnfilename_variants, 'w') as foutsumm:
+                    foutvar.write('"assembly start","assembly end","contig","position",'\
+                            '"reference","variant"\n')
+                    foutsumm.write('"assembly start","assembly end","contig name",'\
+                            '"contig start","contig end","aligned length (bp)",'\
+                            '"total variants"\n')
+                    for contig_id, (contig_start, contig_end) in alnd_contigs.items():
+                        # write each aligned contig sequence
+                        _SeqIO.write(aligned_regions[ref_region_id][1], foutalnd, 'fasta')
+                        print('{} to {} is {} to {}'.format(ref_region_id, contig_id, contig_start+1, contig_end))
+                        these_variants = variants_by_contig[ref_region_id][contig_id]
+                        foutsumm.write('{}, {}, "{}", {}, {}, {}\n'.format(
+                                ref_start+1, ref_end, contig_id, contig_start+1, 
+                                contig_end, contig_end - contig_start, len(these_variants)))
+                        for refpos0,(ref_char,alnd_char) in these_variants.items():
+                            # assembly start, assembly end, contig, refpos1, ref_char, aligned_char
+                            # base-1 counts, position inclusive ranges i.e., not Python slices
+                            foutvar.write('{},{},"{}",{},"{}","{}"\n'.format(
+                                    ref_start+1, ref_end, contig_id, refpos0+1, ref_char, alnd_char))
+
 
 
 

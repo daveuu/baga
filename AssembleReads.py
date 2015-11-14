@@ -225,25 +225,32 @@ class DeNovo:
                     cmd += ['--pe{}-s'.format(cnum+1), use_files[2]]
                 except IndexError:
                     pass
+            try:
+                # add a second library if provided
+                if isinstance(self.read_files2[pairname], dict):
+                    # if a dict supplied, make it a list
+                    use_files2 = []
+                    for k,v in sorted(self.read_files2[pairname].items()):
+                        use_files2 += [v]
+                else:
+                    use_files2 = self.read_files2[pairname]
+                cmd += ['--pe{}-1'.format(cnum+2), use_files2[0]]
+                cmd += ['--pe{}-2'.format(cnum+2), use_files2[1]]
                 try:
-                    # add a second library if provided
-                    if isinstance(self.read_files2[pairname], dict):
-                        # if a dict supplied, make it a list
-                        use_files2 = []
-                        for k,v in sorted(self.read_files2[pairname].items()):
-                            use_files2 += [v]
-                    else:
-                        use_files2 = self.read_files2[pairname]
-                    cmd += ['--pe{}-1'.format(cnum+2), use_files2[0]]
-                    cmd += ['--pe{}-2'.format(cnum+2), use_files2[1]]
-                    try:
-                        cmd += ['--pe{}-s'.format(cnum+2), use_files2[2]]
-                    except IndexError:
-                        pass
-                except AttributeError:
+                    cmd += ['--pe{}-s'.format(cnum+2), use_files2[2]]
+                except IndexError:
                     pass
+            except AttributeError:
+                pass
             
-            this_output_path = _os.path.sep.join(output_folder + ['multi_region'])
+            ## this isn't very flexible:
+            # retain <sample>__<genome> from pairname:
+            # pairname == <sample>__<genome>_<start>-<end>+<padding>
+            # and replace with multiregion
+            folder = '{}__{}_{}'.format(pairname.split('__')[0],
+                                        pairname.split('__')[1].split('_')[0],
+                                        'multi_region')
+            this_output_path = _os.path.sep.join(output_folder + [folder])
             if not _os.path.exists(this_output_path):
                 _os.makedirs(this_output_path)
             
