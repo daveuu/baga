@@ -499,7 +499,7 @@ filter_names = {
             ('genome_repeats',): 'baga reference genome repeats', 
             ('rearrangements1', 'rearrangements2'): 'baga genome rearrangements'
 }
-class Caller:
+class CallerGATK:
     '''
     A collection of short read datasets that have been aligned to the same genome 
     sequence in Sequence Alignment/Map (SAM) format for variant calling using GATK.
@@ -509,17 +509,17 @@ class Caller:
         Initialise with:
         a baga.AlignReads.SAMs object
         or
-        a saved baga.CallVariants.Caller object
+        a saved baga.CallVariants.CallerGATK object
         '''
-        assert alignments or baga, 'Instantiate with alignments or a previously saved Caller'
-        assert not (alignments and baga), 'Instantiate with alignments OR a previously saved Caller!'
+        assert alignments or baga, 'Instantiate with alignments or a previously saved CallerGATK'
+        assert not (alignments and baga), 'Instantiate with alignments OR a previously saved CallerGATK!'
         
         if alignments:
             try:
                 self.ready_BAMs = alignments.ready_BAMs
             except AttributeError:
                 print('''
-        ERROR: baga.CallVariants.Caller needs a baga.AlignReads.SAMs object 
+        ERROR: baga.CallVariants.CallerGATK needs a baga.AlignReads.SAMs object 
         with a "ready_BAMs" attribute. This can be obtained with the 
         "IndelRealignGATK()" method of the AlignReads module.
         ''')
@@ -529,7 +529,7 @@ class Caller:
                 self.genome_id = alignments.genome_id
             except AttributeError:
                 print('''
-        ERROR: baga.CallVariants.Caller needs a baga.AlignReads.SAMs object 
+        ERROR: baga.CallVariants.CallerGATK needs a baga.AlignReads.SAMs object 
         with a "genome_sequence" attribute. This can be obtained by running all methods in the
         AlignReads module.
         ''')
@@ -553,7 +553,7 @@ class Caller:
         Save processed SAM file info to a local compressed pickle file.
         'name' should exclude extension: .baga will be added
         '''
-        fileout = 'baga.CallVariants.Caller-%s.baga' % name
+        fileout = 'baga.CallVariants.CallerGATK-%s.baga' % name
         with _tarfile.open(fileout, "w:gz") as tar:
             print('Writing to {} . . . '.format(fileout))
             for att_name, att in self.__dict__.items():
@@ -1236,7 +1236,7 @@ class Linkage:
         """
         
         e = 'Instantiate with an alignment object and paths to VCF files or ' + \
-        'a previously saved Caller'
+        'a previously saved CallerGATK'
         assert ((genome and alignment_paths and vcf_paths) and not baga) or \
                (not (genome and alignment_paths and vcf_paths) and baga), e
         

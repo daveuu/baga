@@ -1970,23 +1970,23 @@ if using any of:
         import baga
         from baga import CallVariants
         
-        if os.path.exists('baga.CallVariants.Caller-{}.baga'.format(alns_name)) and not args.new:
+        if os.path.exists('baga.CallVariants.CallerGATK-{}.baga'.format(alns_name)) and not args.new:
             print('Loading existing variants call analysis for: {}'.format(alns_name))
             print('(use --new to start variant calling again)')
-            caller = CallVariants.Caller(baga = 'baga.CallVariants.Caller-{}.baga'.format(alns_name))
-        elif os.path.exists('baga.CallVariants.Caller-{}.baga'.format(alns_name)) and args.new:
+            caller = CallVariants.CallerGATK(baga = 'baga.CallVariants.CallerGATK-{}.baga'.format(alns_name))
+        elif os.path.exists('baga.CallVariants.CallerGATK-{}.baga'.format(alns_name)) and args.new:
             print('Starting new variant calling analysis bacause --new requested. Will overwrite any previous analyses.')
             from baga import AlignReads
             print('Loading alignments information for: {} from AlignReads output'.format(alns_name))
             alignments = AlignReads.SAMs(baga = 'baga.AlignReads.SAMs-{}.baga'.format(alns_name))
-            caller = CallVariants.Caller(alignments = alignments)
-        elif not os.path.exists('baga.CallVariants.Caller-{}.baga'.format(alns_name)):
+            caller = CallVariants.CallerGATK(alignments = alignments)
+        elif not os.path.exists('baga.CallVariants.CallerGATK-{}.baga'.format(alns_name)):
             print('Starting new variant calling analysis. Will overwrite any previous analyses.')
-            print('(could not find baga.CallVariants.Caller-{}.baga)'.format(alns_name))
+            print('(could not find baga.CallVariants.CallerGATK-{}.baga)'.format(alns_name))
             from baga import AlignReads
             print('Loading alignments information for: {} from AlignReads output'.format(alns_name))
             alignments = AlignReads.SAMs(baga = 'baga.AlignReads.SAMs-{}.baga'.format(alns_name))
-            caller = CallVariants.Caller(alignments = alignments)
+            caller = CallVariants.CallerGATK(alignments = alignments)
         
         # because --new, setting --force to true to overwrite each output file
         if args.new:
@@ -2073,8 +2073,8 @@ if args.subparser == 'FilterVariants':
             assert all([use_path_reads,use_name_reads]), e
             alns_name = '__'.join([use_name_reads, use_name_genome])
             
-            filein = 'baga.CallVariants.Caller-{}.baga'.format(alns_name)
-            caller = CallVariants.Caller(baga = filein)
+            filein = 'baga.CallVariants.CallerGATK-{}.baga'.format(alns_name)
+            caller = CallVariants.CallerGATK(baga = filein)
             
             if hasattr(caller, 'path_to_hardfiltered_SNPs') and hasattr(caller, 'path_to_hardfiltered_INDELs'):
                 # only one for VCFs so no overwriting
@@ -2233,8 +2233,8 @@ if args.subparser == 'CheckLinkage':
         assert all([use_path_reads,use_name_reads]), e
         alns_name = '__'.join([use_name_reads, use_name_genome])
         
-        filein = 'baga.CallVariants.Caller-{}.baga'.format(alns_name)
-        caller = CallVariants.Caller(baga = filein)
+        filein = 'baga.CallVariants.CallerGATK-{}.baga'.format(alns_name)
+        caller = CallVariants.CallerGATK(baga = filein)
         
         if hasattr(caller, 'path_to_hardfiltered_SNPs') and hasattr(caller, 'path_to_hardfiltered_INDELs'):
             # only one for VCFs so no overwriting
@@ -2369,8 +2369,8 @@ if args.subparser == 'ComparativeAnalysis':
                 assert all([use_path_reads,use_name_reads]), e
                 alns_name = '__'.join([use_name_reads, use_name_genome])
                 
-                filein = 'baga.CallVariants.Caller-{}.baga'.format(alns_name)
-                caller = CallVariants.Caller(baga = filein)
+                filein = 'baga.CallVariants.CallerGATK-{}.baga'.format(alns_name)
+                caller = CallVariants.CallerGATK(baga = filein)
                 
                 if hasattr(caller, 'path_to_hardfiltered_SNPs') and hasattr(caller, 'path_to_hardfiltered_INDELs'):
                     checkthis = caller.path_to_hardfiltered_SNPs[-1]
