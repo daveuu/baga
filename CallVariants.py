@@ -237,12 +237,12 @@ def to_by_position_filtered(variants, filters_applied, summarise = True):
         for chromosome, positions in chromosomes.items():
             # iterate through variants by position
             for position, ((reference,query),filters) in sorted(positions.items()):
-                if len(filters & filters_applied) == 0:
+                if len(filters & set(filters_applied)) == 0:
                     # retain variants without any filters flagged (of those we are interested in)
                     by_position[chromosome][(position,reference,query,None)] += 1
                 else:
-                    for f in filters & filters_applied:
-                        # also retain those with a filter flag, seperately for each filter
+                    for f in filters & set(filters_applied):
+                        # also retain those with a filter flag, separately for each filter
                         by_position_filtered[chromosome][(position,reference,query,f)] += 1
 
     if summarise:
@@ -259,7 +259,8 @@ def to_by_position_filtered(variants, filters_applied, summarise = True):
     return(by_position,by_position_filtered)
 
 def reportCumulative(filter_order, reference_id, VCFs, VCFs_indels = False):
-    '''Generate simple table of cumulative effects of filters applied to a VCF file
+    '''
+    Generate simple table of cumulative totals after filters applied to a VCF file
 
     This function parses VCF files already created by BAGA with various filters 
     applied and writes the total of each class of variant (SNP, indel) removed
@@ -280,21 +281,6 @@ def reportCumulative(filter_order, reference_id, VCFs, VCFs_indels = False):
         colnames += ["{} all samples".format(v)]
 
 
-    # non-BAGA filters (e.g., from GATK) that are worth knowing about
-    other_filters = {'GATK':('LowQual', 'standard_hard_filter')}
-
-    # determine order of filters to include
-
-    # GATK's LowQual and standard_hard_filter
-    short2fullnames = dict(other_filters.items())
-    short2fullnames['genome_repeats'] = ('genome_repeats',)
-    short2fullnames['rearrangements'] = ('rearrangements1', 'rearrangements2')
-    # names for table
-    filter_names = {
-                ('LowQual', 'standard_hard_filter'): "GATK standard 'hard' filter", 
-                ('genome_repeats',): 'baga reference genome repeats', 
-                ('rearrangements1', 'rearrangements2'): 'baga genome rearrangements'
-    }
 
     # start with no filters
     filters_applied_ordered = [()]
@@ -362,23 +348,119 @@ def reportCumulative(filter_order, reference_id, VCFs, VCFs_indels = False):
                     by_position, by_position_filtered = to_by_position_filtered(
                             variants_divided[group_name], cumulative_filters)
                     
+                    # reference_id is the chromosome ID
                     print('{} {}'.format(len(by_position[reference_id]), varianttype))
                     this_row[group_name] += [len(by_position[reference_id])]
                     totals_by_type[group_name][varianttype].update([info[0] for info in by_position[reference_id]])
-        
+                    
         # add totals for variant class in columns corresponding to variant_type_order
         for group_name in variant_groups:
             this_row[group_name] += [len(totals_by_type[group_name][varianttype]) for varianttype in variant_type_order]
             rows[group_name] += [this_row[group_name]]
 
     for group_name in variant_groups:
-        outfilename = 'Table_of_cumulative_variant_totals_with_filters_{}.csv'.format(group_name)
+        # just the totals by variant class
+        outfilename = 'Table_of_cumulative_variant_totals_as_filters_applied_{}.csv'.format(group_name)
         print('Printing to {}'.format(outfilename))
         with open(outfilename, 'w') as fout:
             fout.write(','.join(['"{}"'.format(c) for c in colnames])+'\n')
             for row in rows[group_name]:
                 fout.write(','.join(['"{}"'.format(row[0])]+[str(c) for c in row[1:]])+'\n')
 
+def reportLists(include_filters, reference_id, VCFs, VCFs_indels = False):
+    '''
+    Generate simple table of variants and the filters applied from a VCF file
+
+    This function parses VCF files already created by BAGA with various filters 
+    applied and writes each variant with names of filters if masked to a .csv
+    file.
+    '''
+
+    ## Frequencies with filters applied divided by group that variants were called in
+    ## Single position might appear more than once if affected by a filter in only
+    ## some samples. 
+
+    ## arbitrary group e.g. within versus between clades?
+    ## VCFs are currently divided as called so this is not easily implemented
+    ## would need to specify a second list of groups
+
+    ## build table column names
+    colnames = ["Position", "Reference", "Variant", "Frequency", "Sample Group", "Filter"]
+
+    # dataset == reads_name == Sample Group
+    # also include combined frequencies
+
+    variant_type_order = ['SNPs', 'InDels']
+
+    # GATK filters added upstream so are in all BAGA produced VCFs if GATK used
+    collect_baga_filters = [f for f in include_filters if 'GATK' not in f]
+    from glob import glob as _glob
+    # find actual VCFs . . find the VCFs with suffixes that match the requested filters
+    VCFs_use = {}
+    filters_per_VCF = {}
+    for dataset,varianttypes in sorted(VCFs.items()):
+        VCFs_use[dataset] = {}
+        for varianttype,filename in varianttypes.items():
+            bits = filename.split(_os.path.extsep)
+            pattern = _os.path.extsep.join(bits[:-1]) + '*' + bits[-1]
+            for checkthis in _glob(pattern):
+                filter_present = []
+                for fltr in include_filters:
+                    if 'F_'+fltr in checkthis:
+                        filter_present += [fltr]
+                
+                if set(filter_present) >= set(collect_baga_filters):
+                    # OK if additional filters included in a VCF
+                    VCFs_use[dataset][varianttype] = checkthis
+                    # retain requested filters present in this VCF
+                    filters_per_VCF[checkthis] = set(filter_present) & set(collect_baga_filters)
+
+
+    # build table
+
+    # cumulative_filters = set()
+
+    variant_groups = ('all', 'among', 'to_reference')
+    rows = {group_name:list() for group_name in variant_groups}
+
+    for reads_name,varianttypes in sorted(VCFs_use.items()):
+        print('=> Dataset: {}'.format(dataset))
+        for varianttype in variant_type_order:
+            print('==> Variant class: {}'.format(varianttype))
+            filename = varianttypes[varianttype]
+            header, header_section_order, these_colnames, variantrows = parseVCF(filename)
+            variants, allfilters = sortVariantsKeepFilter(header, these_colnames, variantrows)
+            # divide variants into those among sample only, those between sample
+            # and reference
+            variants_divided = sortAmongBetweenReference(variants, sample_size = len(these_colnames[9:]))
+            variants_divided['all'] = variants
+            # cumulative filters applied here
+            for group_name in variant_groups:
+                print('===> Filtered in variant group: {}'.format(group_name))
+                by_position, by_position_filtered = to_by_position_filtered(
+                        variants_divided[group_name], include_filters)
+                
+                ### '"Position","Reference","Variant","Frequency","Sample Group","Filter"' <======
+                
+                # reference_id is the chromosome ID
+                for info,frequency in sorted(by_position[reference_id].items()):
+                    position,ref_char,query,this_filter = info
+                    rows[group_name] += ['{},"{}","{}",{},"{}","retained"'.format(
+                            position,ref_char,query,frequency,reads_name)]
+                for filter_of_interest in include_filters:
+                    for info,frequency in sorted(by_position_filtered[reference_id].items()):
+                        position,ref_char,query,this_filter = info
+                        if filter_of_interest == this_filter:
+                            rows[group_name] += ['{},"{}","{}",{},"{}","{}"'.format(
+                                    position,ref_char,query,frequency,reads_name,this_filter)]
+
+    for group_name in variant_groups:
+        # just the totals by variant class
+        outfilename = 'Table_of_variants_with_filters_if_masked_{}.csv'.format(group_name)
+        print('Printing to {}'.format(outfilename))
+        with open(outfilename, 'w') as fout:
+            fout.write(','.join(['"{}"'.format(c) for c in colnames])+'\n')
+            fout.write('\n'.join(rows[group_name])+'\n')
 
 # hard coded information for known filter types
 known_filters = {}
@@ -400,6 +482,23 @@ known_filters['genome_repeats']['string'] = [
 '##FILTER=<ID=genome_repeats,Description="Within a long repeat unit in the reference genome">'
 ]
 known_filters['genome_repeats']['per_sample'] = False
+
+
+# non-BAGA filters (e.g., from GATK) that are worth knowing about
+other_filters = {'GATK':('LowQual', 'standard_hard_filter')}
+
+# determine order of filters to include
+
+# GATK's LowQual and standard_hard_filter
+short2fullnames = dict(other_filters.items())
+short2fullnames['genome_repeats'] = ('genome_repeats',)
+short2fullnames['rearrangements'] = ('rearrangements1', 'rearrangements2')
+# names for table
+filter_names = {
+            ('LowQual', 'standard_hard_filter'): "GATK standard 'hard' filter", 
+            ('genome_repeats',): 'baga reference genome repeats', 
+            ('rearrangements1', 'rearrangements2'): 'baga genome rearrangements'
+}
 class Caller:
     '''
     A collection of short read datasets that have been aligned to the same genome 

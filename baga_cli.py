@@ -659,7 +659,7 @@ parser_FilterVariants.add_argument('-r', "--report",
     help = "summarise the effect of filters. Only choice currently implemented is cumulative effect on total variants.",
     type = str,
     nargs = '+',
-    choices = ['cumulative'],
+    choices = ['cumulative','lists'],
     metavar = 'REPORT_TYPE')
 
 parser_FilterVariants.add_argument('-i', "--path_to_rearrangements_info", 
@@ -2109,11 +2109,14 @@ if args.subparser == 'FilterVariants':
     # either do a report or go on and actually do filtering
     if args.report:
         for reporttype in args.report:
-            print('{} == cumulative'.format(reporttype))
             if reporttype == 'cumulative':
-                filter_order = args.filters
-                print('Reporting . . .: {}, {}'.format(args.report,'+'.join(filter_order)))
-                CallVariants.reportCumulative(filter_order, use_name_genome, VCFs_for_report)
+                print('Reporting cumulative variant totals by class and group as '\
+                        'filters applied : {}'.format('+'.join(args.filters)))
+                CallVariants.reportCumulative(args.filters, use_name_genome, VCFs_for_report)
+            elif reporttype == 'lists':
+                print('Reporting lists of variants by class and group with filters'\
+                        ': {}'.format('+'.join(args.filters)))
+                CallVariants.reportLists(args.filters, use_name_genome, VCFs_for_report)
     else:
         # check accessible and collect sample names with genome accession
         sample_names = {}
