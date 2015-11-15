@@ -82,14 +82,31 @@ class Reads:
     and trimming by position specific scores. Align reads to a reference genome 
     sequence.
     '''
-    def __init__(self, reads):
+    def __init__(self, reads = False, path_to_baga = False):
         '''
         Initialise with a baga.CollectData.Reads object
+        or
+        path to a previously save baga object of this class
         '''
-        try:
-            self.read_files = reads.read_files
-        except AttributeError:
-            print('baga.PrepareReads.Reads needs a baga.CollectData.Reads object with a "read_files" attribute. This can be obtained with the "getFromENA()" or "getFromPath()" methods.')
+        assert bool(reads) ^ bool(path_to_baga), 'Instantiate with baga.CollectData.Reads or '\
+                'the path to a previously saved baga.PreparedReads.Reads object' # xor
+        
+        if reads:
+            try:
+                self.read_files = reads.read_files
+            except AttributeError:
+                print('baga.PrepareReads.Reads needs a baga.CollectData.Reads object '\
+                        'with a "read_files" attribute. This can be obtained with the '\
+                        '"getFromENA()" or "getFromPath()" methods.')
+        else:
+            try:
+                loaded_baga = _cPickle.load(_gzip.open(path_to_baga,'rb'))
+                for attribute_name in dir(loaded_baga):
+                    if attribute_name[0] != '_':
+                        setattr(self, attribute_name, getattr(loaded_baga, attribute_name))
+            except IOError:
+                print('Could not access {}'.format(file_name))
+
     def saveLocal(self, name):
         '''
         Save processed read info to a local compressed pickle file.
