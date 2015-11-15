@@ -501,38 +501,38 @@ filter_names = {
 }
 class CallerGATK:
     '''
-    A collection of short read datasets that have been aligned to the same genome 
-    sequence in Sequence Alignment/Map (SAM) format for variant calling using GATK.
+    Wrapper around Broad Institute's Genome Analysis Tool Kit for variant calling
+
+    Requires a collection of short read datasets that have been aligned to the 
+    same genome sequence in Sequence Alignment/Map (SAM) format for variant 
+    calling using Genome Analysis Tool Kit (GATK).
     '''
     def __init__(self, alignments = False, baga = False):
         '''
         Initialise with:
         a baga.AlignReads.SAMs object
         or
-        a saved baga.CallVariants.CallerGATK object
+        path to a saved baga.CallVariants.CallerGATK object
         '''
-        assert alignments or baga, 'Instantiate with alignments or a previously saved CallerGATK'
-        assert not (alignments and baga), 'Instantiate with alignments OR a previously saved CallerGATK!'
+        assert alignments or baga, 'Instantiate with alignments or the path to a '\
+                'previously saved CallerGATK'
+        assert not (alignments and baga), 'Instantiate with alignments OR the path '\
+                'to a previously saved CallerGATK!'
         
         if alignments:
             try:
                 self.ready_BAMs = alignments.ready_BAMs
             except AttributeError:
-                print('''
-        ERROR: baga.CallVariants.CallerGATK needs a baga.AlignReads.SAMs object 
-        with a "ready_BAMs" attribute. This can be obtained with the 
-        "IndelRealignGATK()" method of the AlignReads module.
-        ''')
-            
+                print('ERROR: baga.CallVariants.CallerGATK needs a baga.AlignReads.SAMs '\
+                        'object with a "ready_BAMs" attribute. This can be obtained with '\
+                        'the "IndelRealignGATK()" method of the AlignReads module.')
             try:
                 self.genome_sequence = alignments.genome_sequence
                 self.genome_id = alignments.genome_id
             except AttributeError:
-                print('''
-        ERROR: baga.CallVariants.CallerGATK needs a baga.AlignReads.SAMs object 
-        with a "genome_sequence" attribute. This can be obtained by running all methods in the
-        AlignReads module.
-        ''')
+                print('ERROR: baga.CallVariants.CallerGATK needs a baga.AlignReads.SAMs '\
+                        'object with a "genome_sequence" attribute. This can be '\
+                        'obtained by running all methods in the AlignReads module.')
         elif baga:
             with _tarfile.open(baga, "r:gz") as tar:
                 for member in tar:
@@ -680,7 +680,9 @@ class CallerGATK:
         CallgVCFsGATK()\n\
         method on this SAMs instance.'
 
-        assert hasattr(self, 'paths_to_raw_gVCFs'), e1
+        assert hasattr(self, 'paths_to_raw_gVCFs'), 'Could not find "paths_to_raw_gVCFs" '\
+                'attribute. Before starting performing joint GATK analysis, variants must '\
+                'be called. Please run:\nCallgVCFsGATK()\nmethod on this SAMs instance.'
 
         # use the last VCFs called
         open('variants.list', 'w').write('\n'.join(self.paths_to_raw_gVCFs[-1]))
