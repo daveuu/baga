@@ -920,6 +920,183 @@ class CallerGATK:
         # the last list of BAMs in ready_BAMs is input for CallgVCFsGATK
         # both IndelRealignGATK and recalibBaseScoresGATK put here
         self.ready_BAMs += [paths_to_recalibrated_BAMs]
+class CallerDiscoSNP:
+    '''
+    Wrapper around DiscoSNP++ for SNP and InDel calling from short reads.
+
+    Requires a collection of short read datasets. Alignment and reference-free.
+    Can produce a VCF file if a reference genome provided.
+    '''
+    def __init__(self, reads = False, 
+                       genome = False, 
+                       path_to_baga = False):
+        '''
+        Initialise with:
+        a baga.PrepareReads.Reads object and optionally,
+        a baga.CollectData.Genome object.
+        
+        OR
+        
+        a path to baga.CallVariants.CallerDiscoSNP object (like this one) that 
+        was previously saved.
+        '''
+        assert reads or path_to_baga, 'Instantiate with reads or a previously saved CallerDiscoSNP'
+        assert not (reads and path_to_baga), 'Instantiate with reads or a previously saved CallerDiscoSNP!'
+        
+        if reads:
+            for attribute_name in dir(reads):
+                if 'read_files' in attribute_name:
+                    setattr(self, attribute_name, getattr(reads, attribute_name))
+            if genome:
+                self.genome_sequence = genome.sequence
+                self.genome_id = genome.id
+        elif path_to_baga:
+            with _tarfile.open(path_to_baga, "r:gz") as tar:
+                for member in tar:
+                    contents = _StringIO(tar.extractfile(member).read())
+                    try:
+                        # either json serialised conventional objects
+                        contents = _json.loads(contents.getvalue())
+                    except ValueError:
+                        #print('json failed: {}'.format(member.name))
+                        # or longer python array.array objects
+                        contents = _array('c', contents.getvalue())
+                    
+                    setattr(self, member.name, contents)
+
+
+    def saveLocal(self, name):
+        '''
+        Save processed SAM file info to a local compressed pickle file.
+        'name' should exclude extension: .baga will be added
+        '''
+        fileout = 'baga.CallVariants.CallerDiscoSNP-%s.baga' % name
+        with _tarfile.open(fileout, "w:gz") as tar:
+            print('Writing to {} . . . '.format(fileout))
+            for att_name, att in self.__dict__.items():
+                if isinstance(att, _array):
+                    io = _StringIO(att.tostring())
+                    io.seek(0, _os.SEEK_END)
+                    length = io.tell()
+                    io.seek(0)
+                    thisone = _tarfile.TarInfo(name = att_name)
+                    thisone.size = length
+                    tar.addfile(tarinfo = thisone, fileobj = io)
+                else:
+                    # try saving everything else here by jsoning
+                    try:
+                        io = _StringIO()
+                        _json.dump(att, io)
+                        io.seek(0, _os.SEEK_END)
+                        length = io.tell()
+                        io.seek(0)
+                        thisone = _tarfile.TarInfo(name = att_name)
+                        thisone.size = length
+                        tar.addfile(tarinfo = thisone, fileobj = io)
+                    except TypeError:
+                        # ignore non-jsonable things like functions
+                        # include unicodes, strings, lists etc etc
+                        #print('omitting {}'.format(att_name))
+                        pass
+
+    def call(self, 
+            local_variants_path = ['variants_DiscoSNP'],
+            path_to_bwa = False,
+            use_existing_graph = False,
+            force = False,
+            max_cpus = -1):
+        '''
+        Call SNPs and InDels using kissnp2 and kissreads2 of DiscoSNP++
+        '''
+
+        path_to_exe = _get_exe_path('discosnp')
+
+        local_variants_path = _os.path.sep.join(local_variants_path)
+        if not _os.path.exists(local_variants_path):
+            _os.makedirs(local_variants_path)
+
+        local_variants_path_genome = _os.path.sep.join([
+                                        local_variants_path,
+                                        self.genome_id])
+
+        if not _os.path.exists(local_variants_path_genome):
+            _os.makedirs(local_variants_path_genome)
+
+        max_processes = _decide_max_processes( max_cpus )
+
+        # select read files to use
+
+        if hasattr(self, 'trimmed_read_files'):
+            use_reads = self.trimmed_read_files
+        elif hasattr(self, 'adaptorcut_read_files'):
+            print('WARNING: "trimmed_read_files" attribute not found in '\
+                    'baga.PreparedReads.Reads object')
+            use_reads = self.adaptorcut_read_files
+            print('Using read files that have not been trimmed by position score')
+        else:
+            print('WARNING: "trimmed_read_files" nor "adaptorcut_read_files" attribute '\
+                    'not found in baga.PreparedReads.Reads object')
+            assert hasattr(self, 'read_files'), 'Try recreating '\
+                    'baga.PreparedReads.Reads . . . could not find '\
+                    'any read files.'
+            use_reads = self.read_files
+            print('Using read files that have not been trimmed by position score nor had '\
+                    'potential library preparation artifacts removed ("adaptor" sequences '\
+                    'etc)')
+
+        print(use_reads,local_variants_path_genome)
+
+        pair_file_names = []
+        for sample_name, pair in use_reads.items():
+            this_file_name = _os.path.sep.join([
+                    local_variants_path_genome, 
+                    'readspair_paths_for_{}.txt'.format(sample_name)])
+            pair_file_names += [this_file_name]
+            with open(this_file_name, 'w') as fout:
+                fout.write('{}\n{}\n'.format(
+                        _os.path.abspath(pair[1]),
+                        _os.path.abspath(pair[2])))
+
+        this_file_name = _os.path.sep.join([local_variants_path_genome, 
+                'readpairs_for_DiscoSNP.txt'])
+
+        with open(this_file_name, 'w') as fout:
+            for pair_file_name in pair_file_names:
+                fout.write('{}\n'.format(_os.path.abspath(pair_file_name)))
+
+        try:
+            # previous failed runs can leave this file which causes problems
+            _os.unlink(this_file_name+'_removemeplease')
+        except OSError:
+            pass
+
+        cmd = [path_to_exe, '-r', this_file_name, '-T']
+
+        if hasattr(self, 'genome_sequence') and hasattr(self, 'genome_id'):
+            print('Will map DiscoSNP++ variants to {} ({:,} bp)'.format(
+                    self.genome_id, len(self.genome_sequence)))
+            if not path_to_bwa:
+                path_to_bwa = _get_exe_path('bwa')
+            if _os.path.isfile(path_to_bwa):
+                # VCF maker only wants path to bwa exe, not the exe itself
+                path_to_bwa = path_to_bwa[:-4]
+            genome_fna = 'genome_sequences/%s.fna' % self.genome_id
+            if not _os.path.exists(genome_fna):
+                _SeqIO.write(_SeqRecord(_Seq(self.genome_sequence.tostring()), id = self.genome_id), 
+                        genome_fna, 
+                        'fasta')
+            
+            cmd += ['-G', genome_fna, '-B', path_to_bwa]
+
+        if use_existing_graph:
+            print('Will attempt to use existing graph: be sure your input reads match the graph!')
+            # discoRes_k_31_c_auto.h5 for default settings
+            cmd += ['-g']
+
+
+        print(' '.join(cmd))
+        _subprocess.call(cmd)
+
 class Filter:
     '''
     Methods to remove variant calls from VCFs according to position specific 
