@@ -1003,6 +1003,7 @@ class CallerDiscoSNP:
             local_variants_path = ['variants_DiscoSNP'],
             path_to_bwa = False,
             use_existing_graph = False,
+            add_prefix = False,
             force = False,
             max_cpus = -1):
         '''
@@ -1015,9 +1016,14 @@ class CallerDiscoSNP:
         if not _os.path.exists(local_variants_path):
             _os.makedirs(local_variants_path)
 
+        if hasattr(self, 'genome_id'):
+            use_genome_name = self.genome_id
+        else:
+            use_genome_name = 'no_reference'
+
         local_variants_path_genome = _os.path.sep.join([
                                         local_variants_path,
-                                        self.genome_id])
+                                        use_genome_name])
 
         if not _os.path.exists(local_variants_path_genome):
             _os.makedirs(local_variants_path_genome)
@@ -1044,7 +1050,6 @@ class CallerDiscoSNP:
                     'potential library preparation artifacts removed ("adaptor" sequences '\
                     'etc)')
 
-        print(use_reads,local_variants_path_genome)
 
         pair_file_names = []
         for sample_name, pair in use_reads.items():
@@ -1096,6 +1101,53 @@ class CallerDiscoSNP:
 
         print(' '.join(cmd))
         _subprocess.call(cmd)
+
+        if add_prefix:
+            # rename outputs according to reads and genome combination
+            # DiscoSNP++ defaults
+            disco_k = 31
+            disco_c = 'auto'
+            resultsname_part_1 = 'discoRes_k_{}_c_{}'.format(disco_k, disco_c)
+            disco_D = 100
+            disco_P = 1
+            disco_b = 0
+            resultsname_part_2 = 'D_{}_P_{}_b_{}'.format(disco_D, disco_P, disco_b)
+            def rename(oldname, newname):
+                print('Renaming {} to {}'.format(oldname, newname))
+                _os.rename(oldname, newname)
+            # discoRes_k_31_c_auto.h5
+            oldname = _os.path.extsep.join([resultsname_part_1,'h5'])
+            rename(oldname, add_prefix+'__'+oldname)
+            # discoRes_k_31_c_auto_cov.h5
+            oldname = _os.path.extsep.join([resultsname_part_1+'_cov','h5'])
+            rename(oldname, add_prefix+'__'+oldname)
+            
+            resultsname = resultsname_part_1+'_'+resultsname_part_2
+            # discoRes_k_31_c_auto_D_100_P_1_b_0_coherent.fa
+            oldname = _os.path.extsep.join(
+                    [resultsname+'_coherent','fa'])
+            rename(oldname, add_prefix+'__'+oldname)
+            # discoRes_k_31_c_auto_D_100_P_1_b_0_uncoherent.fa
+            oldname = _os.path.extsep.join(
+                    [resultsname+'_uncoherent','fa'])
+            rename(oldname, add_prefix+'__'+oldname)
+            if hasattr(self, 'genome_id'):
+                # discoRes_k_31_c_auto_D_100_P_1_b_0_coherentbis.fasta
+                oldname = _os.path.extsep.join(
+                        [resultsname+'_coherentbis','fasta'])
+                rename(oldname, add_prefix+'__'+oldname)
+                # discoRes_k_31_c_auto_D_100_P_1_b_0_coherentBWA_OPT_n4_l10_s0.sam
+                oldname = _os.path.extsep.join(
+                        [resultsname+'_coherentBWA_OPT_n4_l10_s0','sam'])
+                rename(oldname, add_prefix+'__'+oldname)
+                # discoRes_k_31_c_auto_D_100_P_1_b_0_coherent.vcf
+                oldname = _os.path.extsep.join(
+                        [resultsname+'_coherent','vcf'])
+                rename(oldname, add_prefix+'__'+oldname)
+                # discoRes_k_31_c_auto_D_100_P_1_b_0_coherent_for_IGV.vcf
+                oldname = _os.path.extsep.join(
+                        [resultsname+'_coherent_for_IGV','vcf'])
+                rename(oldname, add_prefix+'__'+oldname)
 
 class Filter:
     '''
