@@ -180,12 +180,14 @@ def get_download(name, description, source, url, commit, checksum, destination, 
     if preparation:
         for do_this in preparation:
             if 'just_packages' in do_this['arguments']:
-                # this is the only thing that differentiates this prepare() from others that need some chdir <== this should be improved
+                # this is the only thing that differentiates this prepare()
+                # from others that need some chdir <== this should be improved
                 # see dep dict
                 _os.chdir(_os.path.pardir)
                 do_this['function'](*do_this['arguments']['package_list'])
             else:
-                _os.chdir(archive.getnames()[0])
+                extracted_base_dir = archive.getnames()[0].split(_os.path.sep)[0]
+                _os.chdir(extracted_base_dir)
                 do_this['function'](**do_this['arguments'])
                 _os.chdir(_os.path.pardir)
                 _os.chdir(_os.path.pardir)
@@ -199,7 +201,7 @@ def get_other_packages(packages):
         get_download(**Dependencies.dependencies[package])
 
 def get_GATK():
-    print("Visit https://www.broadinstitute.org/gatk/download/auth?package=GATK and download after reviewing and agreeing license. Place jar file to external_programs/GenomeAnalysisTK/GenomeAnalysisTK.jar")
+    print("Visit https://www.broadinstitute.org/gatk/download/auth?package=GATK and download after reviewing and agreeing license (and signing up to the forum). Place jar file to external_programs/GenomeAnalysisTK/GenomeAnalysisTK.jar")
 
 def pysam_install():
     _subprocess.call([_sys.executable, 'setup.py', 'build'])
@@ -215,6 +217,14 @@ def pysam_install():
     
     _os.rename('pysam', '../pysam')
 
+
+def discosnp_install():
+    print(_os.listdir('.'))
+    _subprocess.call(['bash','./compile_discoSnp++.sh'])
+    # ensure VCF generation works if system default python is version 3
+    # VCF code is python 2 only
+    fixed = open('run_VCF_creator.sh').read().replace('python ','python2 ')
+    open('run_VCF_creator.sh','w').write(fixed)
 
 
 def prep_python_install(extras):
@@ -691,6 +701,20 @@ dependencies['spades'] = {
     'checker': {'function': check_no_error,
                 'arguments':{'path': ['SPAdes-3.6.1-Linux', 'bin', 'spades.py'],
                              'extra_pre': ['python2']}}
+    }
+
+dependencies['discosnp'] = {
+    'name': 'discosnp',
+    'description': 'short read de novo variant caller',
+    'source': 'download',
+    'url': 'http://gatb-tools.gforge.inria.fr/versions/src/DiscoSNP++-2.2.1-Source.tar.gz',
+    'commit': None,
+    'checksum': None,
+    'destination': destination_programs,
+    'preparation': [{'function': discosnp_install,
+                     'arguments': {}}],
+    'checker': {'function': check_no_error,
+                'arguments':{'path': ['DiscoSNP++-2.2.1-Source', 'run_discoSnp++.sh']}}
     }
 dependencies_notes = {}
 
