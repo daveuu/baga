@@ -579,19 +579,19 @@ parser_CallVariants.add_argument('-m', "--max_memory",
     default = 8)
 
 parser_CallVariants.add_argument('-c', "--calleach", 
-    help = "call variants in each alignment in preparation for a joint analysis.\
-Called 1st time on uncalibrated alignments, called 2nd after base quality score \
-recalibration.",
+    help = "call variants in each alignment in preparation for a joint analysis. "\
+"Called 1st time on uncalibrated alignments, called 2nd after base quality score "\
+"recalibration.",
     action = 'store_true')
 
 parser_CallVariants.add_argument('-j', "--calljoint", 
-    help = "call variants in all alignments in a joint analysis. Called 1st time \
-on uncalibrated alignments, called 2nd after base quality score recalibration.",
+    help = "call variants in all alignments in a joint analysis. Called 1st time "\
+"on uncalibrated alignments, called 2nd after base quality score recalibration.",
     action = 'store_true')
 
 parser_CallVariants.add_argument('-f', "--hardfilter", 
-    help = "apply 'hard filtering' thresholds on called variants to decrease \
-false positives using GATK",
+    help = "apply 'hard filtering' thresholds on called variants to decrease "\
+"false positives using GATK",
     action = 'store_true')
 
 parser_CallVariants.add_argument('-R', "--recalibrate", 
@@ -599,11 +599,13 @@ parser_CallVariants.add_argument('-R', "--recalibrate",
     action = 'store_true')
 
 parser_CallVariants.add_argument('-P', "--GATK_jar_path", 
-    help = "path to Genome Analysis Toolkit (GATK) jar file. See also --JRE_1_7_path if system JAVA is version 1.8",
+    help = "path to Genome Analysis Toolkit (GATK) jar file. See also "\
+"--JRE_1_7_path if system JAVA is version 1.8",
     type = str)
 
 parser_CallVariants.add_argument('-J', "--JRE_1_7_path", 
-    help = "path to JAVA runtime environment version 1.7 binary file for use with GATK versions 3.3 or 3.4 (not compatible with JRE 1.8!)",
+    help = "path to JAVA runtime environment version 1.7 binary file for use "\
+"with GATK versions 3.3 or 3.4 (not compatible with JRE 1.8!)",
     type = str)
 
 
