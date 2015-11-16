@@ -673,6 +673,7 @@ class Reads:
             
             checked_read_files[pairname] = files
 
+        print('Total read pairs: {}'.format(len(checked_read_files)))
 
         self.read_files = checked_read_files
 
