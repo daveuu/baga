@@ -12,7 +12,7 @@
 # with funding from The Wellcome Trust (093306/Z/10) awarded to:
 # Dr Steve Paterson (The University of Liverpool, UK)
 # Dr Craig Winstanley (The University of Liverpool, UK)
-# Dr Michael A Brockhurst (University of York, UK)
+# Dr Michael A Brockhurst (The University of York, UK)
 #
 
 import cPickle as _cPickle
