@@ -545,9 +545,12 @@ parser_CallVariants = subparser_adder.add_parser(
 text_width, replace_whitespace = False))
 
 parser_CallVariants.add_argument('-r', "--reads_name", 
-    help = "name of read datasets group processed by PrepareReads and AlignReads options",
+    help = "name of read datasets group processed by PrepareReads and "\
+    "AlignReads options. For GATK a single group can be processed. For "\
+    "DiscoSNP++, one or more groups can be processed",
     type = str,
-    required = True)
+    required = True,
+    nargs = '+')
 
 parser_CallVariants.add_argument('-g', "--genome_name", 
     help = "name of genome obtained by the CollectData option",
@@ -1951,6 +1954,9 @@ if args.subparser == 'CallVariants':
             args.hardfilter, 
             args.recalibrate
             ]):
+        if len(args.reads_name) > 1:
+            sys.exit('Only one reads group can be processed by GATK per '\
+            'analysis (supplied: {})'.format(', '.join(args.reads_name)))
         if args.calldisco:
             sys.exit('--calldisco cannot be used with any GATK options!')
         elif not args.GATK_jar_path:
@@ -1979,23 +1985,28 @@ if using any of:
     from baga import CallVariants
     if args.calldisco:
         # load baga reads
-        use_path_reads,use_name_reads = check_baga_path(
-                'baga.PrepareReads.Reads', args.reads_name)
-        assert all([use_path_reads,use_name_reads]), 'Could not locate a saved '\
-                'baga.PrepareReads.Reads-<reads_name>.baga for reads group '\
-                'given: {}'.format(args.reads_name)
         from baga import PrepareReads
-        reads = PrepareReads.Reads(path_to_baga = use_path_reads)
+        use_these = []
+        use_these_names = []
+        for reads_group in args.reads_name:
+            use_path_reads,use_name_reads = check_baga_path(
+                    'baga.PrepareReads.Reads', reads_group)
+            use_these_names += [use_name_reads]
+            assert all([use_path_reads,use_name_reads]), 'Could not locate a saved '\
+                    'baga.PrepareReads.Reads-<reads_name>.baga for reads group '\
+                    'given: {}'.format(reads_group)
+            use_these += [PrepareReads.Reads(path_to_baga = use_path_reads)]
+            print('Loaded: {}'.format(use_path_reads))
         from baga import CollectData
         if args.genome_name:
             genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
-            caller = CallVariants.CallerDiscoSNP(reads = reads, genome = genome)
+            caller = CallVariants.CallerDiscoSNP(reads = use_these, genome = genome)
         else:
-            caller = CallVariants.CallerDiscoSNP(reads = reads)
+            caller = CallVariants.CallerDiscoSNP(reads = use_these)
         if args.genome_name:
-            add_prefix = use_name_genome + '_' + use_name_reads
+            add_prefix = use_name_genome + '_' + '+'.join(use_these_names)
         else:
-            add_prefix = 'noref_' + use_name_reads
+            add_prefix = 'noref_' + '+'.join(use_these_names)
         caller.call(use_existing_graph = args.use_existing_graph, add_prefix = add_prefix)
     elif any([args.calleach, 
             args.calljoint, 
@@ -2008,7 +2019,7 @@ if using any of:
         # i.e. mygenome . . . but not for this reads__genome compound name
         # so args.reads must be given correctly. Feedback given is a file can't
         # be found so should still be fine for ease-of-use.
-        reads_genome_name = '__'.join([args.reads_name, use_name_genome])
+        reads_genome_name = '__'.join([args.reads_name[0], use_name_genome])
         # see what is already available (existing analysis of data from
         # previous baga stage or data from this stage)
         use_path_alns,use_name_alns = check_baga_path(

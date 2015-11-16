@@ -941,7 +941,7 @@ class CallerDiscoSNP:
                        path_to_baga = False):
         '''
         Initialise with:
-        a baga.PrepareReads.Reads object and optionally,
+        a list of one or more baga.PrepareReads.Reads object and optionally,
         a baga.CollectData.Genome object.
         
         OR
@@ -953,9 +953,14 @@ class CallerDiscoSNP:
         assert not (reads and path_to_baga), 'Instantiate with reads or a previously saved CallerDiscoSNP!'
         
         if reads:
-            for attribute_name in dir(reads):
-                if 'read_files' in attribute_name:
-                    setattr(self, attribute_name, getattr(reads, attribute_name))
+            reads_paths = []
+            for read_group in reads:
+                reads_paths += [{}]
+                for attribute_name in dir(read_group):
+                    if 'read_files' in attribute_name:
+                        reads_paths[-1][attribute_name] = getattr(read_group, attribute_name)
+            
+            self.reads = reads_paths
             if genome:
                 self.genome_sequence = genome.sequence
                 self.genome_id = genome.id
@@ -1041,23 +1046,28 @@ class CallerDiscoSNP:
 
         # select read files to use
 
-        if hasattr(self, 'trimmed_read_files'):
-            use_reads = self.trimmed_read_files
-        elif hasattr(self, 'adaptorcut_read_files'):
-            print('WARNING: "trimmed_read_files" attribute not found in '\
-                    'baga.PreparedReads.Reads object')
-            use_reads = self.adaptorcut_read_files
-            print('Using read files that have not been trimmed by position score')
-        else:
-            print('WARNING: "trimmed_read_files" nor "adaptorcut_read_files" attribute '\
-                    'not found in baga.PreparedReads.Reads object')
-            assert hasattr(self, 'read_files'), 'Try recreating '\
-                    'baga.PreparedReads.Reads . . . could not find '\
-                    'any read files.'
-            use_reads = self.read_files
-            print('Using read files that have not been trimmed by position score nor had '\
-                    'potential library preparation artifacts removed ("adaptor" sequences '\
-                    'etc)')
+        use_reads = {}
+        for n,reads_group in enumerate(self.reads):
+            if 'trimmed_read_files' in reads_group:
+                for pairname,pair in reads_group['trimmed_read_files'].items():
+                    use_reads[pairname] = pair
+            elif 'adaptorcut_read_files' in reads_group:
+                print('WARNING: "trimmed_read_files" attribute not found in '\
+                        'baga.PreparedReads.Reads object {}'.format(n+1))
+                for pairname,pair in reads_group['adaptorcut_read_files'].items():
+                    use_reads[pairname] = pair
+                print('Using read files that have not been trimmed by position score')
+            else:
+                print('WARNING: "trimmed_read_files" nor "adaptorcut_read_files" attribute '\
+                        'not found in baga.PreparedReads.Reads object {}'.format(n+1))
+                assert 'read_files' in reads_group, 'Try recreating '\
+                        'baga.PreparedReads.Reads . . . could not find '\
+                        'any read files.'
+                for pairname,pair in reads_group['read_files'].items():
+                    use_reads[pairname] = pair
+                print('Using read files that have not been trimmed by position score nor had '\
+                        'potential library preparation artifacts removed ("adaptor" sequences '\
+                        'etc) {}'.format(n+1))
 
 
         pair_file_names = []
