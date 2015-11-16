@@ -398,23 +398,31 @@ def reportLists(include_filters, reference_id, VCFs, VCFs_indels = False):
     # find actual VCFs . . find the VCFs with suffixes that match the requested filters
     VCFs_use = {}
     filters_per_VCF = {}
+    checked = []
     for dataset,varianttypes in sorted(VCFs.items()):
         VCFs_use[dataset] = {}
         for varianttype,filename in varianttypes.items():
             bits = filename.split(_os.path.extsep)
             pattern = _os.path.extsep.join(bits[:-1]) + '*' + bits[-1]
+            print(pattern)
             for checkthis in _glob(pattern):
                 filter_present = []
                 for fltr in include_filters:
                     if 'F_'+fltr in checkthis:
                         filter_present += [fltr]
                 
+                checked += [checkthis]
                 if set(filter_present) >= set(collect_baga_filters):
                     # OK if additional filters included in a VCF
                     VCFs_use[dataset][varianttype] = checkthis
                     # retain requested filters present in this VCF
                     filters_per_VCF[checkthis] = set(filter_present) & set(collect_baga_filters)
+                    print('Selecting: {}'.format(checkthis))
 
+    checked.sort()
+    assert len(filters_per_VCF) > 0, 'No suitable VCFs located for filters: {}. '\
+            'These were considered based on content of the CallVariants.CallerGATK '\
+            'object:\n{}'.format(', '.join(collect_baga_filters), '\n'.join(checked))
 
     # build table
 
