@@ -426,7 +426,8 @@ def reportLists(include_filters, reference_id, VCFs, VCFs_indels = False):
 
     # build table
 
-    # cumulative_filters = set()
+    # expand multi-part filters
+    include_filters2 = [a for b in [short2fullnames[f] for f in include_filters] for a in b]
 
     variant_groups = ('all', 'among', 'to_reference')
     rows = {group_name:list() for group_name in variant_groups}
@@ -442,11 +443,11 @@ def reportLists(include_filters, reference_id, VCFs, VCFs_indels = False):
             # and reference
             variants_divided = sortAmongBetweenReference(variants, sample_size = len(these_colnames[9:]))
             variants_divided['all'] = variants
-            # cumulative filters applied here
+            # filters applied here
             for group_name in variant_groups:
                 print('===> Filtered in variant group: {}'.format(group_name))
                 by_position, by_position_filtered = to_by_position_filtered(
-                        variants_divided[group_name], include_filters)
+                        variants_divided[group_name], include_filters2)
                 
                 ### '"Position","Reference","Variant","Frequency","Sample Group","Filter"' <======
                 
@@ -455,7 +456,7 @@ def reportLists(include_filters, reference_id, VCFs, VCFs_indels = False):
                     position,ref_char,query,this_filter = info
                     rows[group_name] += ['{},"{}","{}",{},"{}","retained"'.format(
                             position,ref_char,query,frequency,reads_name)]
-                for filter_of_interest in include_filters:
+                for filter_of_interest in include_filters2:
                     for info,frequency in sorted(by_position_filtered[reference_id].items()):
                         position,ref_char,query,this_filter = info
                         if filter_of_interest == this_filter:
