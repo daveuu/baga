@@ -1527,7 +1527,7 @@ if args.subparser == 'Structure':
     if not(args.check or args.plot or args.plot_range or args.summarise or args.collect):
         parser_Structure.error('Need at least one of --check/-c, --plot/-p or --plot_range/-r or --summarise/-s or --collect/-C')
     
-    if args.check or args.plot or args.plot_range or args.collect or args.collect_rangess:
+    if args.check or args.plot or args.plot_range or args.collect or args.collect_ranges:
         # collect BAMs
         if args.reads_name:
             # baga pipeline information provided
@@ -1700,7 +1700,7 @@ if args.subparser == 'Structure':
     elif args.reads_name and not args.genome_name:
         parser.error('--genome_name/-g is required with --reads_name/-n. (The baga CollectData-processed genome used with the AlignReads option)')
     
-    if args.summarise or args.collect or args.collect_rangess:
+    if args.summarise or args.collect or args.collect_ranges:
         # both tasks share some requirements: deal with these first
         
         if args.reads_name:
