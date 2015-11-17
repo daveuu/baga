@@ -26,6 +26,7 @@ import re as _re
 import tarfile as _tarfile
 import json as _json
 import time as _time
+import shlex as _shlex
 from cStringIO import StringIO as _StringIO
 from array import array as _array
 
@@ -198,3 +199,51 @@ def get_jar_path(name):
     '''
     from baga.Dependencies import dependencies as _dependencies
     return(_dependencies[name]['checker']['arguments']['java_commands'][2])
+
+def parse_new_arguments(arguments, cmd):
+    '''
+    Update cmd dict from string of arguments to pass to wrapped program
+    
+    Handles -/--, flags, quotes and multiple arguments per option
+    '''
+    lexer = _shlex.shlex(arguments)
+    new_arguments = {}
+    collect = False
+    pre = []
+    for token in lexer:
+        if token == '-':
+            collect = False
+            pre += [token]
+        else:
+            if not collect:
+                k = ''.join(pre + [token])
+                new_arguments[k] = None
+                collect = True
+                pre = []
+            else:
+                try:
+                    new_arguments[k] += [token]
+                except TypeError:
+                    new_arguments[k] = [token]
+    
+    for opt,arg in new_arguments.items():
+        if arg is not None:
+            new = opt + ' ' + ' '.join(arg)
+            # remove ""
+            use_arg = [a.strip('"') for a in arg]
+        else:
+            new = opt
+            use_arg = arg
+        try:
+            if cmd[opt] is not None:
+                old = opt + ' ' + ' '.join(cmd[opt])
+            else:
+                old = opt
+            if old != new:
+                print('Using option: {} (instead of: {})'.format(new, old))
+                cmd[opt] = [a.strip() for a in arg]
+        except KeyError:
+            print('Using option: {}'.format(new))
+            cmd[opt] = use_arg
+    
+    return(cmd)

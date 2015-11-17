@@ -129,6 +129,25 @@ def check_baga_path(baga_prefix, supplied_name):
     
     return(False,False)
 
+def check_direct_arguments(arguments, wrapped_tools):
+    '''
+    Parse commandline arguments to be passed to wrapped tools.
+    
+    Checks whether specified target programs are recognised among task-specific 
+    "wrapped_tools".
+    '''
+    direct_arguments = {a:b for a,b in zip(arguments[::2],
+                                           arguments[1::2])}
+    recognised = set(direct_arguments) & set(wrapped_tools)
+    if len(recognised) == 0:
+        recognised = ['none']
+    not_recognised = set(direct_arguments) - set(wrapped_tools)
+    assert len(not_recognised) == 0, 'Some of the wrapped '\
+            'program names specified are not recognised:\n'\
+            'Recognised: {}\n'\
+            'Not recognised: {}\n'.format(', '.join(recognised),
+                                          ', '.join(not_recognised))
+    return(direct_arguments)
 text_width = 70
 
 title = 'Bacterial and Archaeal Genome Analyser'
@@ -618,6 +637,11 @@ parser_CallVariants.add_argument('-d', "--calldisco",
 parser_CallVariants.add_argument('-e', "--use_existing_graph", 
     help = "Use previously generated DiscoSNP++ graph. Be sure the last graph generated matches the specified reads!",
     action = 'store_true')
+
+parser_CallVariants.add_argument('-A', "--arguments", 
+    help = "Send direct arguments to a wrapped tool. E.g. --arguments DiscoSNP++ '-k 41'",
+    nargs = '*')
+
 
 parser_FilterVariants = subparser_adder.add_parser('FilterVariants',
                 formatter_class = argparse.RawDescriptionHelpFormatter,
@@ -1948,7 +1972,11 @@ if args.subparser == 'Structure':
 
 if args.subparser == 'CallVariants':
     print('\n-- Variant Calling module --\n')
-    # first check whether GATK path is needed
+    # check if direct commands make sense
+    if args.arguments:
+        direct_arguments = check_direct_arguments(args.arguments, 
+                                                  wrapped_tools = ['DiscoSNP++'])
+    # check whether GATK path is needed
     if any([args.calleach, 
             args.calljoint, 
             args.hardfilter, 
@@ -1997,8 +2025,8 @@ if using any of:
                     'given: {}'.format(reads_group)
             use_these += [PrepareReads.Reads(path_to_baga = use_path_reads)]
             print('Loaded: {}'.format(use_path_reads))
-        from baga import CollectData
         if args.genome_name:
+            from baga import CollectData
             genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
             caller = CallVariants.CallerDiscoSNP(reads = use_these, genome = genome)
         else:
@@ -2007,7 +2035,11 @@ if using any of:
             add_prefix = use_name_genome + '_' + '+'.join(use_these_names)
         else:
             add_prefix = 'noref_' + '+'.join(use_these_names)
-        caller.call(use_existing_graph = args.use_existing_graph, add_prefix = add_prefix)
+        try:
+            use_arguments = direct_arguments['DiscoSNP++']
+        except KeyError:
+            use_arguments = False
+        caller.call(use_existing_graph = args.use_existing_graph, add_prefix = add_prefix, arguments = use_arguments)
     elif any([args.calleach, 
             args.calljoint, 
             args.hardfilter, 

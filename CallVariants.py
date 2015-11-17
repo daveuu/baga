@@ -1019,7 +1019,8 @@ class CallerDiscoSNP:
             use_existing_graph = False,
             add_prefix = False,
             force = False,
-            max_cpus = -1):
+            max_cpus = -1,
+            arguments = False):
         '''
         Call SNPs and InDels using kissnp2 and kissreads2 of DiscoSNP++
         '''
@@ -1094,7 +1095,11 @@ class CallerDiscoSNP:
         except OSError:
             pass
 
-        cmd = [path_to_exe, '-r', this_file_name, '-T']
+        # cmd should be built as 'option':[argument list] dictionary
+        # with None as values for flag options
+        cmd = {}
+        cmd['-r'] = [this_file_name]
+        cmd['-T'] = None
 
         if hasattr(self, 'genome_sequence') and hasattr(self, 'genome_id'):
             print('Will map DiscoSNP++ variants to {} ({:,} bp)'.format(
@@ -1110,63 +1115,32 @@ class CallerDiscoSNP:
                         genome_fna, 
                         'fasta')
             
-            cmd += ['-G', genome_fna, '-B', path_to_bwa]
+            cmd['-G'] = [genome_fna]
+            cmd['-B'] = [path_to_bwa]
 
         if use_existing_graph:
             print('Will attempt to use existing graph: be sure your input reads match the graph!')
             # discoRes_k_31_c_auto.h5 for default settings
-            cmd += ['-g']
-
-
-        print(' '.join(cmd))
-        _subprocess.call(cmd)
+            cmd['-g'] = None
 
         if add_prefix:
-            # rename outputs according to reads and genome combination
-            # DiscoSNP++ defaults
-            disco_k = 31
-            disco_c = 'auto'
-            resultsname_part_1 = 'discoRes_k_{}_c_{}'.format(disco_k, disco_c)
-            disco_D = 100
-            disco_P = 1
-            disco_b = 0
-            resultsname_part_2 = 'D_{}_P_{}_b_{}'.format(disco_D, disco_P, disco_b)
-            def rename(oldname, newname):
-                print('Renaming {} to {}'.format(oldname, newname))
-                _os.rename(oldname, newname)
-            # discoRes_k_31_c_auto.h5
-            oldname = _os.path.extsep.join([resultsname_part_1,'h5'])
-            rename(oldname, add_prefix+'__'+oldname)
-            # discoRes_k_31_c_auto_cov.h5
-            oldname = _os.path.extsep.join([resultsname_part_1+'_cov','h5'])
-            rename(oldname, add_prefix+'__'+oldname)
-            
-            resultsname = resultsname_part_1+'_'+resultsname_part_2
-            # discoRes_k_31_c_auto_D_100_P_1_b_0_coherent.fa
-            oldname = _os.path.extsep.join(
-                    [resultsname+'_coherent','fa'])
-            rename(oldname, add_prefix+'__'+oldname)
-            # discoRes_k_31_c_auto_D_100_P_1_b_0_uncoherent.fa
-            oldname = _os.path.extsep.join(
-                    [resultsname+'_uncoherent','fa'])
-            rename(oldname, add_prefix+'__'+oldname)
-            if hasattr(self, 'genome_id'):
-                # discoRes_k_31_c_auto_D_100_P_1_b_0_coherentbis.fasta
-                oldname = _os.path.extsep.join(
-                        [resultsname+'_coherentbis','fasta'])
-                rename(oldname, add_prefix+'__'+oldname)
-                # discoRes_k_31_c_auto_D_100_P_1_b_0_coherentBWA_OPT_n4_l10_s0.sam
-                oldname = _os.path.extsep.join(
-                        [resultsname+'_coherentBWA_OPT_n4_l10_s0','sam'])
-                rename(oldname, add_prefix+'__'+oldname)
-                # discoRes_k_31_c_auto_D_100_P_1_b_0_coherent.vcf
-                oldname = _os.path.extsep.join(
-                        [resultsname+'_coherent','vcf'])
-                rename(oldname, add_prefix+'__'+oldname)
-                # discoRes_k_31_c_auto_D_100_P_1_b_0_coherent_for_IGV.vcf
-                oldname = _os.path.extsep.join(
-                        [resultsname+'_coherent_for_IGV','vcf'])
-                rename(oldname, add_prefix+'__'+oldname)
+            cmd['-p'] = [add_prefix+'__DiscoSNP']
+
+        if arguments:
+            # overwrite defaults with direct arguments
+            # (e.g. via -A/--arguments cli)
+            from baga import parse_new_arguments
+            cmd = parse_new_arguments(arguments, cmd)
+
+        # make commands into a list suitable for subprocess
+        cmds = []
+        for opt,arg in cmd.items():
+            cmds += [opt]
+            if arg is not None:
+                cmds += arg
+
+        print(' '.join([path_to_exe] + cmds))
+        _subprocess.call([path_to_exe] + cmds)
 
 class Filter:
     '''
