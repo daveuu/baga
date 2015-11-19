@@ -617,26 +617,41 @@ class Reads:
             print('Please supply an even number of paired files. Found {}:\n{}'.format(len(use_files), '\n'.join(use_files)))
             _sys.exit(1)
 
+        error_explanation = 'Problem parsing read files: ensure pairs are numbered '\
+        '1 and 2\n'\
+        'BAGA looks for a "1" or "2" labelling in read pair filenames and takes '\
+        'the last digit in the filename.\n'\
+        'E.g. *R1.fastq.gz and *R2.fastq.gz would be OK, 1_thesereads1.fastq.gz '\
+        'and 2_thesereads1.fastq.gz would not. (Leading digits OK for sample '\
+        'numbering: 1_* 2_* 3_* etc but must each have 1 or 2 elsewhere in file '\
+        'name)\n . . else please report as bug'
+
 
         # match pairs
         filepairs = {}
         for path in use_files:
             path_bits = path.split(_os.path.sep)
-            filename = path_bits[-1]
-            # {1} prevents splitting at 1 or 2 first character
-            bits = _re.split('([^0-9]{1}[12][^0-9])', filename)
-            e = 'Problem parsing read files: ensure pairs are numbered 1 and 2\n'
-            e += 'BAGA looks for 1 and 2 labelling in read pair filenames, excluding at the start and 1 or 2 among other digits.\n'
-            e += 'E.g. *R1.fastq.gz and *R2.fastq.gz would be OK, 1_thesereads.fastq.gz and 2_thesereads.fastq.gz would not.\n'
-            e += '(leading digits OK for sample numbering: 1_* 2_* 3_* etc but must each have 1 or 2 elsewhere in file name)\n'
-            e += ' . . else please report as bug. Problem filename: {}'.format(filename)
-            assert len(bits) == 3, e
-            known_suffixes = ['.fastq.gz','.fq.gz','.fastq','.fq']
+            filename_ext = path_bits[-1]
+            filename, ext = _re.findall('(.+)(\.fastq\.gz|\.fastq|\.fq\.gz|\.fq)$', filename_ext)[0]
+            print(filename, ext)
+            ones_and_twos = list(_re.finditer('[12]', filename))
+            assert len(ones_and_twos) > 0, '{}. Problem filename: {}'.format(
+                                                                        error_explanation, 
+                                                                        filename)
             # make name for each pair that is consistant parts of file name
             # joining with space caused problems when incorporating into a filename downstream
             # and joining with underscore risks introducing double underscore which would cause splitting on __ later to fail
-            pairname = '-'.join([bits[0],bits[2]])
-            for known_suffix in known_suffixes:
+            s,e = ones_and_twos[-1].span()
+            pairmember = ones_and_twos[-1].group()
+            # omit the 1 or 2 relevent to pairing from the name
+            part1,part2 = filename[:s],filename[e:]
+            if len(part1) and len(part2):
+                pairname = '-'.join([part1,part2])
+            elif len(part1) and not len(part2):
+                pairname = part1
+            else:
+                pairname = part2
+            for known_suffix in ['.fastq.gz','.fq.gz','.fastq','.fq']:
                 thismatch = _re.findall('('+known_suffix+')$', pairname)
                 if thismatch:
                     pairnamenew = _re.sub('('+thismatch[0]+')$', '', pairname)
@@ -646,14 +661,18 @@ class Reads:
             
             # store with keys 1 or 2
             try:
-                filepairs[pairname][int(bits[1][1])] = path
+                filepairs[pairname][int(pairmember)] = path
             except KeyError:
-                filepairs[pairname] = {int(bits[1][1]): path}
+                filepairs[pairname] = {int(pairmember): path}
 
         # check pairs are accessible
         checked_read_files = {}
         for pairname,files in filepairs.items():
-            print('Collected pair: {} and {}'.format(files[1], files[2]))
+            assert len(files) == 2, '{}. Problem filename(s): {}'.format(
+                    error_explanation, ', '.join(files))
+            
+            print('Collected pair "{}": {} and {}'.format(
+                    pairname, files[1], files[2]))
             
             try:
                 if _os.path.getsize(files[1]) == 0:
