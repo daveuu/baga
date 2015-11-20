@@ -139,8 +139,10 @@ class DeNovo:
         --cov-cutoff <float> positive float value, or 'auto', or 'off'. Default value is 'off'
         '''
 
+        assert isinstance(output_folder, list), 'Provide output folder as list of folders forming path'
 
         base_output_path = _os.path.sep.join(output_folder)
+
         if not _os.path.exists(base_output_path):
             _os.makedirs(base_output_path)
 
@@ -267,6 +269,12 @@ class DeNovo:
             # prepare commandline and launch each SPAdes assembly
             contigs = {}
             for cnum, (pairname, files) in enumerate(self.read_files.items()):
+                if isinstance(use_exe, list):
+                    # allow for use of prepended executable with script to run
+                    cmd = list(use_exe)
+                else:
+                    # or just executable
+                    cmd = [use_exe]
                 # allow use of tuples or dicts by converting dicts to lists
                 if isinstance(files, dict):
                     use_files = []
