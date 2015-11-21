@@ -2247,7 +2247,7 @@ class Aligner:
                     self.path_to_alignments, self.aligned_to_sample, 
                     self.aligned_to_genome)
             with open(alnfilename_variants, 'w') as foutvar, \
-                    open(alnfilename_variants, 'w') as foutsumm:
+                    open(alnfilename_summary, 'w') as foutsumm:
                 foutvar.write('"assembly start","assembly end","contig","position",'\
                         '"reference","variant"\n')
                 foutsumm.write('"assembly start","assembly end","contig name",'\
@@ -2289,11 +2289,11 @@ class Aligner:
                         _SeqIO.write(aligned_regions[ref_region_id][0][1], foutalnd, 'fasta')
                 alnfilename_variants = '{}/{}__{}_{}_alnd_variants.csv'.format(
                         self.path_to_alignments, self.aligned_to_sample, 
-                        self.aligned_to_genome, region_id[4:])
+                        self.aligned_to_genome, ref_region_id[4:])
                 alnfilename_summary = '{}/{}__{}_{}_alnd_summary.csv'.format(
                         self.path_to_alignments, self.aligned_to_sample, 
                         self.aligned_to_genome, ref_region_id[4:])
-                with open(alnfilename_variants, 'w') as foutvar, open(alnfilename_variants, 'w') as foutsumm:
+                with open(alnfilename_variants, 'w') as foutvar, open(alnfilename_summary, 'w') as foutsumm:
                     foutvar.write('"assembly start","assembly end","contig","position",'\
                             '"reference","variant"\n')
                     foutsumm.write('"assembly start","assembly end","contig name",'\
