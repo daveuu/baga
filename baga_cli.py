@@ -476,7 +476,7 @@ files in a user provided path or a reads group processed with the AlignReads opt
 \n\n\
 Example usages:\n\
 %(prog)s --genome_name FM209186.1 --reads_name Liverpool --check\n\
-%(prog)s --genome_name FM209186.1 --alignments_path path/to/my/bams --check\n', 
+%(prog)s --genome_name FM209186.1 --alignments_paths path/to/my/bams --check\n', 
 text_width, replace_whitespace = False))
 
 mutually_exclusive_group = parser_Structure.add_mutually_exclusive_group(required=True)
@@ -485,7 +485,7 @@ mutually_exclusive_group.add_argument('-n', "--reads_name",
     help = "name of read datasets group if processed by PrepareReads and AlignReads options. Should match --reads_name option used previously",
     type = str)
 
-mutually_exclusive_group.add_argument('-a', "--alignments_path", 
+mutually_exclusive_group.add_argument('-a', "--alignments_paths", 
     help = "path to paired-end short read alignments to a reference genome. If a directory path(s) is provided, all *.BAM and *.bam files will be included. A list of filenames with full path or with *, ? or [] characters can also be provided (with unix-style pathname pattern expansion for the latter)",
     type = str,
     nargs = '+')
@@ -725,7 +725,7 @@ and VCF files. \
 \n\n\
 Example usages:\n\
 %(prog)s --genome_name FM209186.1 --reads_name Liverpool --check\n\
-%(prog)s --alignments_path path/to/my/bams --vcfs_path path/to/my/vcfs --check --genome_name FM209186.1\n', 
+%(prog)s --alignments_paths path/to/my/bams --vcfs_paths path/to/my/vcfs --check --genome_name FM209186.1\n', 
 text_width, replace_whitespace = False))
 
 mutually_exclusive_group = parser_CheckLinkage.add_mutually_exclusive_group(required=True)
@@ -745,7 +745,7 @@ parser_CheckLinkage.add_argument('-g', "--genome_name",
     type = str,
     required=True)
 
-parser_CheckLinkage.add_argument('-p', "--vcf_paths", 
+parser_CheckLinkage.add_argument('-p', "--vcfs_paths", 
     help = "path to vcf files. If a directory path(s) is provided, all *.VCF and *.vcf files will be included. A list of filenames with full path or with *, ? or [] characters can also be provided (with unix-style pathname pattern expansion for the latter)",
     type = str,
     nargs = '+',
@@ -808,7 +808,7 @@ mutually_exclusive_group2.add_argument('-n', "--reads_name",
     type = str,
     nargs = '+')
 
-mutually_exclusive_group2.add_argument('-v', "--vcfs_path", 
+mutually_exclusive_group2.add_argument('-v', "--vcfs_paths", 
     help = "path to vcf files. If a directory path(s) is provided, all *.VCF and *.vcf files will be included. A list of filenames with full path or with *, ? or [] characters can also be provided (with unix-style pathname pattern expansion for the latter)",
     type = str,
     nargs = '+')
@@ -1587,14 +1587,14 @@ if args.subparser == 'Structure':
             BAMs = alignments.ready_BAMs[-1]
             sample_names = sorted(alignments.read_files)
             
-        elif args.alignments_path:
+        elif args.alignments_paths:
             # list of folders or files provided
             BAMs = []
-            for path in args.alignments_path:
+            for path in args.alignments_paths:
                 if os.path.isdir(path):
                     path_contents = os.listdir(path)
                     theseBAMs = [os.path.sep.join([path,f]) for f in path_contents if f[-3:] in ('BAM', 'bam')]
-                    e = 'No BAM files (*.bam or *.BAM) found in:\n{}'.format(args.alignments_path)
+                    e = 'No BAM files (*.bam or *.BAM) found in:\n{}'.format(args.alignments_paths)
                     assert len(theseBAMs), e
                     BAMs += theseBAMs
                 else:
@@ -2208,13 +2208,13 @@ if args.subparser == 'FilterVariants':
                 sys.exit('It seems the analysis described in {} is incomplete. Try completing or rerunning using the CallVariants module'.format(filein))
         
     else:
-        # list of folders or files provided in args.vcf_paths
+        # list of folders or files provided in args.vcfs_paths
         VCFs = []
-        for path in args.vcfs_path:
+        for path in args.vcfs_paths:
             if os.path.isdir(path):
                 path_contents = os.listdir(path)
                 theseVCFs = [os.path.sep.join([path,f]) for f in path_contents if f[-3:] in ('VCF', 'vcf')]
-                e = 'No VCF files (*.vcf or *.VCF) found in:\n{}'.format(args.alignments_path)
+                e = 'No VCF files (*.vcf or *.VCF) found in:\n{}'.format(args.alignments_paths)
                 assert len(theseVCFs), e
                 VCFs += theseVCFs
             else:
@@ -2330,7 +2330,7 @@ if args.subparser == 'CheckLinkage':
     from baga import CallVariants
     if args.reads_name:
         # allegedly works in 2 and 3
-        raise NotImplementedError('Waiting for pooled samples to be implemented in baga.CallVariants. Use --vcf_paths --alignment_paths instead')
+        raise NotImplementedError('Waiting for pooled samples to be implemented in baga.CallVariants. Use --vcfs_paths --alignments_paths instead')
         # part of baga pipeline
         if not args.genome_name:
             parser.error('--genome_name/-g is required with --reads_name/-n. (The baga CollectData-processed genome used with the AlignReads option)')
@@ -2405,13 +2405,13 @@ if args.subparser == 'CheckLinkage':
             sample_names = sorted(found_labels)
             
     else:
-        # list of folders or files provided in args.vcf_paths
+        # list of folders or files provided in args.vcfs_paths
         VCFs = []
-        for path in args.vcf_paths:
+        for path in args.vcfs_paths:
             if os.path.isdir(path):
                 path_contents = os.listdir(path)
                 theseVCFs = [os.path.sep.join([path,f]) for f in path_contents if f[-3:] in ('VCF', 'vcf')]
-                e = 'No VCF files (*.vcf or *.VCF) found in:\n{}'.format(args.alignment_paths)
+                e = 'No VCF files (*.vcf or *.VCF) found in:\n{}'.format(args.alignments_paths)
                 assert len(theseVCFs), e
                 VCFs += theseVCFs
             else:
@@ -2419,11 +2419,11 @@ if args.subparser == 'CheckLinkage':
                 VCFs += [path]
         print('Loaded VCF locations:\n{}'.format('\n'.join(VCFs)))
         BAMs = []
-        for path in args.alignment_paths:
+        for path in args.alignments_paths:
             if os.path.isdir(path):
                 path_contents = os.listdir(path)
                 theseBAMs = [os.path.sep.join([path,f]) for f in path_contents if f[-3:] in ('BAM', 'bam')]
-                e = 'No BAM files (*.bam or *.BAM) found in:\n{}'.format(args.alignment_paths)
+                e = 'No BAM files (*.bam or *.BAM) found in:\n{}'.format(args.alignments_paths)
                 assert len(theseBAMs), e
                 BAMs += theseBAMs
             else:
@@ -2455,7 +2455,7 @@ if args.subparser == 'ComparativeAnalysis':
         if args.reads_name:
             if args.sample_bams:
                 print('If --reads_name/-n provided, --sample_bams/-B is not necessary: ignoring latter')
-        elif args.vcfs_path:
+        elif args.vcfs_paths:
             # these two added as "add_mutually_exclusive_group"
             if args.include_invariants:
                 if not args.sample_bams:
@@ -2524,15 +2524,15 @@ if args.subparser == 'ComparativeAnalysis':
             MSA_filename = '{}__{}_SNPs'.format(use_name_genome,'_'.join(args.reads_name))
             
         else:
-            # list of folders or files provided in args.vcf_paths
+            # list of folders or files provided in args.vcfs_paths
             # not part of a baga pipeline, so need BAMs linked to samples separately in --sample_bams
             paths_to_VCFs = []
             paths_to_BAMs = []
-            for path in args.vcfs_path:
+            for path in args.vcfs_paths:
                 if os.path.isdir(path):
                     path_contents = os.listdir(path)
                     theseVCFs = [os.path.sep.join([path,f]) for f in path_contents if f[-3:] in ('VCF', 'vcf')]
-                    e = 'No VCF files (*.vcf or *.VCF) found in:\n{}'.format(args.alignments_path)
+                    e = 'No VCF files (*.vcf or *.VCF) found in:\n{}'.format(args.alignments_paths)
                     assert len(theseVCFs), e
                     paths_to_VCFs += theseVCFs
                 else:
