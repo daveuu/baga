@@ -172,6 +172,7 @@ class Finder:
             return(sorted(next_hit_ORFs.items(), key = lambda x: x[1])[0])
     def getHomologousContiguousBlocks(self):
         blocks = []
+        this_block = []
         merging = False
         block_to_homoblocks = {}  ## need to add singletons
         for n,thisORF in enumerate(self.ORFs_with_hits_ordered):
@@ -208,12 +209,20 @@ class Finder:
                 # print('tandem warning', thisORF, thisORFnearestWithHit, self.ORF_hits[thisORF])
                 # due to tandem repeat, break blocks appropriately
                 # add this ORF as a single-ORF block as complete
+                if len(this_block) == 0:
+                    # this is necessary if first checked is in a single ORF (near-)tandem repeat
+                    # not checked in detail
+                    this_block = [thisORF]
+                    homoblocks = {}
+                    homoblocks[thisORFnearestWithHit] = [thisORF]
+                    homoblocks[thisORF] = [thisORFnearestWithHit]
                 blocks += [[thisORF]]
                 # also save homologous contiguous blocks
                 block_to_homoblocks[tuple(this_block)] = sorted(map(sorted, homoblocks.values()))
                 
             elif merging and thisORFnearestWithHit in [a for b in map(self.ORF_hits.get, this_block) for a in b]:
                 ## multi-ORF tandem repeat
+                # print('multi-ORF tandem repeat')
                 # this next adjacent is a homolog to an ORF in current contiguous block, so block should be terminated
                 # add this multi-ORF block as complete
                 blocks += [this_block]
@@ -228,7 +237,7 @@ class Finder:
             else:
                 # did find an adjacent ORF within maxdist with a homolog elsewhere (and not self i.e., not tandem repeat): are homologs part of a homologous block?
                 # print('%s hits (para)logs %s' % (thisORF, ', '.join(self.ORF_hits[thisORF])))
-                
+                # print('did find an adjacent ORF within maxdist . . .')
                 if not merging:
                     # assuming these share homology to adjacent blocks elsewhere . . .
                     # start a new block because we weren't merging
