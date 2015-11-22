@@ -161,6 +161,11 @@ class Genome:
             or other unambiguous ID that will return a single result
             '''
             
+            print("WARNING: NCBI's Entrez query system used here can be unreliable. "\
+                    "If the download does not start (if you don't see '524,288 bytes "\
+                    "...') within a few seconds, press ctrl-c and issue the same "\
+                    "command again (up-arrow, enter, usually works)\n")
+            
             if '.' in search_id:
                 search_id_unversioned,requested_ver = search_id.split('.')
             else:
@@ -236,7 +241,7 @@ class Genome:
                 use_name = search_id_unversioned + '.' + refseq2version[search_id_unversioned]
                 if requested_ver is None:
                     print('Found version {} of RefSeq accession {}'.format(
-                            search_id_unversioned, refseq2version[search_id_unversioned]))
+                            refseq2version[search_id_unversioned], search_id_unversioned))
                 elif requested_ver != refseq2version[search_id_unversioned]:
                     print('RefSeq accession {} version {} was requested, '\
                     'but version {} is the current version and will be used instead'.format(
