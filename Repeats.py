@@ -970,18 +970,22 @@ class Finder:
                     for s,e in pair[label]['ambiguous_ranges']:
                         all_positions.update(range(s,e))
 
-        all_ambiguous_ranges = self.makeRanges(sorted(all_positions))
+        if len(all_positions) > 0:
+            all_ambiguous_ranges = self.makeRanges(sorted(all_positions))
+            initial_num_repeats = len(all_ambiguous_ranges)
+            all_ambiguous_ranges = [(s,e) for s,e in all_ambiguous_ranges if e - s > minimum_repeat_length]
+            s = sum([(e - s) for s,e in all_ambiguous_ranges])
+            print('Dropped {} repeats less than {} basepairs; {} remain spanning {:,} basepairs'.format(
+                                                                            initial_num_repeats, 
+                                                                            minimum_repeat_length, 
+                                                                            len(all_ambiguous_ranges),
+                                                                            s))
+            self.ambiguous_ranges = all_ambiguous_ranges
+        else:
+            print('No repeats found.')
+            self.ambiguous_ranges = []
 
-        initial_num_repeats = len(all_ambiguous_ranges)
-        all_ambiguous_ranges = [(s,e) for s,e in all_ambiguous_ranges if e - s > minimum_repeat_length]
-        s = sum([(e - s) for s,e in all_ambiguous_ranges])
-        print('Dropped {} repeats less than {} basepairs; {} remain spanning {:,} basepairs'.format(
-                                                                        initial_num_repeats, 
-                                                                        minimum_repeat_length, 
-                                                                        len(all_ambiguous_ranges),
-                                                                        s))
 
-        self.ambiguous_ranges = all_ambiguous_ranges
 
 
     def saveLocal(self, name):
