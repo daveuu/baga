@@ -577,10 +577,10 @@ parser_CallVariants.add_argument('-g', "--genome_name",
     required = False)
 
 parser_CallVariants.add_argument('-F', "--force", 
-    help = "overwrite existing per isolate data: required when repeating an \
-analysis else previous versions retained. Retention of previous versions is \
-convenient for resuming an interrupted analysis in which only some read sets \
-were processed.",
+    help = "overwrite existing per isolate data: required when repeating an "\
+    "analysis else previous versions retained. Retention of previous versions "\
+    "is convenient for resuming an interrupted analysis in which only some "\
+    "read sets were processed.",
     action = 'store_true',
     default = False)
 
@@ -665,8 +665,11 @@ mutually_exclusive_group.add_argument('-n', "--reads_name",
     type = str,
     nargs = '+')
 
-mutually_exclusive_group.add_argument('-p', "--vcfs_path", 
-    help = "path to vcf files. If a directory path(s) is provided, all *.VCF and *.vcf files will be included. A list of filenames with full path or with *, ? or [] characters can also be provided (with unix-style pathname pattern expansion for the latter)",
+mutually_exclusive_group.add_argument('-p', "--vcfs_paths", 
+    help = "path to vcf files. If a directory path(s) is provided, all *.VCF "\
+    "and *.vcf files will be included. A list of filenames with full path or "\
+    "with *, ? or [] characters can also be provided (with unix-style pathname "\
+    "pattern expansion for the latter)",
     type = str,
     nargs = '+')
 
@@ -883,29 +886,34 @@ parser_ComparativeAnalysis.add_argument('-G', "--genome_length",
     type = int)
 
 parser_AssembleReads = subparser_adder.add_parser('AssembleReads',
-                formatter_class = argparse.RawDescriptionHelpFormatter,
-                description = textwrap.fill('Assemble reads into contiguous chromosome sequences.',
-                                            text_width,
-                                            replace_whitespace = False),
-                epilog = textwrap.fill('Example usage: %(prog)s --denovo spades \
---reads_name Liverpool\n', 
-text_width, replace_whitespace = False))
-
+    formatter_class = argparse.RawDescriptionHelpFormatter,
+    description = textwrap.fill('Assemble reads into contiguous chromosome sequences.',
+                                text_width,
+                                replace_whitespace = False),
+    epilog = textwrap.fill('Example usage: %(prog)s --denovo spades '\
+    '--reads_name Liverpool\n', 
+    text_width, replace_whitespace = False))
 
 parser_AssembleReads.add_argument('-n', "--reads_name", 
-    help = "name of read datasets groups on which to perform assembly. Reads should have collected and prepared with BAGA's CollectData and PrepareReads options. Should match --reads_name option used previously",
+    help = "name of read datasets groups on which to perform assembly. Reads "\
+    "should have collected and prepared with BAGA's CollectData and "\
+    "PrepareReads options. Should match --reads_name option used previously",
     required = True,
     type = str,
     nargs = '+')
 
 parser_AssembleReads.add_argument('-s', "--include_samples", 
-    help = "Implement Me! restrict assembly to these samples within the read datasets groups provided by --reads_name/-n. If omitted, all samples are included.",
+    help = "Implement Me! restrict assembly to these samples within the read "\
+    "datasets groups provided by --reads_name/-n. If omitted, all samples are "\
+    "included.",
     type = str,
     nargs = '+',
     metavar = 'SAMPLE_NAME')
 
 parser_AssembleReads.add_argument('-e', "--exclude_samples", 
-    help = "Implement Me! exclude these samples from assembly from among samples within the read datasets groups provided by --reads_name/-n. If omitted, no samples are excluded.",
+    help = "Implement Me! exclude these samples from assembly from among samples "\
+    "within the read datasets groups provided by --reads_name/-n. If omitted, no "\
+    "samples are excluded.",
     type = str,
     nargs = '+',
     metavar = 'SAMPLE_NAME')
@@ -917,7 +925,8 @@ parser_AssembleReads.add_argument('-P', "--program",
     default = 'spades')
 
 parser_AssembleReads.add_argument('-m', "--max_memory", 
-    help = "maximum memory to use in gigabytes for each assembly. If not specified, total available at launch time will be used.",
+    help = "maximum memory to use in gigabytes for each assembly. If not "\
+    "specified, total available at launch time will be used.",
     type = int)
 
 args = parser.parse_args()
