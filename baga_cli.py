@@ -136,18 +136,35 @@ def check_direct_arguments(arguments, wrapped_tools):
     Checks whether specified target programs are recognised among task-specific 
     "wrapped_tools".
     '''
-    direct_arguments = {a:b for a,b in zip(arguments[::2],
-                                           arguments[1::2])}
-    recognised = set(direct_arguments) & set(wrapped_tools)
-    if len(recognised) == 0:
-        recognised = ['none']
-    not_recognised = set(direct_arguments) - set(wrapped_tools)
-    assert len(not_recognised) == 0, 'Some of the wrapped '\
-            'program names specified are not recognised:\n'\
-            'Recognised: {}\n'\
-            'Not recognised: {}\n'.format(', '.join(recognised),
-                                          ', '.join(not_recognised))
-    return(direct_arguments)
+    if arguments:
+        # to avoid conflicts on the command line, these direct arguments to 
+        # wrapped tools need to use underscores instead of dashes, so replace
+        # former with latter here
+        def underscores(txt):
+            '''convert __ to -- and _ to -'''
+            a = re.sub('(_)(_)', r'-\1', txt)
+            a = re.sub('([- ]|^)(_)([\w])', r'\1-\3', a)
+            return(a)
+        direct_arguments = {a:underscores(b) for a,b in zip(arguments[::2],
+                                               arguments[1::2])}
+        assert len(direct_arguments) != 0, 'Supplied direct arguments ({}) '\
+                'not recognised. Should be: "--arguments <program name> '\
+                '<\'_o 5 __option 2\'>" (use underscore, _o and __option, '\
+                'instead of hyphen, -o and --option)'
+        recognised = set(direct_arguments) & set(wrapped_tools)
+        if len(recognised) == 0:
+            recognised = ['none']
+        not_recognised = set(direct_arguments) - set(wrapped_tools)
+        print(direct_arguments, not_recognised, len(not_recognised))
+        assert len(not_recognised) == 0, 'Some of the wrapped '\
+                'program names specified are not recognised:\n'\
+                'Recognised: {}\n'\
+                'Not recognised: {}\n'.format(', '.join(recognised),
+                                              ', '.join(not_recognised))
+        return(direct_arguments)
+    else:
+        # CLI defaults to False for empty
+        return({})
 text_width = 70
 
 title = 'Bacterial and Archaeal Genome Analyser'
@@ -568,7 +585,7 @@ parser_CallVariants.add_argument('-r', "--reads_name",
     "AlignReads options. For GATK a single group can be processed. For "\
     "DiscoSNP++, one or more groups can be processed",
     type = str,
-    required = True,
+    required = False,
     nargs = '+')
 
 parser_CallVariants.add_argument('-g', "--genome_name", 
@@ -1062,7 +1079,6 @@ if args.subparser == 'Dependencies':
                     check_summary[-1] += "Installed successfully: found!"
                 else:
                     check_summary[-1] += "Failed to install . . . there may be dependencies missing or some other problem . . ."
-                    check_summary[-1] += ". . . currently python modules like dendropy cannot be checked straight after getting . . . so rerunning this command may succeed for those: try that."
                 
                 check_results += [gotnow]
             
@@ -1981,17 +1997,14 @@ if args.subparser == 'Structure':
 
 if args.subparser == 'CallVariants':
     print('\n-- Variant Calling module --\n')
-    # check if direct commands make sense
-    if args.arguments:
-        direct_arguments = check_direct_arguments(args.arguments, 
-                                                  wrapped_tools = ['DiscoSNP++'])
     # check whether GATK path is needed
     if any([args.calleach, 
             args.calljoint, 
             args.hardfilter, 
             args.recalibrate
             ]):
-        if len(args.reads_name) > 1:
+        assert args.reads_name, '--reads_name is required for calling with GATK'
+        if len(args.reads_name) != 1:
             sys.exit('Only one reads group can be processed by GATK per '\
             'analysis (supplied: {})'.format(', '.join(args.reads_name)))
         if args.calldisco:

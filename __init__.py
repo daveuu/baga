@@ -207,6 +207,8 @@ def parse_new_arguments(arguments, cmd):
     Handles -/--, flags, quotes and multiple arguments per option
     '''
     lexer = _shlex.shlex(arguments)
+    # prevent splitting floating point arguments
+    lexer.wordchars += '.'
     new_arguments = {}
     collect = False
     pre = []

@@ -76,6 +76,7 @@ def parseVCF(path_to_VCF):
     header = dict(header)
     header_section_order = list(header_section_order)
     return(header, header_section_order, colnames, variants)
+
 def dictify_vcf_header(header):
     '''convert VCF header to dict using re for quotes'''
     pattern1 = _re.compile(''',(?=(?:[^'"]|'[^']*'|"[^"]*")*$)''')
@@ -184,6 +185,7 @@ def sortVariantsKeepFilter(header, colnames, variantrows):
     allfilters = FILTERfilters | INFOfilters
 
     return(variants, allfilters)
+
 def sortAmongBetweenReference(variants, sample_size):
     '''Separate "among sample" and "to reference" variants
 
@@ -508,6 +510,7 @@ filter_names = {
             ('genome_repeats',): 'baga reference genome repeats', 
             ('rearrangements1', 'rearrangements2'): 'baga genome rearrangements'
 }
+
 class CallerGATK:
     '''
     Wrapper around Broad Institute's Genome Analysis Tool Kit for variant calling
@@ -597,7 +600,8 @@ class CallerGATK:
             use_java = 'java',
             force = False,
             mem_num_gigs = 8, 
-            max_cpus = -1):
+            max_cpus = -1,
+            arguments = False):
         '''
         https://www.broadinstitute.org/gatk/guide/best-practices/?bpm=DNAseq
         max_cpus for this GATK module is "cpu threads per data thread"
@@ -627,26 +631,57 @@ class CallerGATK:
 
         start_time = _time.time()
         paths_to_raw_gVCFs = []
+        exe = [use_java, '-Xmx%sg' % mem_num_gigs, '-jar', jar]
         # call the last set of ready BAMs added
         for cnum,BAM in enumerate(self.ready_BAMs[-1]):
             VCF_out = BAM[:-4] + '_unfiltered.gVCF'
             VCF_out = _os.path.sep.join([local_variants_path_genome, VCF_out.split(_os.path.sep)[-1]])
             if not _os.path.exists(VCF_out) or force:
-                cmd = [use_java, '-Xmx%sg' % mem_num_gigs, '-jar', jar,
-                '-T', 'HaplotypeCaller', '-R', genome_fna, '-I', BAM, #'-L', '20', 
-                '--genotyping_mode', 'DISCOVERY',
-                '--sample_ploidy', '1',
-                '--heterozygosity', '0.0001',         # 650 total SNPs prior in all samples i.e., population <== make this an argument
-                '--indel_heterozygosity', '0.00001',  # 65 total indels prior in all samples i.e., population
-                '--emitRefConfidence', 'GVCF',        # make vcfs appropriate for doing GenotypeGVCFs after
-                '--variant_index_type', 'LINEAR',
-                '--variant_index_parameter', '128000',
-                '-nct',  str(max_processes),
-                '-stand_emit_conf', '10', 
-                '-stand_call_conf', '20', 
-                '-o', VCF_out]
-                print('Called: %s' % (' '.join(map(str, cmd))))
-                _subprocess.call(cmd)
+                # cmd should be built as 'option':[argument list] dictionary
+                # with None as values for flag options
+                cmd = {}
+                # '-T', 'HaplotypeCaller', '-R', genome_fna, '-I', BAM, #'-L', '20', 
+                cmd['-T'] = ['HaplotypeCaller']
+                cmd['-R'] = [genome_fna]
+                cmd['-I'] = [BAM]
+                # '--genotyping_mode', 'DISCOVERY',
+                cmd['--genotyping_mode'] = ['DISCOVERY']
+                #'--sample_ploidy', '1',
+                cmd['--sample_ploidy'] = ['1']
+                #'--heterozygosity', '0.0001',         # 650 total SNPs prior in all samples i.e., population <== make this an argument
+                cmd['--heterozygosity'] = ['0.0001']
+                #'--indel_heterozygosity', '0.00001',  # 65 total indels prior in all samples i.e., population
+                cmd['--indel_heterozygosity'] = ['0.00001']  # 65 total indels prior in all samples i.e., population
+                #'--emitRefConfidence', 'GVCF',        # make vcfs appropriate for doing GenotypeGVCFs after
+                cmd['--emitRefConfidence'] = ['GVCF']  # make vcfs appropriate for doing GenotypeGVCFs after
+                #'--variant_index_type', 'LINEAR',
+                cmd['--variant_index_type'] = ['LINEAR']
+                #'--variant_index_parameter', '128000',
+                cmd['--variant_index_parameter'] = ['128000']
+                #'-nct',  str(max_processes),
+                cmd['-nct'] = [str(max_processes)]
+                #'-stand_emit_conf', '10', 
+                cmd['-stand_emit_conf'] = ['10']
+                #'-stand_call_conf', '20', 
+                cmd['-stand_call_conf'] = ['20']
+                #'-o', VCF_out]
+                cmd['-o'] = [VCF_out]
+                
+                if arguments:
+                    # overwrite defaults with direct arguments
+                    # (e.g. via -A/--arguments cli)
+                    from baga import parse_new_arguments
+                    cmd = parse_new_arguments(arguments, cmd)
+                
+                # make commands into a list suitable for subprocess
+                cmds = []
+                for opt,arg in cmd.items():
+                    cmds += [opt]
+                    if arg is not None:
+                        cmds += arg
+                
+                print('Called: %s' % (' '.join(map(str, exe + cmds))))
+                _subprocess.call(exe + cmds)
                 
             else:
                 print('Found:')
@@ -669,7 +704,8 @@ class CallerGATK:
             local_variants_path = ['variants'],
             use_java = 'java',
             force = False,
-            mem_num_gigs = 8):
+            mem_num_gigs = 8,
+            arguments = False):
         
         jar = _os.path.sep.join(jar)
         local_variants_path = _os.path.sep.join(local_variants_path)
@@ -703,17 +739,36 @@ class CallerGATK:
         use_name = '{}_{}_samples_unfiltered.vcf'.format(data_group_name, len(self.paths_to_raw_gVCFs))
         VCF_out = _os.path.sep.join([local_variants_path_genome, use_name])
 
-        cmd = [use_java, '-Xmx%sg' % mem_num_gigs, '-jar', jar, 
-            '-T', 'GenotypeGVCFs', '-R', genome_fna,
-            '--heterozygosity', '0.0001',         # 650 total indels prior in all samples i.e., population
-            '--indel_heterozygosity', '0.00001',  # 65 total indels prior in all samples i.e., population
-            '-stand_emit_conf', '10', 
-            '-stand_call_conf', '20'] + \
-            ['-V', 'variants.list'] + \
-            ['-o', VCF_out]
+        exe = [use_java, '-Xmx%sg' % mem_num_gigs, '-jar', jar]
 
-        print('Called: %s' % (' '.join(cmd)))
-        _subprocess.call(cmd)
+        # cmd should be built as 'option':[argument list] dictionary
+        # with None as values for flag options
+        cmd = {}
+        cmd['-T'] = ['GenotypeGVCFs']
+        cmd['-R'] = [genome_fna]
+        cmd['--heterozygosity'] = ['0.0001']        # 650 total indels prior in all samples i.e., population
+        cmd['--indel_heterozygosity'] = ['0.00001'] # 65 total indels prior in all samples i.e., population
+        cmd['-stand_emit_conf'] = ['10']
+        cmd['-stand_call_conf'] = ['20']
+        cmd['-V'] = ['variants.list']
+        cmd['-o'] = [VCF_out]
+
+        if arguments:
+            # overwrite defaults with direct arguments
+            # (e.g. via -A/--arguments cli)
+            from baga import parse_new_arguments
+            cmd = parse_new_arguments(arguments, cmd)
+
+        # make commands into a list suitable for subprocess
+        cmds = []
+        for opt,arg in cmd.items():
+            cmds += [opt]
+            if arg is not None:
+                cmds += arg
+
+        print('Called: %s' % (' '.join(map(str, exe + cmds))))
+        _subprocess.call(exe + cmds)
+
 
         # add to a list because this is done twice
         if hasattr(self, 'path_to_unfiltered_VCF'):
@@ -929,6 +984,7 @@ class CallerGATK:
         # the last list of BAMs in ready_BAMs is input for CallgVCFsGATK
         # both IndelRealignGATK and recalibBaseScoresGATK put here
         self.ready_BAMs += [paths_to_recalibrated_BAMs]
+
 class CallerDiscoSNP:
     '''
     Wrapper around DiscoSNP++ for SNP and InDel calling from short reads.
@@ -1423,6 +1479,7 @@ class Filter:
         self.markVariants(filters_to_apply)
 
         self.reportFiltered()
+
 
 class Linkage:
     '''Methods to measure co-incidence of alleles on the same reads or fragments.
