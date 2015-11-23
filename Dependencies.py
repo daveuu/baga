@@ -808,12 +808,14 @@ dependencies_by_task['Repeats'] = [
 'biopython',
 'seq-align',
 'svgwrite',
+'pysam',
 ]
 
 dependencies_by_task['Structure'] = [
 'biopython',
 'pysam',
 'svgwrite',
+'spades',
 ]
 
 dependencies_by_task['CallVariants'] = [
