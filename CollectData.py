@@ -28,7 +28,6 @@ from a the Internet via a URL or from a local path.
 # stdlib
 from ftplib import FTP as _FTP
 from time import sleep as _sleep
-from hashlib import md5 as _md5
 import urllib2 as _urllib2
 from glob import glob as _glob
 
@@ -44,6 +43,7 @@ from baga import _json
 from baga import _StringIO
 from baga import _array
 from baga import _time
+from baga import _md5
 
 from baga import report_time as _report_time
 

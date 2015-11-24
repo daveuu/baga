@@ -27,6 +27,7 @@ import tarfile as _tarfile
 import json as _json
 import time as _time
 import shlex as _shlex
+from hashlib import md5 as _md5
 from cStringIO import StringIO as _StringIO
 from array import array as _array
 
