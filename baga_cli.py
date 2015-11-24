@@ -601,6 +601,30 @@ parser_CallVariants.add_argument('-F', "--force",
     action = 'store_true',
     default = False)
 
+parser_CallVariants.add_argument('-C', "--check", 
+    help = "check previously called variants in a VCF by de novo assembly of "\
+    "relevent shorts reads and aligning the contigs to each variant part of "\
+    "the reference genome.",
+    action = 'store_true',
+    default = False)
+
+parser_CallVariants.add_argument('-p', "--vcfs_paths", 
+    help = "path to vcf files. If a directory path(s) is provided, all *.VCF "\
+    "and *.vcf files will be included. A list of filenames with full path or "\
+    "with *, ? or [] characters can also be provided (with unix-style pathname "\
+    "pattern expansion for the latter)",
+    type = str,
+    nargs = '+')
+
+parser_CallVariants.add_argument('-a', "--alignments_paths", 
+    help = "path to paired-end short read alignments to a reference genome. If a "\
+    "directory path(s) is provided, all *.BAM and *.bam files will be included. A "\
+    "list of filenames with full path or with *, ? or [] characters can also be "\
+    "provided (with unix-style pathname pattern expansion for the latter)",
+    type = str,
+    nargs = '+',
+    metavar = 'PATH_TO_BAMs')
+
 parser_CallVariants.add_argument('-N', "--new", 
     help = "start new variant calling: required when starting whole \
 CallVariants process again from prepared read alignments.",
@@ -613,9 +637,10 @@ parser_CallVariants.add_argument('-n', "--max_cpus",
     default = -1)
 
 parser_CallVariants.add_argument('-m', "--max_memory", 
-    help = "maximum memory to use in gigabytes",
-    type = int,
-    default = 8)
+    help = "maximum memory to use in gigabytes. If not "\
+    "specified, GATK will use 8GB, SPAdes will use total "\
+    "available at launch time.",
+    type = int)
 
 parser_CallVariants.add_argument('-c', "--calleach", 
     help = "call variants in each alignment in preparation for a joint analysis. "\
@@ -2030,140 +2055,188 @@ if using any of:
         assert all([use_path_genome,use_name_genome]), 'Could not locate a '\
                 'saved baga.CollectData.Genome-<genome_name>.baga for name '\
                 'given: {}'.format(args.genome_name)
+        from baga import CollectData
+        genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
     
     import baga
     from baga import CallVariants
-    if args.calldisco:
-        # load baga reads
-        from baga import PrepareReads
-        use_these = []
-        use_these_names = []
-        for reads_group in args.reads_name:
-            use_path_reads,use_name_reads = check_baga_path(
-                    'baga.PrepareReads.Reads', reads_group)
-            use_these_names += [use_name_reads]
-            assert all([use_path_reads,use_name_reads]), 'Could not locate a saved '\
-                    'baga.PrepareReads.Reads-<reads_name>.baga for reads group '\
-                    'given: {}'.format(reads_group)
-            use_these += [PrepareReads.Reads(path_to_baga = use_path_reads)]
-            print('Loaded: {}'.format(use_path_reads))
-        if args.genome_name:
-            from baga import CollectData
-            genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
-            caller = CallVariants.CallerDiscoSNP(reads = use_these, genome = genome)
-        else:
-            caller = CallVariants.CallerDiscoSNP(reads = use_these)
-        if args.genome_name:
-            add_prefix = use_name_genome + '_' + '+'.join(use_these_names)
-        else:
-            add_prefix = 'noref_' + '+'.join(use_these_names)
-        try:
-            use_arguments = direct_arguments['DiscoSNP++']
-        except KeyError:
-            use_arguments = False
-        caller.call(use_existing_graph = args.use_existing_graph, add_prefix = add_prefix, arguments = use_arguments)
-    elif any([args.calleach, 
-            args.calljoint, 
-            args.hardfilter, 
-            args.recalibrate
-            ]):
-        # GATK only other option implemented.
-        # check_baga_path() can handle full object names
-        # e.g. baga.CollectData.Genome-mygenome.baga as well as actual names
-        # i.e. mygenome . . . but not for this reads__genome compound name
-        # so args.reads must be given correctly. Feedback given is a file can't
-        # be found so should still be fine for ease-of-use.
-        reads_genome_name = '__'.join([args.reads_name[0], use_name_genome])
-        # see what is already available (existing analysis of data from
-        # previous baga stage or data from this stage)
-        use_path_alns,use_name_alns = check_baga_path(
-                'baga.AlignReads.SAMs', reads_genome_name)
-        use_path_caller,use_name_caller = check_baga_path(
-                'baga.CallVariants.CallerGATK', reads_genome_name)
-        
-        if args.new:
-            print('Starting new variant calling analysis because --new '\
-                    'requested. Will overwrite any previous analyses.')
-            from baga import AlignReads
-            assert all([use_path_alns,use_name_alns]), 'Could not locate a saved '\
-                    'baga.AlignReads.SAMs-<reads_name>__<genome_name>.baga for '\
-                    'reads group and genome combination given: {}'.format(
-                    use_name_alns)
-            print('Loading alignments information for: {} from AlignReads output'.format(use_name_alns))
-            alignments = AlignReads.SAMs(baga = use_path_alns)
-            caller = CallVariants.CallerGATK(alignments = alignments)
-        elif use_path_caller:
-            # attempt to resume (if use_path_caller not False)
-            print('Loading existing variants call analysis for: {}'.format(use_name_alns))
-            print('(use --new to start variant calling again)')
-            caller = CallVariants.CallerGATK(
-                    baga = use_path_caller)
-        else:
-            # start new as previous not found
-            assert all([use_path_alns,use_name_alns]), 'Could not locate a saved '\
-                    'baga.AlignReads.SAMs-<reads_name>__<genome_name>.baga for '\
-                    'reads group and genome combination given: {}'.format(
-                    use_name_alns)
-            print('Starting new variant calling analysis (could not find '\
-                    'previous baga.CallVariants.CallerGATK-{}.baga)'.format(
-                    reads_genome_name))
-            from baga import AlignReads
-            print('Loading alignments information for: {} from AlignReads '\
-                    'output'.format(use_name_alns))
-            alignments = AlignReads.SAMs(baga = 'baga.AlignReads.SAMs-{}.baga'\
-                    ''.format(use_name_alns))
-            caller = CallVariants.CallerGATK(alignments = alignments)
-        
-        # because --new, setting --force to true to overwrite each output file
-        if args.new:
-            print('Because --new, also setting --force to overwrite each output file')
-            args.force = True
-        
-        if args.calleach:
-            caller.CallgVCFsGATK(
-                        mem_num_gigs = args.max_memory,
-                        jar = args.GATK_jar_path.split(os.path.sep),
-                        use_java = use_java,
-                        force = args.force, 
-                        max_cpus = args.max_cpus)
+    if args.check:
+        assert (args.vcfs_paths and args.genome_name and args.alignments_paths), ''\
+        '--check needs --vcfs_paths to know which variants to check for and '\
+        '--genome_name to align contigs and --alignments_paths for the BAM files '\
+        'against.'
+        def collectfiles(paths, file_extensions):
+            files = []
+            for path in paths:
+                if os.path.isdir(path):
+                    path_contents = os.listdir(path)
+                    thesefiles = [os.path.sep.join([path,f]) for f in path_contents if \
+                                        f.split(_os.path.extsep)[-1] in file_extensions]
+                    glob_extensions = ['*.{}'.format(e) for e in file_extensions]
+                    assert len(thesefiles), 'No files ({}) found in:\n{}'\
+                    ''.format(' or '.join(glob_extensions), args.alignments_paths)
+                    files += thesefiles
+                else:
+                    # add file
+                    files += [path]
+            return(files)
+        BAMs = collectfiles(args.alignments_paths, ('BAM', 'bam'))
+        VCFs = collectfiles(args.vcfs_paths, ('VCF', 'vcf'))
+        checker = CallVariants.Checker(VCFs, BAMs, genome)
+        checker.doCheck(num_padding = 1000, max_memory = args.max_memory, 
+                force = args.force)
+    else:
+        if args.calldisco:
+            assert args.reads_name, '--reads_name is required for calling with DiscoSNP++'
+            # check if direct commands make sense
+            direct_arguments = check_direct_arguments(args.arguments, 
+                    wrapped_tools = ['DiscoSNP++'])
+            # allows for multiple tools to have direct arguments processed together
+            try:
+                use_arguments = direct_arguments['DiscoSNP++']
+            except KeyError:
+                use_arguments = False
+            # load baga reads
+            from baga import PrepareReads
+            use_these = []
+            use_these_names = []
+            for reads_group in args.reads_name:
+                use_path_reads,use_name_reads = check_baga_path(
+                        'baga.PrepareReads.Reads', reads_group)
+                use_these_names += [use_name_reads]
+                assert all([use_path_reads,use_name_reads]), 'Could not locate a saved '\
+                        'baga.PrepareReads.Reads-<reads_name>.baga for reads group '\
+                        'given: {}'.format(reads_group)
+                use_these += [PrepareReads.Reads(path_to_baga = use_path_reads)]
+                print('Loaded: {}'.format(use_path_reads))
+            if args.genome_name:
+                caller = CallVariants.CallerDiscoSNP(reads = use_these, genome = genome)
+            else:
+                caller = CallVariants.CallerDiscoSNP(reads = use_these)
+            if args.genome_name:
+                add_prefix = use_name_genome + '_' + '+'.join(use_these_names)
+            else:
+                add_prefix = 'noref_' + '+'.join(use_these_names)
+            caller.call(use_existing_graph = args.use_existing_graph, add_prefix = add_prefix, arguments = use_arguments)
+        elif any([args.calleach, 
+                args.calljoint, 
+                args.hardfilter, 
+                args.recalibrate
+                ]):
+            # check if direct commands make sense
+            direct_arguments = check_direct_arguments(args.arguments, 
+                    wrapped_tools = ['HaplotypeCaller', 'GenotypeGVCFs'])
+            # GATK only other option implemented.
+            # check_baga_path() can handle full object names
+            # e.g. baga.CollectData.Genome-mygenome.baga as well as actual names
+            # i.e. mygenome . . . but not for this reads__genome compound name
+            # so args.reads must be given correctly. Feedback given is a file can't
+            # be found so should still be fine for ease-of-use.
+            reads_genome_name = '__'.join([args.reads_name[0], use_name_genome])
+            # see what is already available (existing analysis of data from
+            # previous baga stage or data from this stage)
+            use_path_alns,use_name_alns = check_baga_path(
+                    'baga.AlignReads.SAMs', reads_genome_name)
+            use_path_caller,use_name_caller = check_baga_path(
+                    'baga.CallVariants.CallerGATK', reads_genome_name)
             
-            caller.saveLocal(use_name_alns)
-        
-        if args.calljoint:
-            caller.GenotypeGVCFsGATK(
-                        reads_genome_name,
-                        jar = args.GATK_jar_path.split(os.path.sep), 
-                        use_java = use_java,
-                        # ultimately, scale this by the number of samples involved
-                        # needed >8 for a set of 40
-                        mem_num_gigs = args.max_memory, 
-                        force = args.force)
+            if args.max_memory:
+                max_memory = args.max_memory
+            else:
+                max_memory = 8
+            if args.new:
+                print('Starting new variant calling analysis because --new '\
+                        'requested. Will overwrite any previous analyses.')
+                from baga import AlignReads
+                assert all([use_path_alns,use_name_alns]), 'Could not locate a saved '\
+                        'baga.AlignReads.SAMs-<reads_name>__<genome_name>.baga for '\
+                        'reads group and genome combination given: {}'.format(
+                        use_name_alns)
+                print('Loading alignments information for: {} from AlignReads output'.format(use_name_alns))
+                alignments = AlignReads.SAMs(baga = use_path_alns)
+                caller = CallVariants.CallerGATK(alignments = alignments)
+            elif use_path_caller:
+                # attempt to resume (if use_path_caller not False)
+                print('Loading existing variants call analysis for: {}'.format(use_name_alns))
+                print('(use --new to start variant calling again)')
+                caller = CallVariants.CallerGATK(
+                        baga = use_path_caller)
+            else:
+                # start new as previous not found
+                assert all([use_path_alns,use_name_alns]), 'Could not locate a saved '\
+                        'baga.AlignReads.SAMs-<reads_name>__<genome_name>.baga for '\
+                        'reads group and genome combination given: {}'.format(
+                        use_name_alns)
+                print('Starting new variant calling analysis (could not find '\
+                        'previous baga.CallVariants.CallerGATK-{}.baga)'.format(
+                        reads_genome_name))
+                from baga import AlignReads
+                print('Loading alignments information for: {} from AlignReads '\
+                        'output'.format(use_name_alns))
+                alignments = AlignReads.SAMs(baga = 'baga.AlignReads.SAMs-{}.baga'\
+                        ''.format(use_name_alns))
+                caller = CallVariants.CallerGATK(alignments = alignments)
             
-            caller.saveLocal(use_name_alns)
-        
-        if args.hardfilter:
-            caller.hardfilterSNPsGATK(
-                        jar = args.GATK_jar_path.split(os.path.sep),
-                        use_java = use_java,
-                        force = args.force)
+            # because --new, setting --force to true to overwrite each output file
+            if args.new:
+                print('Because --new, also setting --force to overwrite each output file')
+                args.force = True
             
-            caller.hardfilterINDELsGATK(
-                        jar = args.GATK_jar_path.split(os.path.sep),
-                        use_java = use_java,
-                        force = args.force)
+            if args.calleach:
+                try:
+                    use_arguments = direct_arguments['HaplotypeCaller']
+                except KeyError:
+                    use_arguments = False
+                caller.CallgVCFsGATK(
+                            mem_num_gigs = max_memory,
+                            jar = args.GATK_jar_path.split(os.path.sep),
+                            use_java = use_java,
+                            force = args.force, 
+                            max_cpus = args.max_cpus,
+                            arguments = use_arguments)
+                
+                caller.saveLocal(use_name_alns)
             
-            caller.saveLocal(use_name_alns)
-        
-        if args.recalibrate:
-            # this is slow!
-            caller.recalibBaseScoresGATK(
-                        jar = args.GATK_jar_path.split(os.path.sep),
-                        use_java = use_java,
-                        force = args.force, 
-                        mem_num_gigs = args.max_memory, 
-                        max_cpus = args.max_cpus)
+            if args.calljoint:
+                try:
+                    use_arguments = direct_arguments['GenotypeGVCFs']
+                except KeyError:
+                    use_arguments = False
+                caller.GenotypeGVCFsGATK(
+                            reads_genome_name,
+                            jar = args.GATK_jar_path.split(os.path.sep), 
+                            use_java = use_java,
+                            # ultimately, scale this by the number of samples involved
+                            # needed >8 for a set of 40
+                            mem_num_gigs = max_memory, 
+                            force = args.force,
+                            arguments = use_arguments)
+                
+                caller.saveLocal(use_name_alns)
             
-            caller.saveLocal(use_name_alns)
+            if args.hardfilter:
+                caller.hardfilterSNPsGATK(
+                            jar = args.GATK_jar_path.split(os.path.sep),
+                            use_java = use_java,
+                            force = args.force)
+                
+                caller.hardfilterINDELsGATK(
+                            jar = args.GATK_jar_path.split(os.path.sep),
+                            use_java = use_java,
+                            force = args.force)
+                
+                caller.saveLocal(use_name_alns)
+            
+            if args.recalibrate:
+                # this is slow!
+                caller.recalibBaseScoresGATK(
+                            jar = args.GATK_jar_path.split(os.path.sep),
+                            use_java = use_java,
+                            force = args.force, 
+                            mem_num_gigs = max_memory, 
+                            max_cpus = args.max_cpus)
+                
+                caller.saveLocal(use_name_alns)
     
 
 ### Filter Variants ###

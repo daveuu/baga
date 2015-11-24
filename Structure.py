@@ -2057,6 +2057,7 @@ class Aligner:
                            num_padding_positions = 5000, 
                            pID_window = 100, 
                            pID_step = 10, 
+                           min_region_length = 200,
                            path_to_omit_sequences = False,
                            min_pID_aligned = 0.9,
                            single_assembly = False):
@@ -2082,8 +2083,7 @@ class Aligner:
 
         aligned = {}
         for (s,e),contigfile in sorted(assemblies_by_region.items()):
-            if e - s > 200:
-                # print((s,e),e-s,contigfile)
+            if e - s > min_region_length:
                 ref_chrom_region = _Seq(self.genome.sequence[s-num_padding_positions:e+num_padding_positions].tostring())
                 ref_region_id = 'ref_{:07d}_{:07d}'.format(s-num_padding_positions,e+num_padding_positions)
                 aligned[ref_region_id] = {}
@@ -2329,8 +2329,11 @@ class Aligner:
                             foutvar.write('{},{},"{}",{},"{}","{}"\n'.format(
                                     ref_start+1, ref_end, contig_id, refpos0+1, ref_char, alnd_char))
 
+        info = {'variants_by_contig':variants_by_contig, 
+                'alnd_range_by_contig':alnd_range_by_contig, 
+                'aligned_regions':aligned_regions}
 
-
+        return(info)
 
     def get_percent_ID(self, A, B, window = 100, step = 20):
         pID_per_window = []

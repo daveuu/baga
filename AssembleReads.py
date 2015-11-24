@@ -268,7 +268,7 @@ class DeNovo:
             start_time = _time.time()
             # prepare commandline and launch each SPAdes assembly
             contigs = {}
-            for cnum, (pairname, files) in enumerate(self.read_files.items()):
+            for cnum, (pairname, files) in enumerate(sorted(self.read_files.items())):
                 if isinstance(use_exe, list):
                     # allow for use of prepended executable with script to run
                     cmd = list(use_exe)

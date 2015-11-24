@@ -41,6 +41,7 @@ from baga import _tarfile
 from baga import _array
 from baga import _json
 from baga import _time
+from baga import _md5
 
 # external Python modules
 import pysam as _pysam
@@ -562,7 +563,7 @@ class CallerGATK:
 
     def saveLocal(self, name):
         '''
-        Save processed SAM file info to a local compressed pickle file.
+        Save processed object info to a local compressed archive of json strings.
         'name' should exclude extension: .baga will be added
         '''
         fileout = 'baga.CallVariants.CallerGATK-%s.baga' % name
@@ -1037,7 +1038,7 @@ class CallerDiscoSNP:
 
     def saveLocal(self, name):
         '''
-        Save processed SAM file info to a local compressed pickle file.
+        Save processed object info to a local compressed archive of json strings.
         'name' should exclude extension: .baga will be added
         '''
         fileout = 'baga.CallVariants.CallerDiscoSNP-%s.baga' % name
@@ -1197,6 +1198,367 @@ class CallerDiscoSNP:
 
         print(' '.join([path_to_exe] + cmds))
         _subprocess.call([path_to_exe] + cmds)
+
+
+class Checker:
+    '''
+    Check variants in a VCF against regional de novo assemblies.
+
+    Extract short reads from a BAM aligned around each variant, de novo 
+    assemble using SPAdes, then optimal global align contigs back to those 
+    regions and check for variants.
+    '''
+    def __init__(self, VCF_paths, BAM_paths, genome):
+        '''
+        A CallVariants.Checker object must be instantiated with:
+            - a list of paths to VCF files
+            - a CollectData genome object
+        '''
+        
+        e = 'Could not find %s.\nPlease ensure all files exist'
+        for VCF in VCF_paths:
+            assert _os.path.exists(VCF), e % VCF
+        
+        for BAM in BAM_paths:
+            assert _os.path.exists(VCF), e % BAM
+        
+        self.VCF_paths = VCF_paths
+        self.BAM_paths = BAM_paths
+        self.genome = genome
+
+    def saveLocal(self, name):
+        '''
+        Save processed object info to a local compressed archive of json strings.
+        'name' should exclude extension: .baga will be added
+        '''
+        fileout = 'baga.CallVariants.Checker-%s.baga' % name
+        with _tarfile.open(fileout, "w:gz") as tar:
+            print('Writing to {} . . . '.format(fileout))
+            for att_name, att in self.__dict__.items():
+                if isinstance(att, _array):
+                    io = _StringIO(att.tostring())
+                    io.seek(0, _os.SEEK_END)
+                    length = io.tell()
+                    io.seek(0)
+                    thisone = _tarfile.TarInfo(name = att_name)
+                    thisone.size = length
+                    tar.addfile(tarinfo = thisone, fileobj = io)
+                else:
+                    # try saving everything else here by jsoning
+                    try:
+                        io = _StringIO()
+                        _json.dump(att, io)
+                        io.seek(0, _os.SEEK_END)
+                        length = io.tell()
+                        io.seek(0)
+                        thisone = _tarfile.TarInfo(name = att_name)
+                        thisone.size = length
+                        tar.addfile(tarinfo = thisone, fileobj = io)
+                    except TypeError:
+                        # ignore non-jsonable things like functions
+                        # include unicodes, strings, lists etc etc
+                        #print('omitting {}'.format(att_name))
+                        pass
+
+    def collect_variants(self):
+        '''
+        Collect variants from VCF files for 
+        '''
+
+        all_variants = {}
+
+        for VCF in self.VCF_paths: #break
+            header, header_section_order, these_colnames, variantrows = parseVCF(VCF)
+            headerdict = dictify_vcf_header(header)
+            #print(headerdict)
+            variants, allfilters = sortVariantsKeepFilter(header, these_colnames, variantrows)
+            #print(variants)
+            all_variants = dict(all_variants.items() + variants.items())
+
+        return(all_variants)
+            
+
+    def doCheck(self, num_padding = 2000, max_memory = False, force = False):
+        '''
+        De novo assemble variant regions and compare with variant calls
+        '''
+        # VCFs and genome provided at instantiation
+        # do some checks on provided genome and VCFs
+        genome_ids = {}
+        genome_lengths = {}
+        pattern = _re.compile('##contig=<ID=([A-Za-z0-9\._]+),length=([0-9]+)>')
+        for VCF in self.VCF_paths: #break
+            for line in open(VCF):
+                
+                if line[:9] == '##contig=':
+                    try:
+                        genome_id, genome_length = _re.match(pattern, line).groups()
+                    except AttributeError:
+                        print('Failed to parse genome information from {}'.format(line))
+                    genome_lengths[int(genome_length)] = VCF
+                    genome_ids[genome_id] = VCF
+                    #print(genome_id, genome_length)
+                    identified = True
+                    break
+                
+            e = "Failed to identify which chromosome the variants in {} were called on (couldn't find '##contig=')".format(VCF)
+            assert identified, e
+
+        e = 'Differing reference genome among provided VCFs? {}'.format(genome_ids.items())
+        assert len(genome_ids) == 1, e
+
+        e = 'Genome provided ({}) does not match genome ID in provided VCFs: {}'.format(self.genome.id, genome_ids.keys()[0])
+        assert self.genome.id == genome_ids.keys()[0], e
+        print('Variants were called against {:,} bp genome: {}\n'.format(int(genome_length), genome_id))
+
+
+        all_variants = self.collect_variants()
+
+        BAMs_by_ids = {}
+        for BAM in self.BAM_paths:
+            header = _pysam.Samfile(BAM, 'rb').header
+            BAMs_by_ids[(header['RG'][0]['ID'],header['SQ'][0]['SN'])] = BAM
+            assert header['SQ'][0]['SN'] == self.genome.id, 'mismatch between '\
+                    'BAM genome ({}) and genome used by BAGA ({})'.format(
+                    header['SQ'][0]['SN'], self.genome.id)
+
+        use_samples = set(all_variants) & set([sample for sample,chromosome in BAMs_by_ids])
+
+        print('Found {} samples common to supplied VCFs and BAMs:\n{}'.format(
+                len(use_samples),', '.join(use_samples)))
+
+
+        from baga import Structure
+
+        try:
+            _os.mkdir('variant_checks')
+        except OSError:
+            pass
+
+        path_to_variant_checks = ['variant_checks', self.genome.id]
+        # inconsistant requirements for path (list or str) below
+        path_to_variant_checks_str = _os.path.sep.join(path_to_variant_checks)
+
+        try:
+            _os.mkdir(path_to_variant_checks_str)
+        except OSError:
+            pass
+
+        import baga
+
+        denovo_info = {}
+        for sample in use_samples:
+            denovo_info[sample] = {}
+            chromosomes = all_variants[sample]
+            for chromosome,variants in chromosomes.items():
+                print('Extracting poorly and unaligned reads for sample {}'.format(sample))
+                collector = Structure.Collector(BAMs_by_ids[(sample, chromosome)])
+                single_assembly = False
+                collector.getUnmapped()
+                r1_out_path_um, r2_out_path_um, rS_out_path_um = \
+                        collector.writeUnmapped(path_to_variant_checks_str)
+                import AssembleReads
+                if max_memory:
+                    use_mem_gigs = max_memory
+                else:
+                    # round down available GBs
+                    use_mem_gigs = int(baga.get_available_memory())
+                    # unless to zero!
+                    if use_mem_gigs == 0:
+                        use_mem_gigs = 1
+                
+                reads_path_unmapped = {}
+                output_folder_um = '_'.join(
+                        r1_out_path_um.split('_')[:-1]).split(_os.path.sep)[-1]
+                reads_path_unmapped[output_folder_um] = (r1_out_path_um, 
+                        r2_out_path_um, rS_out_path_um)
+                path_to_bad_unmapped_contigs = _os.path.sep.join([
+                        path_to_variant_checks_str, output_folder_um, 
+                        'contigs.fasta'])
+                if _os.path.exists(path_to_bad_unmapped_contigs) and \
+                        _os.path.getsize(path_to_bad_unmapped_contigs) > 0 and \
+                        not force:
+                    print('Found assembly at {}\nUse --force/-F to overwrite. '\
+                            'Skipping . . .'.format(path_to_bad_unmapped_contigs))
+                else:
+                    if not force:
+                        # if args.force specified, don't need to say anything
+                        # either way, do assembly
+                        print('Nothing found at {}. Doing assembly.'.format(
+                                path_to_bad_unmapped_contigs))
+                    
+                    reads = AssembleReads.DeNovo(paths_to_reads = reads_path_unmapped)
+                    reads.SPAdes(output_folder = path_to_variant_checks, 
+                            mem_num_gigs = use_mem_gigs)
+                # assemble read from each region with poorly/unmapped
+                reads_paths = {}
+                # make a second dict of reads for assembly, all values for unmapped reads
+                # that need to be included in each assembly
+                # first, collect reads, make fastqs, recording in a dict
+                reads_path_unmapped = {}
+                assemblies_by_variant = {}
+                for pos1,info in sorted(variants.items()):
+                    print('Extracting reads aligned near variant at {} in sample {}'\
+                            ''.format(pos1, sample))
+                    collector.makeCollection(pos1 - 1, pos1, num_padding)
+                    r1_out_path, r2_out_path, rS_out_path = collector.writeCollection(
+                            path_to_variant_checks_str)
+                    if not r1_out_path:
+                        # if no reads found, False returned
+                        print('WARNING: No reads found in region +/- {} positions around '\
+                                'variant at {}'.format(num_padding, pos1))
+                        continue
+                    # put assembly in folder with same name as read files
+                    output_folder = '_'.join(r1_out_path.split('_')[:-1]).split(
+                            _os.path.sep)[-1]
+                    print(output_folder)
+                    path_to_contigs = _os.path.sep.join([path_to_variant_checks_str,
+                                                        output_folder, 
+                                                        'contigs.fasta'])
+                    assemblies_by_variant[pos1 - 1, pos1] = path_to_contigs
+                    if _os.path.exists(path_to_contigs) and \
+                            _os.path.getsize(path_to_contigs) > 0 and \
+                            not force:
+                        print('Found assembly at {}\nUse --force/-F to overwrite. '\
+                                'Skipping . . .'.format(path_to_contigs))
+                    else:
+                        # if omitted from this "reads_paths" dict, no assembly done
+                        # but aligning still done if in "assemblies_by_variant"
+                        reads_paths[output_folder] = (r1_out_path, r2_out_path, 
+                                rS_out_path)
+                        reads_path_unmapped[output_folder] = (r1_out_path_um, 
+                                r2_out_path_um, rS_out_path_um)
+                
+                # second, run each assembly in single call to
+                # AssembleReads.DeNovo.SPAdes
+                print('Assemble reads for each region around variants')
+                reads = AssembleReads.DeNovo(paths_to_reads = reads_paths, 
+                        paths_to_reads2 = reads_path_unmapped)
+                reads.SPAdes(output_folder = path_to_variant_checks, 
+                        mem_num_gigs = use_mem_gigs, single_assembly = single_assembly)
+                
+                # a dict of paths to contigs per region
+                aligner = Structure.Aligner(self.genome)
+                unmappedfasta = _os.path.sep.join([path_to_variant_checks_str, 
+                                                  output_folder_um, 
+                                                  'contigs.fasta'])
+                if _os.path.exists(unmappedfasta) and _os.path.getsize(unmappedfasta) > 0:
+                    # provide dict of range tuples
+                    aligner.alignRegions(assemblies_by_variant, num_padding, 
+                            path_to_omit_sequences = unmappedfasta, 
+                            single_assembly = single_assembly, min_region_length = 0)
+                    denovo_info[sample][chromosome] = aligner.reportAlignments()
+                else:
+                    print('WARNING: no assembled unmapped and poorly mapped reads found at:\n{}'.format(unmappedfasta))
+                    try:
+                        r1_size = os.path.getsize(r1_out_path_um)
+                        r2_size = os.path.getsize(r2_out_path_um)
+                        print('but reads, {} ({:,} bytes) and {} ({:,} bytes), exist . . check SPAdes assembly log in {}'.format(
+                                                                r1_out_path_um,
+                                                                r1_size,
+                                                                r2_out_path_um,
+                                                                r2_size,
+                                                                unmappedfasta.replace('contigs.fasta','')))
+                    except IOError:
+                        print('WARNING: could not find unmapped and poorly '\
+                        'aligned reads at:\n{}\n{}\nthis is unexpected but '\
+                        'conceivable (if ALL reads really did map to reference!).'.format(
+                                r1_out_path_um,r2_out_path_um))
+                    print('proceeding with alignment of assembled putatively rearranged regions to reference nonetheless')
+                    aligner.alignRegions(assemblies_by_variant, num_padding,
+                            single_assembly = single_assembly, min_region_length = 0)
+                    denovo_info[sample][chromosome] = aligner.reportAlignments()
+
+
+
+
+        # collect all the de novo assembly called variants and compare
+        table_outname = 'Table_of_variants_with_de_novo_comparison.csv'
+        colnames = ['Sample','Chromosome','Position (bp base-1)','Corroborated','Filters','Alignment']
+        with open(table_outname,'w') as fout:
+            fout.write(','.join(['"{}"'.format(a) for a in colnames])+'\n')
+            print('=========')
+            zeropadding = len(str(len(self.genome.sequence)))
+            got = {}
+            missing = {}
+            for sample in use_samples:
+                print('===',sample)
+                chromosomes = all_variants[sample]
+                got[sample] = {}
+                missing[sample] = {}
+                for chromosome,variants in chromosomes.items():
+                    print('===',chromosome)
+                    these_got = {}
+                    these_missing = {}
+                    for pos1,((ref,query),filters) in sorted(variants.items()):
+                        s, e = pos1 - 1, pos1
+                        ref_region_id = 'ref_{0:0{2}d}_{1:0{2}d}'.format(
+                                s - num_padding,
+                                e + num_padding,
+                                zeropadding)
+                        alignment_name = 'variant_checks/{1}/{0}__{1}_{3:0{4}d}_{2:0{4}d}_multi_alnd.fna'.format(
+                                sample,
+                                chromosome,
+                                s - num_padding,
+                                e + num_padding,
+                                zeropadding)
+                        #print(ref_region_id)
+                        if ref_region_id in denovo_info[sample][chromosome]['variants_by_contig']:
+                            for contig_id in denovo_info[sample][chromosome]['variants_by_contig'][ref_region_id]:
+                                # print(sorted(denovo_info[sample][chromosome]['variants_by_contig'][ref_region_id][contig_id]))
+                                # print(sorted(variants))
+                                # print(sorted(set(denovo_info[sample][chromosome]['variants_by_contig'][ref_region_id][contig_id]) & set(variants)))
+                                try:
+                                    ref_char,alnd_char = denovo_info[sample][chromosome]['variants_by_contig'][ref_region_id][contig_id][pos1-1]
+                                    #print(ref,query,ref_char,alnd_char)
+                                    if query == alnd_char:
+                                        these_got[pos1] = ((ref,query),filters)
+                                    else:
+                                        these_missing[pos1] = ((ref,query),filters)
+                                    corroborated = True
+                                except KeyError:
+                                    #print('MISSING:',pos1,((ref,query),filters))
+                                    these_missing[pos1] = ((ref,query),filters)
+                                    corroborated = False
+                                
+                                #fout.write(','.join(['"{}"'.format(a) for a in colnames]))
+                                fout.write('"{}","{}",{},"{}","{}","{}"\n'.format(
+                                        sample,
+                                        chromosome,
+                                        pos1,
+                                        corroborated,
+                                        '+'.join(filters),
+                                        alignment_name
+                                        ))
+                    
+                    got[sample][chromosome] = these_got
+                    missing[sample][chromosome] = these_missing
+
+        print('Wrote variants and whether thay were found in their respective de '\
+                'novo assembled contigs in:\n{}'.format(table_outname))
+
+        #print('summary')
+        for sample,chromosomes in got.items():
+            for chromosome,these_got in chromosomes.items():
+                print('{} aligned against {}: {} SNPs called also in de novo '\
+                        'assemblies; {} not.'.format(sample, chromosome, 
+                        len(these_got), len(missing[sample][chromosome])))
+
+        self.got = got
+        self.missing = missing
+
+        # generate name from genome + used samples in sorted order
+        # should be unique to this combination without needing a specific --read_group X --genome Y combination
+        # currently arbitrary VCFs and BAMs can be provided
+        # does not allow use of combined chromosomes
+        # could be standadised baga-wide?
+        hasher = _md5()
+        hasher.update(str([self.genome.id]+sorted(use_samples)))
+        unique_name = hasher.hexdigest()
+
+        self.saveLocal(unique_name)
+
+
 
 class Filter:
     '''

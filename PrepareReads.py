@@ -382,8 +382,8 @@ class Reads:
             processed_path_1 = insert_suffix(files[1], '_adpt')
             processed_path_2 = insert_suffix(files[2], '_adpt')
             
-            print(files[1], processed_path_1)
-            print(files[2], processed_path_2)
+            # print(files[1], processed_path_1)
+            # print(files[2], processed_path_2)
             
             # single end
             cmd = [path_to_exe] + \
