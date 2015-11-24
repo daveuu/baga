@@ -2161,6 +2161,7 @@ class Aligner:
         self.aligned_to_sample = s
         self.aligned_to_genome = g
         self.path_to_alignments = _os.path.sep.join(use_contigfile.split(_os.path.sep)[:-2])
+
     def reportAlignments(self):
         '''
         Summarise variants in alignments of contigs to reference chromosome regions
@@ -2199,16 +2200,25 @@ class Aligner:
                 contig_post_gaps = self.countEndGaps(contig_alnd_seq, pre = False)
                 pre_gaps = max(ref_pre_gaps,contig_pre_gaps)
                 post_gaps = max(ref_post_gaps,contig_post_gaps)
-                print(ref_pre_gaps,ref_post_gaps,contig_pre_gaps,contig_post_gaps,pre_gaps,post_gaps)
+                print("ref_pre_gaps, ref_post_gaps, contig_pre_gaps, "\
+                        "contig_post_gaps, pre_gaps,post_gaps")
+                print(ref_pre_gaps, ref_post_gaps, contig_pre_gaps, \
+                        contig_post_gaps, pre_gaps,post_gaps)
                 alnd_len = len(ref_alnd_seq)
                 query_insertions = '-' in ref_alnd_seq[pre_gaps:alnd_len-post_gaps]
-                assert str(ref_alnd_seq[ref_pre_gaps:alnd_len-ref_post_gaps]) == self.genome.sequence[ref_region_start:ref_region_end].tostring()
+                A_alnd = str(ref_alnd_seq[ref_pre_gaps:alnd_len-ref_post_gaps])
+                B_orig = self.genome.sequence[ref_region_start:ref_region_end].tostring()
+                # confirm, minus gaps in aligned contig, we have the correct region
+                assert A_alnd.replace('-','') == B_orig, '{}\n!=\n{}'\
+                        ''.format(A_alnd.replace('-',''),B_orig)
                 
+                # identify variants
                 these_variants = {}
                 refpos0 = ref_region_start
                 alnpos0 = 0
                 for ref in str(ref_alnd_seq[pre_gaps:alnd_len-post_gaps]):
                     if ref != contig_alnd_seq[pre_gaps:][alnpos0]:
+                        # save SNPs and indels, but for indels, each contiguous gap is saved separately
                         print(alnpos0, refpos0, ref, contig_alnd_seq[pre_gaps:][alnpos0], self.genome.sequence[refpos0])
                         these_variants[refpos0] = (ref, contig_alnd_seq[pre_gaps:][alnpos0])
                     
@@ -2217,7 +2227,9 @@ class Aligner:
                         refpos0 += 1
                 
                 variants_by_contig[ref_region_id][contig_id] = these_variants
-                alnd_range_by_contig[ref_region_id][contig_id] = (ref_region_start + contig_pre_gaps, ref_region_end - contig_post_gaps)
+                alnd_range_by_contig[ref_region_id][contig_id] = (
+                        ref_region_start + contig_pre_gaps, 
+                        ref_region_end - contig_post_gaps)
                 
                 ref_sequence_ends_trimmed = []
                 contig_sequence_ends_trimmed = []
