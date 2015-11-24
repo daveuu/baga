@@ -2289,6 +2289,11 @@ class Aligner:
                                     ref_start+1, ref_end, contig_id, refpos0+1, ref_char, alnd_char))
         else:
             for ref_region_id, alnd_contigs in alnd_range_by_contig.items():
+                if len(aligned_regions[ref_region_id]) == 0:
+                    print('No alignment to summarise for {}'.format(ref_region_id))
+                    continue
+                else:
+                    print('Summarising alignment for {} in {}'.format(ref_region_id, aligned_regions[ref_region_id]))
                 # ref_0000100_0000200
                 ref_start, ref_end = map(int,ref_region_id[4:].split('_'))
                 # write reference once then each aligned contig sequence
@@ -2298,7 +2303,8 @@ class Aligner:
                 with open(alnfilename_msa, 'w') as foutalnd:
                     _SeqIO.write(aligned_regions[ref_region_id][0][0], foutalnd, 'fasta')
                     for ref_aligned,contig_aligned in aligned_regions[ref_region_id]:
-                        _SeqIO.write(aligned_regions[ref_region_id][0][1], foutalnd, 'fasta')
+                        _SeqIO.write(contig_aligned, foutalnd, 'fasta')
+                        #_SeqIO.write(aligned_regions[ref_region_id][0][1], foutalnd, 'fasta')
                 alnfilename_variants = '{}/{}__{}_{}_alnd_variants.csv'.format(
                         self.path_to_alignments, self.aligned_to_sample, 
                         self.aligned_to_genome, ref_region_id[4:])
@@ -2312,8 +2318,6 @@ class Aligner:
                             '"contig start","contig end","aligned length (bp)",'\
                             '"total variants"\n')
                     for contig_id, (contig_start, contig_end) in alnd_contigs.items():
-                        # write each aligned contig sequence
-                        _SeqIO.write(aligned_regions[ref_region_id][1], foutalnd, 'fasta')
                         print('{} to {} is {} to {}'.format(ref_region_id, contig_id, contig_start+1, contig_end))
                         these_variants = variants_by_contig[ref_region_id][contig_id]
                         foutsumm.write('{}, {}, "{}", {}, {}, {}\n'.format(
