@@ -106,11 +106,11 @@ def sortVariantsKeepFilter(header, colnames, variantrows):
     '''
     # identify chromosome for this VCF <== this will fail if running against > 1 contigs . . .
     try:
-        pattern = _re.compile('##contig=<ID=([A-Za-z0-9]+\.[0-9]+),length=([0-9]+)>')
+        pattern = _re.compile('##contig=<ID=([A-Za-z0-9_]+\.[0-9]+),length=([0-9]+)>')
         # for multiple chromosomes iterate here
         genome_id, genome_length = _re.match(pattern, header['contig'][0]).groups()
         genome_length = int(genome_length)
-    except KeyError:
+    except (KeyError, AttributeError):
         print("Failed to identify which chromosome the variants were called on (couldn't find '##contig=')")
 
     print('Variants were called against {:,} bp genome: {}\n'.format(genome_length, genome_id))
