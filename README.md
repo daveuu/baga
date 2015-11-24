@@ -15,8 +15,10 @@ BAGA is a wrapper for proven third party tools<sup>1</sup>, but also includes no
 1. e.g. [BWA](http://bio-bwa.sourceforge.net/) for short read alignment to longer sequences, [GATK](https://www.broadinstitute.org/partnerships/education/broade/best-practices-variant-calling-gatk-1) for variant calling and [ClonalFrameML](https://github.com/xavierdidelot/clonalframeml) for homologous recombination inference
 2. Variant calls in such regions are unreliable and should be filtered because conventional variant calling algorithms would be unaware of potential misalignments caused by the loss of homology and might therefore report false positive variant calls e.g., near chromosomal rearrangements caused by mobile genetic elements. Detailed characterisation of those regions can be made by local de novo assemblies of reads and alignment of resulting contigs to the reference sequence
 3. researchers can make use of version-control and digital object identifiers to generate citable and reproducible analyses for peer review publication
-4. BAGA can plot all automatically indicated regions such as those prone to misalignment of short reads because of structural differences between a reference sequence and a sampled genome, e.g. a missing prophage (see point 2 above) ![](docs/images/2689000_2691500_NC_011770.1__Liverpool__ERR953478.svg)
+4. BAGA can plot all automatically indicated regions such as those prone to misalignment of short reads because of structural differences between a reference sequence and a sampled genome, e.g. a missing prophage (see point 2 above) ![](docs/images/2689000_2691500_NC_011770.1__Liverpool__ERR953478.png)
 
+
+## An example
 
 A pipeline for inferring the population structure of a set of bacterial isolates implemented in BAGA could include the following steps. All required software is installed locally by BAGA except Genome Analysis Tool Kit from The Broad Institute which requires agreement with the license and registering in their forums. Each step can be achieved through a single BAGA command:
 
@@ -28,6 +30,8 @@ A pipeline for inferring the population structure of a set of bacterial isolates
 * Scan each alignment for evidence of structural rearrangements which are known to cause false positive variant calls using a built-in method
 * Scan the reference genome for repeated regions allowing for some sequence divergence in which called variants may be ambiguous
 * Use the Genome Analysis Tool Kit (GATK) to call variants
+
+## Funding
 
 Work on this software was started at [**The University of Liverpool**](https://www.liv.ac.uk), UK with funding from [**The Wellcome Trust**](http://www.wellcome.ac.uk/) (093306/Z/10) awarded to:
 
