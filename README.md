@@ -6,16 +6,16 @@
 
 ## Introduction
 
-*The Bacterial and Archaeal Genome Analyser (BAGA, pronounced "baga") is a commandline application and Python 2 package (3 coming soon) for diverse analyses of genome sequence data.*
+**The Bacterial and Archaeal Genome Analyser (BAGA, pronounced "baga") is a commandline application and Python 2 package (3 coming soon) for diverse analyses of genome sequence data.**
 
-*Input data* can be complete genome sequences and/or paired end short reads from Illumina sequencers, typically whole genome shotgun libraries. *Tasks* might include variant calling and resolving population structure of resequenced pathogen isolates, analysis of evolution experiments and comparative genomics including phylogenomics.
+**Input data** can be complete genome sequences and/or paired end short reads from Illumina sequencers, typically whole genome shotgun libraries. **Tasks** might include variant calling and resolving population structure of resequenced pathogen isolates, analysis of evolution experiments and comparative genomics including phylogenomics.
 
-BAGA is a wrapper for proven third party tools<sup>1</sup>, but also includes novel algorithms for identifying chromosomal rearrangements<sup>2</sup>, provides a means to create custom pipelines for reproducible analyses<sup>3</sup>, can generate various informative plots<sup>4</sup>. It is under active development: new features and much more documentation will be appearing shortly.
+BAGA is a wrapper for proven third party tools<sup>1</sup>, but also includes novel algorithms for identifying chromosomal rearrangements<sup>2</sup>, provides a means to create custom pipelines for reproducible analyses<sup>3</sup>, and can generate various informative plots<sup>4</sup>. It is under active development: new features and much more documentation will be appearing shortly.
 
-1. e.g. BWA for short read alignment to longer sequences, GATK for variant calling and ClonalFrameML for homologous recombination inference
-2. useful for mitigating false positive variant calls e.g., near chromosomal rearrangements caused by mobile genetic elements and detailed characterisation of those elements by local de novo assemblies and contig alignment to the reference sequence
+1. e.g. [BWA](http://bio-bwa.sourceforge.net/) for short read alignment to longer sequences, [GATK](https://www.broadinstitute.org/partnerships/education/broade/best-practices-variant-calling-gatk-1) for variant calling and [ClonalFrameML](https://github.com/xavierdidelot/clonalframeml) for homologous recombination inference
+2. Variant calls in such regions are unreliable and should be filtered because conventional variant calling algorithms would be unaware of potential misalignments caused by the loss of homology and might therefore report false positive variant calls e.g., near chromosomal rearrangements caused by mobile genetic elements. Detailed characterisation of those regions can be made by local de novo assemblies of reads and alignment of resulting contigs to the reference sequence
 3. researchers can make use of version-control and digital object identifiers to generate citable and reproducible analyses for peer review publication
-4. [fig1](docs/images/2689000_2691500_NC_011770.1__Liverpool__ERR953478.svg)BAGA can automatically indicate regions prone to misalignment of short reads and therefore unreliable variant calls that a conventional variant calling algorithm would be unaware of.
+4. BAGA can plot all automatically indicated regions such as those prone to misalignment of short reads because of structural differences between a reference sequence and a sampled genome, e.g. a missing prophage (see point 2 above) ![fig1](docs/images/2689000_2691500_NC_011770.1__Liverpool__ERR953478.svg)
 
 
 A pipeline for inferring the population structure of a set of bacterial isolates implemented in BAGA could include the following steps. All required software is installed locally by BAGA except Genome Analysis Tool Kit from The Broad Institute which requires agreement with the license and registering in their forums. Each step can be achieved through a single BAGA command:
