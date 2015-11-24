@@ -1474,20 +1474,17 @@ class Checker:
 
         # collect all the de novo assembly called variants and compare
         table_outname = 'Table_of_variants_with_de_novo_comparison.csv'
-        colnames = ['Sample','Chromosome','Position (bp base-1)','Corroborated','Filters','Alignment']
+        colnames = ['Sample','Chromosome','Position (bp base-1)','Reference','Variant','Corroborated','Filters','Alignment']
         with open(table_outname,'w') as fout:
             fout.write(','.join(['"{}"'.format(a) for a in colnames])+'\n')
-            print('=========')
             zeropadding = len(str(len(self.genome.sequence)))
             got = {}
             missing = {}
             for sample in use_samples:
-                print('===',sample)
                 chromosomes = all_variants[sample]
                 got[sample] = {}
                 missing[sample] = {}
                 for chromosome,variants in chromosomes.items():
-                    print('===',chromosome)
                     these_got = {}
                     these_missing = {}
                     for pos1,((ref,query),filters) in sorted(variants.items()):
@@ -1496,7 +1493,7 @@ class Checker:
                                 s - num_padding,
                                 e + num_padding,
                                 zeropadding)
-                        alignment_name = 'variant_checks/{1}/{0}__{1}_{3:0{4}d}_{2:0{4}d}_multi_alnd.fna'.format(
+                        alignment_name = 'variant_checks/{1}/{0}__{1}_{2:0{4}d}_{3:0{4}d}_multi_alnd.fna'.format(
                                 sample,
                                 chromosome,
                                 s - num_padding,
@@ -1522,10 +1519,12 @@ class Checker:
                                     corroborated = False
                                 
                                 #fout.write(','.join(['"{}"'.format(a) for a in colnames]))
-                                fout.write('"{}","{}",{},"{}","{}","{}"\n'.format(
+                                fout.write('"{}","{}",{},"{}","{}","{}","{}","{}"\n'.format(
                                         sample,
                                         chromosome,
                                         pos1,
+                                        ref,
+                                        query,
                                         corroborated,
                                         '+'.join(filters),
                                         alignment_name
