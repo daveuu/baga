@@ -2148,9 +2148,9 @@ class Aligner:
                     else:
                         print('Omitting contig from unmapped/poorly mapped reads: {}'.format(rec.id))
             
-            print(ref_region_id,len(aligned[ref_region_id]))
-            if len(aligned[ref_region_id]) == 0:
-                del aligned[ref_region_id] 
+                print(ref_region_id,len(aligned[ref_region_id]))
+                if len(aligned[ref_region_id]) == 0:
+                    del aligned[ref_region_id] 
 
         # retain info useful for summarising
         self.aligned = aligned
