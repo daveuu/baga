@@ -1451,8 +1451,8 @@ class Checker:
                 else:
                     print('WARNING: no assembled unmapped and poorly mapped reads found at:\n{}'.format(unmappedfasta))
                     try:
-                        r1_size = os.path.getsize(r1_out_path_um)
-                        r2_size = os.path.getsize(r2_out_path_um)
+                        r1_size = _os.path.getsize(r1_out_path_um)
+                        r2_size = _os.path.getsize(r2_out_path_um)
                         print('but reads, {} ({:,} bytes) and {} ({:,} bytes), exist . . check SPAdes assembly log in {}'.format(
                                                                 r1_out_path_um,
                                                                 r1_size,
