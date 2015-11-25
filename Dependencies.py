@@ -1,5 +1,5 @@
 #! /usr/bin/env python2
-# -*- coding: utf-8 -*-@language python
+# -*- coding: utf-8 -*-
 #
 # This file is part of the Bacterial and Archaeal Genome Analyser
 # Copyright (C) 2015 David Williams
