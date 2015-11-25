@@ -625,20 +625,26 @@ class Reads:
         error_explanation = 'Problem parsing read files: ensure pairs are numbered '\
         '1 and 2\n'\
         'BAGA looks for a "1" or "2" labelling in read pair filenames and takes '\
-        'the last digit in the filename.\n'\
-        'E.g. *R1.fastq.gz and *R2.fastq.gz would be OK, 1_thesereads1.fastq.gz '\
-        'and 2_thesereads1.fastq.gz would not. (Leading digits OK for sample '\
+        'the last digit in the filename (excluding the set number if present e.g., '\
+        '_001.fastq).\n E.g. *R1.fastq.gz and *R2.fastq.gz would be OK, 1_thesereads1'\
+        '.fastq.gz and 2_thesereads1.fastq.gz would not. (Leading digits OK for sample '\
         'numbering: 1_* 2_* 3_* etc but must each have 1 or 2 elsewhere in file '\
         'name)\n . . else please report as bug'
 
+        # Illumina filename scheme:
+        # <sample name>_<barcode sequence>_L<lane (0-padded to 3 digits)>_R<read number>_<set number (0-padded to 3 digits>.fastq.gz
+        # http://support.illumina.com/help/SequencingAnalysisWorkflow/Content/Vault/Informatics/Sequencing_Analysis/CASAVA/swSEQ_mCA_FASTQFiles.htm
 
         # match pairs
         filepairs = {}
         for path in use_files:
             path_bits = path.split(_os.path.sep)
             filename_ext = path_bits[-1]
-            filename, ext = _re.findall('(.+)(\.fastq\.gz|\.fastq|\.fq\.gz|\.fq)$', filename_ext)[0]
-            print(filename, ext)
+            # for now dump set number (if present? not always present?)
+            # really need to deal with multiple sets and all likely versions of CASAVA filename schemes
+            # _<set number (0-padded to 3 digits>.f
+            use_filename_ext = _re.sub('(_[0-9]{3})(\.[fF])', r'\2', filename_ext)
+            filename, ext = _re.findall('(.+)(\.fastq\.gz|\.fastq|\.fq\.gz|\.fq)$', use_filename_ext)[0]
             ones_and_twos = list(_re.finditer('[12]', filename))
             assert len(ones_and_twos) > 0, '{}. Problem filename: {}'.format(
                                                                         error_explanation, 
@@ -674,14 +680,14 @@ class Reads:
         checked_read_files = {}
         for pairname,files in filepairs.items():
             assert len(files) == 2, '{}. Problem filename(s): {}'.format(
-                    error_explanation, ', '.join(files))
+                    error_explanation, ', '.join(files.values()))
             
             print('Collected pair "{}": {} and {}'.format(
                     pairname, files[1], files[2]))
             
             try:
                 if _os.path.getsize(files[1]) == 0:
-                    print('File access fail: {}'.format(files[1]))
+                    print('File access fail (empty file): {}'.format(files[1]))
                     _sys.exit(1)
             except OSError:
                 print('File access fail: {}'.format(files[1]))
@@ -689,7 +695,7 @@ class Reads:
             
             try:
                 if _os.path.getsize(files[2]) == 0:
-                    print('File access fail: {}'.format(files[2]))
+                    print('File access fail (empty file): {}'.format(files[2]))
                     _sys.exit(1)
             except OSError:
                 print('File access fail: {}'.format(files[2]))
