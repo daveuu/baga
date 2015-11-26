@@ -1378,7 +1378,10 @@ class Summariser:
                     for sample in sample_order:
                         try:
                             filters = samples[sample]
-                            if filters == set(['.']):
+                            if \
+                                    filters == set(['.']) or \
+                                    filters == set(['PASS']) or \
+                                    len(filters) == 0:
                                 this_row += [1]
                                 freq_filtered += 1
                             else:
