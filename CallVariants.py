@@ -105,15 +105,22 @@ def sortVariantsKeepFilter(header, colnames, variantrows):
     ##INFO entries and have Descriptions starting "FILTER:".
     '''
     # identify chromosome for this VCF <== this will fail if running against > 1 contigs . . .
-    try:
-        pattern = _re.compile('##contig=<ID=([A-Za-z0-9_]+\.[0-9]+),length=([0-9]+)>')
-        # for multiple chromosomes iterate here
-        genome_id, genome_length = _re.match(pattern, header['contig'][0]).groups()
-        genome_length = int(genome_length)
-    except (KeyError, AttributeError):
-        print("Failed to identify which chromosome the variants were called on (couldn't find '##contig=')")
+    pattern = _re.compile('##contig=<ID=([A-Za-z0-9_\.]+),length=([0-9]+)>')
+    # for multiple chromosomes iterate here
 
-    print('Variants were called against {:,} bp genome: {}\n'.format(genome_length, genome_id))
+    genome_ids = []
+    genome_lengths = []
+    for contig in header['contig']:
+        match = _re.match(pattern, contig)
+        if match is None:
+            raise Exception("Failed to identify which chromosome the variants were called on (couldn't find '##contig=' and/or recognise name)")
+        
+        genome_id, genome_length = match.groups()
+        genome_lengths += [int(genome_length)]
+        genome_ids += [genome_id]
+
+    for genome_length, genome_id in zip(genome_lengths, genome_ids):
+        print('Variants were called against {:,} bp genome: {}\n'.format(genome_length, genome_id))
 
     parameter_names = colnames[:colnames.index('FORMAT')+1]
     parameter_names[0] = parameter_names[0].lstrip('#')
