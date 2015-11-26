@@ -213,11 +213,18 @@ parser = argparse.ArgumentParser(
 parser.add_argument('--version', action='version', 
                     version='%(prog)s {} ({})'.format(version_num, version_date))
 
-parser.add_argument('--nosplash',
+group = parser.add_mutually_exclusive_group(required=False)
+
+#parser.add_argument('--nosplash',
+group.add_argument('--nosplash',
     help = "Supress printing of start-up splash info.",
     action = 'store_true',
     default = False)
 
+group.add_argument('--splash',
+    help = "Print start-up splash info.",
+    action = 'store_true',
+    default = True)
 
 # group = parser.add_mutually_exclusive_group()
 # group.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
@@ -766,9 +773,10 @@ mutually_exclusive_group.add_argument('-p', "--vcfs_paths",
         nargs = '+')
 
 # even without reads_name, genome is still useful to provide additional annotations
-parser_SummariseVariants.add_argument('-g', "--genome_name", 
+parser_SummariseVariants.add_argument('-g', "--genome_names", 
         help = "name of genome obtained by the CollectData option",
-        type = str)
+        type = str,
+        nargs = '+')
 
 parser_SummariseVariants.add_argument('-f', "--filters", 
         help = "names of filters to apply. One or more of: genome_repeats provided "\
@@ -1024,12 +1032,12 @@ parser_AssembleReads.add_argument('-m', "--max_memory",
     "specified, total available at launch time will be used.",
     type = int)
 
-args = parser.parse_args()
-
-if not args.nosplash:
+if '--nosplash' not in sys.argv:
     print(splash)
 
+args = parser.parse_args()
 
+    
 
 
 # if args.verbose:
@@ -2454,12 +2462,6 @@ if args.subparser == 'SummariseVariants':
     if args.reads_name:
         assert args.genome_name, "--genome_name is required with --reads_name"
     
-    if args.genome_name:
-        use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
-        if not all([use_path_genome,use_name_genome]):
-            print('WARNING: Could not locate a saved baga.CollectData.Genome-<genome_name>.baga '\
-                    'for name given: {}'.format(args.genome_name))
-    
     VCFs_for_report = {}
     
     # collect VCFs
@@ -2512,6 +2514,17 @@ if args.subparser == 'SummariseVariants':
 
     print('Loaded VCF locations:\n{}'.format('\n'.join(VCFs)))
     
+    # collect genomes
+    if args.genome_names:
+        from baga import CollectData
+        use_genomes = []
+        for genome_name in args.genome_names:
+            use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', genome_name)
+            assert all([use_path_genome,use_name_genome]), 'Could not locate genome: {}'.format(genome_name)
+            use_genomes += [CollectData.Genome(local_path = use_path_genome, format = 'baga')]
+    else:
+        use_genomes = False
+    
     message = 'Need --filters FILTER_NAME [FILTER_NAME] for report type "{}"'
     if args.cumulative:
         assert args.filters, message.format('cumulative')
@@ -2526,7 +2539,7 @@ if args.subparser == 'SummariseVariants':
         CallVariants.reportLists(args.filters, use_name_genome, VCFs_for_report)
     
     if args.simple:
-        summariser = CallVariants.Summariser(VCFs)
+        summariser = CallVariants.Summariser(VCFs, genomes = use_genomes)
         summariser.simple()
 
 ### Check Linkage ###

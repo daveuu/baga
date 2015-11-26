@@ -1206,7 +1206,7 @@ class Summariser:
 
     Parse VCF files and create .csv files for viewing in spreadsheets
     '''
-    def __init__(self, VCF_paths = False, path_to_caller = False, genome = False):
+    def __init__(self, VCF_paths = False, path_to_caller = False, genomes = False):
         '''
         A CallVariants.Summariser object can be instantiated with:
             - a list of paths to VCF files
@@ -1227,8 +1227,18 @@ class Summariser:
         elif path_to_caller:
             raise NotImplementedError('only direct paths to VCFs is currently implemented')
         
-        if genome:
-            self.genome = genome
+        # allow genomes to be provided as single object for 1 replicon
+        # or list or tuple for one or more
+        # or False
+        if isinstance(genomes, list) or isinstance(genomes, tuple):
+            self.genomes = {genome.id:genome for genome in genomes}
+        elif genomes:
+            self.genomes = {genomes.id:genomes}
+        else:
+            self.genomes = genomes
+            
+            
+        
 
 
     def collect_variants(self):
@@ -1269,44 +1279,115 @@ class Summariser:
                 # "implemented for simple summary. {} found: {}".format(len(genome_IDs), 
                 # ', '.join(genome_IDs))
 
-        # collect by position
+        if self.genomes:
+            annotate_with_these = set(self.genomes) & genome_IDs
+            requested_not_found = set(self.genomes) - genome_IDs
+            found_not_requested = genome_IDs - set(self.genomes)
+            if len(requested_not_found) == 1:
+                print('WARNING: {} was requested for use with annotations, but not found in VCFs'\
+                        ''.format(sorted(requested_not_found)[0]))
+            elif len(requested_not_found) > 1:
+                print('WARNING: {} were requested for use with annotations, but not found in VCFs'\
+                        ''.format(', '.join(sorted(requested_not_found))))
+            if len(found_not_requested) == 1:
+                print('WARNING: {} was found in VCFs, but not provided for use with annotations'\
+                        ''.format(sorted(found_not_requested)[0]))
+            elif len(found_not_requested) > 1:
+                print('WARNING: {} were found in VCFs, but not provided for use with annotations'\
+                        ''.format(', '.join(sorted(found_not_requested))))
+            if len(annotate_with_these):
+                print('Using {} for annotations'.format(', '.join(sorted(annotate_with_these))))
+
+
+        # collect by chromsome,position
         by_position = _defaultdict(dict)
+        annotations = {}
         for sample,chromsomes in all_variants.items():
             for chromosome,positions in chromsomes.items():
-                print(sample,chromosome,sorted(positions))
-                for position,((r,q),filters) in positions.items():
+                #print(sample,chromosome,sorted(positions))
+                for pos1,((r,q),filters) in positions.items():
                     try:
-                        by_position[chromosome,position][(r,q)][sample] = filters
+                        by_position[chromosome,pos1][(r,q)][sample] = filters
                     except KeyError:
-                        by_position[chromosome,position][(r,q)] = {}
-                        by_position[chromosome,position][(r,q)][sample] = filters
-                        
+                        by_position[chromosome,pos1][(r,q)] = {}
+                        by_position[chromosome,pos1][(r,q)][sample] = filters
+                    
+                    try:
+                        ORFs_info = [(ORF_id,s,e,st,n) for ORF_id,(s,e,st,n) in self.genomes[chromosome].ORF_ranges.items() if s < pos1 < e]
+                        if len(ORFs_info) > 1:
+                            print('WARNING: variant in more than one ORF (overlapping): not implemented')
+                        elif len(ORFs_info) == 1:
+                            ORF_id,s,e,strand,gene_name = ORFs_info[0]
+                            ORF_seq = self.genomes[chromosome].sequence[s:e].tostring()
+                            ORF0 = pos1 - 1 - s
+                            ORF0_codon_start = ORF0 - ORF0 % 3
+                            ref_codon = ORF_seq[ORF0_codon_start:ORF0_codon_start+3]
+                            frame1 = ORF0 - ORF0_codon_start + 1
+                            var_codon = list(ref_codon)
+                            var_codon[frame1-1] = q
+                            var_codon = ''.join(var_codon)
+                            assert self.genomes[chromosome].sequence[pos1-1] == ref_codon[frame1-1]
+                            if st == 1:
+                                var_AA = str(_Seq(var_codon).translate())
+                                ref_AA = str(_Seq(ref_codon).translate())
+                            else:
+                                var_AA = str(_Seq(var_codon).reverse_complement().translate())
+                                ref_AA = str(_Seq(ref_codon).reverse_complement().translate())
+                                var_codon = str(_Seq(var_codon).reverse_complement())
+                                ref_codon = str(_Seq(ref_codon).reverse_complement())
+                                frame1 = 3 - (frame1-1)
+                            
+                            annotations[(chromosome,pos1,r,q)] = (ref_codon, var_codon, 
+                                    ref_AA, var_AA, frame1, ORF_id, gene_name, strand)
+                    except (KeyError, TypeError):
+                        pass
+
+
         filenameout = 'Simple_summary_for_{}_and_{}_others.csv'.format(sorted(all_variants)[0], 
                 len(all_variants)-1)
 
         sample_order = sorted(all_variants)
 
         def quote(v):
-            if str(v).isdigit():
+            if str(v).replace('-','').isdigit():
                 return(str(v))
             else:
                 return('"'+v+'"')
 
+        colnames = ['Chromosome','Position (bp)', 'Reference', \
+                'Variant', 'Gene ID', 'Gene name', 'Strand', 'Reference codon', 'Variant codon', \
+                'Reference AA', 'Variant AA', 'Codon position'] + sample_order + \
+                ['Frequency', 'Frequency (filtered)']
+
         with open(filenameout, 'w') as fout:
             print('Writing to {}'.format(filenameout))
-            for (chromosome,position),variants in sorted(by_position.items()):
+            fout.write(','.join(map(quote,colnames))+'\n')
+            for (chromosome,pos1),variants in sorted(by_position.items()):
                 for (r,q),samples in variants.items():
-                    this_row = [chromosome,position,r,q]
+                    try:
+                        (ref_codon, var_codon, ref_AA, var_AA, frame1, ORF_id, \
+                                gene_name, strand) = annotations[(chromosome,pos1,r,q)]
+                    except KeyError:
+                        (ref_codon, var_codon, ref_AA, var_AA, frame1, ORF_id, \
+                                gene_name, strand) = '', '', '', '', -1, '', '', 0
+                    
+                    this_row = [chromosome,pos1,r,q] + [ORF_id, gene_name, strand, ref_codon, \
+                            var_codon, ref_AA, var_AA, frame1]
+                    freq_all = 0
+                    freq_filtered = 0
                     for sample in sample_order:
                         try:
                             filters = samples[sample]
-                            if len(filters) == 0:
-                                this_row += ['True']
+                            if filters == set(['.']):
+                                this_row += [1]
+                                freq_filtered += 1
                             else:
                                 this_row += ['+'.join(filters)]
+                            freq_all += 1
                         except KeyError:
-                            this_row += ['False']
+                            this_row += [0]
                     
+                    this_row += [freq_all, freq_filtered]
                     fout.write(','.join(map(quote,this_row))+'\n')
 
 class Checker:
