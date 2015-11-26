@@ -727,24 +727,77 @@ parser_FilterVariants.add_argument('-f', "--filters",
     # these choices must correspond to known_filters in CallVariants.Filter.__init__()
     # or to other_filters which are listed by variant calling program, currently just GATK
     choices = ['genome_repeats','rearrangements','GATK'],
-    required = True,
-    metavar = 'FILTER_NAME')
+    metavar = 'FILTER_NAME',
+    required = True)
 
 parser_FilterVariants.add_argument('-s', "--include_samples", 
     help = "restrict filtering to these samples. If omitted, plots for all samples are produced.",
     type = str,
     nargs = '+')
 
-parser_FilterVariants.add_argument('-r', "--report", 
-    help = "summarise the effect of filters. Only choice currently implemented is cumulative effect on total variants.",
-    type = str,
-    nargs = '+',
-    choices = ['cumulative','lists'],
-    metavar = 'REPORT_TYPE')
-
 parser_FilterVariants.add_argument('-i', "--path_to_rearrangements_info", 
     help = "optionally supply path to where rearrangement filter information is for all samples (if not in current directory; they look like baga.Structure.CheckerInfo-<samplename>__<genomename>.baga). These must be generated using the 'Structure --check' option and are each generated from the same .bam alignment file as the corresponding, supplied VCF files.",
     type = str)
+
+
+parser_SummariseVariants = subparser_adder.add_parser('SummariseVariants',
+        formatter_class = argparse.RawDescriptionHelpFormatter,
+        description = textwrap.fill('Generate various .csv text files for '\
+                'convenient viewing and downstream analysis.', text_width,
+                replace_whitespace = False),
+        epilog = textwrap.fill('Example usage: %(prog)s --simple --vcfs_paths '\
+                'path/to/*.vcf\n', text_width, replace_whitespace = False))
+
+mutually_exclusive_group = parser_SummariseVariants.add_mutually_exclusive_group(required=True)
+
+# either: reads_name and genome_name to infer CallVariants.Caller object path
+mutually_exclusive_group.add_argument('-n', "--reads_name", 
+        help = "name of read datasets group if processed by CallVariants options. "\
+        "Should match --reads_name option used previously",
+        type = str,
+        nargs = '+')
+
+mutually_exclusive_group.add_argument('-p', "--vcfs_paths", 
+        help = "path to vcf files. If a directory path(s) is provided, all *.VCF "\
+        "and *.vcf files will be included. A list of filenames with full path or "\
+        "with *, ? or [] characters can also be provided (with unix-style pathname "\
+        "pattern expansion for the latter)",
+        type = str,
+        nargs = '+')
+
+# even without reads_name, genome is still useful to provide additional annotations
+parser_SummariseVariants.add_argument('-g', "--genome_name", 
+        help = "name of genome obtained by the CollectData option",
+        type = str)
+
+parser_SummariseVariants.add_argument('-f', "--filters", 
+        help = "names of filters to apply. One or more of: genome_repeats provided "\
+        "by the Repeats option; rearrangements provided by the Structure option.",
+        type = str,
+        nargs = '+',
+        # these choices must correspond to known_filters in CallVariants.Filter.__init__()
+        # or to other_filters which are listed by variant calling program, currently just GATK
+        choices = ['genome_repeats','rearrangements','GATK'],
+        metavar = 'FILTER_NAME')
+
+parser_SummariseVariants.add_argument('-S', "--simple", 
+        help = "generate a simple .csv table corresponding to the VCF file rows.",
+        action = 'store_true')
+
+parser_SummariseVariants.add_argument('-L', "--lists", 
+        help = "generate a .csv table listing allele frequencies in whole dataset, "\
+        "between samples and reference and among samples excluding reference.",
+        action = 'store_true')
+
+parser_SummariseVariants.add_argument('-C', "--cumulative", 
+        help = "summarise the cumulative effect of filters in .csv table.",
+        action = 'store_true')
+
+parser_SummariseVariants.add_argument('-s', "--include_samples", 
+        help = "restrict filtering to these samples. If omitted, plots for all "\
+        "samples are produced.",
+        type = str,
+        nargs = '+')
 
 
 parser_CheckLinkage = subparser_adder.add_parser('CheckLinkage',
@@ -2309,101 +2362,172 @@ if args.subparser == 'FilterVariants':
 
     print('Loaded VCF locations:\n{}'.format('\n'.join(VCFs)))
     
-    # either do a report or go on and actually do filtering
-    if args.report:
-        for reporttype in args.report:
-            if reporttype == 'cumulative':
-                print('Reporting cumulative variant totals by class and group as '\
-                        'filters applied : {}'.format('+'.join(args.filters)))
-                CallVariants.reportCumulative(args.filters, use_name_genome, VCFs_for_report)
-            elif reporttype == 'lists':
-                print('Reporting lists of variants by class and group with filters'\
-                        ': {}'.format('+'.join(args.filters)))
-                CallVariants.reportLists(args.filters, use_name_genome, VCFs_for_report)
+    # check accessible and collect sample names with genome accession
+    sample_names = {}
+    for VCF in VCFs:
+        try:
+            with open(VCF, 'r') as filein:
+                header, header_section_order, colnames, variants = CallVariants.parseVCF(VCF)
+                bits = header['contig'][0].split('<')[-1].split('>')[0].split(',')
+                contiginfo = dict([bit.split('=') for bit in bits])
+                for sample_name in colnames[9:]:
+                    sample_names[sample_name] = contiginfo
+        except IOError as e:
+            print(e)
+            sys.exit('Failed to open: {}'.format(VCF))
+            
+    # genome is only needed when generating csv summary with ORFs affected
+    from baga import CollectData
+    print('Loading genome %s' % use_name_genome)
+    genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
+    
+    print('Loading filter information . . .')
+    
+    filters = {}
+    if 'genome_repeats' in args.filters:
+        from baga import Repeats
+        filein = 'baga.Repeats.FinderInfo-{}.baga'.format(use_name_genome)
+        finder_info = Repeats.loadFinderInfo(filein)
+        filters['genome_repeats'] = finder_info['ambiguous_ranges']
+        # print a summary
+        t = len(filters['genome_repeats'])
+        s = sum([(e - s) for s,e in filters['genome_repeats']])
+        print('Reference genome sequence {} contains {} repeated regions spanning {:,} basepairs'.format(use_name_genome, t, s))
+    
+    if 'rearrangements' in args.filters:
+        
+        from baga import Structure
+        
+        filters['rearrangements'] = {}
+        #for sample,checker in checkers.items():
+        for sample,genomeinfo in sorted(sample_names.items()):
+            
+            if args.include_samples:
+                if sample not in args.include_samples:
+                    continue
+            
+            filein = 'baga.Structure.CheckerInfo-{}__{}.baga'.format(sample, genomeinfo['ID'])
+            if args.path_to_rearrangements_info:
+                filein = os.path.sep.join([args.path_to_rearrangements_info,filein])
+            
+            checker_info = Structure.loadCheckerInfo(filein)
+            
+            e = 'Genome name for checker {} ({}) does not match supplied genome name ({})'.format(filein, checker_info['genome_name'], genome.id)
+            name_match = checker_info['genome_name'] == genome.id
+            #### temporarily force to true: CheckerInfo will now save genome length
+            checker_info['genome_length'] = len(genome.sequence)
+            length_match = checker_info['genome_length'] == len(genome.sequence)
+            
+            if not name_match:
+                print('WARNING: genome name used for rearrangements filter for {} ({}) does not match requested genome to use ({}).'.format(sample, checker_info['genome_name'], genome.id))
+                if length_match:
+                    print('Genome lengths match so proceeding and assuming alternative names or accession numbers for same genome ({:,} bp).'.format(checker_info['genome_length']))
+                else:
+                    sys.exit('ERROR: genome length mismatch. Different genome used for rearrangemtns filter analysis to one requested to use to apply filter? ({:,} bp vs {:,} bp).'.format(checker_info['genome_length'],len(genome.sequence)))
+            
+            # report brief summary for this sample
+            print('For sample {}, relative to {}:'.format(sample, genome.id))
+            #t = len(checker_info['suspect_regions']['high non-proper pairs'])
+            t = len(checker_info['suspect_regions']['rearrangements'])
+            s = sum([(e - s) for s,e in checker_info['suspect_regions']['rearrangements']])
+            print('  {} regions spanning {:,} basepairs are affected by rearrangements thus having ambiguous 1:1 orthology.'.format(t, s))
+            
+            #t = len(checker_info['suspect_regions_extensions']['high non-proper pairs'])
+            t = len(checker_info['suspect_regions']['rearrangements_extended'])
+            s = sum([(e - s) for s,e in checker_info['suspect_regions']['rearrangements_extended']])
+            print('  {} additional regions spanning {:,} basepairs are adjacent to the above regions but have a >50% zero read depth over a moving window (i.e., any aligned reads have a patchy distribution, are usually rare). These are typically large deletions including missing prophage and genomic islands\n'.format(t, s))
+            
+            filters['rearrangements'][sample] = checker_info['suspect_regions']
+    
+    filter_applier = CallVariants.Filter(VCFs, genome)  #, use_name_reads)
+    filter_applier.doFiltering(filters)
+
+    
+
+### Summarise Variants ###
+
+if args.subparser == 'SummariseVariants':
+    print('\n-- Summarise Variants (part of the Variant Calling module) --\n')
+    
+    from baga import CallVariants
+    ## to apply variants, provide one reads group name
+    if args.reads_name:
+        assert args.genome_name, "--genome_name is required with --reads_name"
+    
+    if args.genome_name:
+        use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
+        if not all([use_path_genome,use_name_genome]):
+            print('WARNING: Could not locate a saved baga.CollectData.Genome-<genome_name>.baga '\
+                    'for name given: {}'.format(args.genome_name))
+    
+    VCFs_for_report = {}
+    
+    # collect VCFs
+    if args.reads_name:
+        for these_reads in args.reads_name:
+            # baga pipeline information provided
+            # allow for multiple rounds of recalibration at end of CallVariants i.e., 1 or 2 and select 2 if available
+            import baga
+            # sometimes the baga from the previous step in the pipeline is not actually needed
+            # so this name and file check could be relaxed
+            use_path_reads,use_name_reads = check_baga_path('baga.PrepareReads.Reads', these_reads)
+            e = 'Could not locate a saved baga.PrepareReads.Reads-<reads_name>.baga for reads group given: {}'.format(these_reads)
+            assert all([use_path_reads,use_name_reads]), e
+            alns_name = '__'.join([use_name_reads, use_name_genome])
+            
+            filein = 'baga.CallVariants.CallerGATK-{}.baga'.format(alns_name)
+            caller = CallVariants.CallerGATK(baga = filein)
+            
+            if hasattr(caller, 'path_to_hardfiltered_SNPs') and hasattr(caller, 'path_to_hardfiltered_INDELs'):
+                # only one for VCFs so no overwriting
+                VCFs = [caller.path_to_hardfiltered_SNPs[-1], caller.path_to_hardfiltered_INDELs[-1]]
+                # more than one can be handled with --report though
+                # only implemented for separate VCFs currently
+                VCFs_for_report[these_reads] = {'SNPs':caller.path_to_hardfiltered_SNPs[-1], 'InDels':caller.path_to_hardfiltered_INDELs[-1]}
+            elif hasattr(caller, 'path_to_unfiltered_VCF'):
+                print('WARNING: path to GATK hardfiltered variants not found in {}'.format(filein))
+                print('It is recommended to complete the GATK variant calling with the CallVariants module')
+                VCFs = [caller.path_to_unfiltered_VCF[-1]]
+            elif hasattr(caller, 'paths_to_raw_gVCFs'):
+                print('WARNING: path to GATK joint called variants not found in {}'.format(filein))
+                print('It is recommended to complete the GATK variant calling with the CallVariants module')
+                VCFs = caller.paths_to_raw_gVCFs[-1]
+            else:
+                print('WARNING: path to GATK called variants not found in {}'.format(filein))
+                sys.exit('It seems the analysis described in {} is incomplete. Try completing or rerunning using the CallVariants module'.format(filein))
+        
     else:
-        # check accessible and collect sample names with genome accession
-        sample_names = {}
-        for VCF in VCFs:
-            try:
-                with open(VCF, 'r') as filein:
-                    header, header_section_order, colnames, variants = CallVariants.parseVCF(VCF)
-                    bits = header['contig'][0].split('<')[-1].split('>')[0].split(',')
-                    contiginfo = dict([bit.split('=') for bit in bits])
-                    for sample_name in colnames[9:]:
-                        sample_names[sample_name] = contiginfo
-            except IOError as e:
-                print(e)
-                sys.exit('Failed to open: {}'.format(VCF))
-                
-        # genome is only needed when generating csv summary with ORFs affected
-        from baga import CollectData
-        print('Loading genome %s' % use_name_genome)
-        genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
-        
-        print('Loading filter information . . .')
-        
-        filters = {}
-        if 'genome_repeats' in args.filters:
-            from baga import Repeats
-            filein = 'baga.Repeats.FinderInfo-{}.baga'.format(use_name_genome)
-            finder_info = Repeats.loadFinderInfo(filein)
-            filters['genome_repeats'] = finder_info['ambiguous_ranges']
-            # print a summary
-            t = len(filters['genome_repeats'])
-            s = sum([(e - s) for s,e in filters['genome_repeats']])
-            print('Reference genome sequence {} contains {} repeated regions spanning {:,} basepairs'.format(use_name_genome, t, s))
-        
-        if 'rearrangements' in args.filters:
-            
-            from baga import Structure
-            
-            filters['rearrangements'] = {}
-            #for sample,checker in checkers.items():
-            for sample,genomeinfo in sorted(sample_names.items()):
-                
-                if args.include_samples:
-                    if sample not in args.include_samples:
-                        continue
-                
-                filein = 'baga.Structure.CheckerInfo-{}__{}.baga'.format(sample, genomeinfo['ID'])
-                if args.path_to_rearrangements_info:
-                    filein = os.path.sep.join([args.path_to_rearrangements_info,filein])
-                
-                checker_info = Structure.loadCheckerInfo(filein)
-                
-                e = 'Genome name for checker {} ({}) does not match supplied genome name ({})'.format(filein, checker_info['genome_name'], genome.id)
-                name_match = checker_info['genome_name'] == genome.id
-                #### temporarily force to true: CheckerInfo will now save genome length
-                checker_info['genome_length'] = len(genome.sequence)
-                length_match = checker_info['genome_length'] == len(genome.sequence)
-                
-                if not name_match:
-                    print('WARNING: genome name used for rearrangements filter for {} ({}) does not match requested genome to use ({}).'.format(sample, checker_info['genome_name'], genome.id))
-                    if length_match:
-                        print('Genome lengths match so proceeding and assuming alternative names or accession numbers for same genome ({:,} bp).'.format(checker_info['genome_length']))
-                    else:
-                        sys.exit('ERROR: genome length mismatch. Different genome used for rearrangemtns filter analysis to one requested to use to apply filter? ({:,} bp vs {:,} bp).'.format(checker_info['genome_length'],len(genome.sequence)))
-                
-                # report brief summary for this sample
-                print('For sample {}, relative to {}:'.format(sample, genome.id))
-                #t = len(checker_info['suspect_regions']['high non-proper pairs'])
-                t = len(checker_info['suspect_regions']['rearrangements'])
-                s = sum([(e - s) for s,e in checker_info['suspect_regions']['rearrangements']])
-                print('  {} regions spanning {:,} basepairs are affected by rearrangements thus having ambiguous 1:1 orthology.'.format(t, s))
-                
-                #t = len(checker_info['suspect_regions_extensions']['high non-proper pairs'])
-                t = len(checker_info['suspect_regions']['rearrangements_extended'])
-                s = sum([(e - s) for s,e in checker_info['suspect_regions']['rearrangements_extended']])
-                print('  {} additional regions spanning {:,} basepairs are adjacent to the above regions but have a >50% zero read depth over a moving window (i.e., any aligned reads have a patchy distribution, are usually rare). These are typically large deletions including missing prophage and genomic islands\n'.format(t, s))
-                
-                filters['rearrangements'][sample] = checker_info['suspect_regions']
-        
-        filter_applier = CallVariants.Filter(VCFs, genome)  #, use_name_reads)
-        filter_applier.doFiltering(filters)
+        # list of folders or files provided in args.vcfs_paths
+        VCFs = []
+        for path in args.vcfs_paths:
+            if os.path.isdir(path):
+                path_contents = os.listdir(path)
+                theseVCFs = [os.path.sep.join([path,f]) for f in path_contents if f[-3:] in ('VCF', 'vcf')]
+                e = 'No VCF files (*.vcf or *.VCF) found in:\n{}'.format(args.alignments_paths)
+                assert len(theseVCFs), e
+                VCFs += theseVCFs
+            else:
+                # add file
+                VCFs += [path]
 
-
-                
-        
+    print('Loaded VCF locations:\n{}'.format('\n'.join(VCFs)))
+    
+    message = 'Need --filters FILTER_NAME [FILTER_NAME] for report type "{}"'
+    if args.cumulative:
+        assert args.filters, message.format('cumulative')
+        print('Reporting cumulative variant totals by class and group as '\
+                'filters applied : {}'.format('+'.join(args.filters)))
+        CallVariants.reportCumulative(args.filters, use_name_genome, VCFs_for_report)
+    
+    if args.lists:
+        assert args.filters, message.format('lists')
+        print('Reporting lists of variants by class and group with filters'\
+                ': {}'.format('+'.join(args.filters)))
+        CallVariants.reportLists(args.filters, use_name_genome, VCFs_for_report)
+    
+    if args.simple:
+        summariser = CallVariants.Summariser(VCFs)
+        summariser.simple()
 
 ### Check Linkage ###
 

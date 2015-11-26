@@ -1200,6 +1200,115 @@ class CallerDiscoSNP:
         _subprocess.call([path_to_exe] + cmds)
 
 
+class Summariser:
+    '''
+    Summarise variants in a VCF in various ways.
+
+    Parse VCF files and create .csv files for viewing in spreadsheets
+    '''
+    def __init__(self, VCF_paths = False, path_to_caller = False, genome = False):
+        '''
+        A CallVariants.Summariser object can be instantiated with:
+            - a list of paths to VCF files
+        or
+            - path to a CallVariants.CallerGATK object
+        or
+            - path to a CallVariants.CallerDiscoSNP object
+        '''
+        
+        assert bool(VCF_paths) ^ bool(path_to_caller), 'cannot instantiate with both '\
+                'paths to VCFs and a Caller object'
+        
+        if VCF_paths:
+            for VCF in VCF_paths:
+                assert _os.path.exists(VCF), 'Could not find {}.\nPlease ensure all '\
+                        'files exist'.format(VCF)
+            self.VCF_paths = VCF_paths
+        elif path_to_caller:
+            raise NotImplementedError('only direct paths to VCFs is currently implemented')
+        
+        if genome:
+            self.genome = genome
+
+
+    def collect_variants(self):
+        '''
+        Collect variants from VCF files for 
+        '''
+
+        all_variants = {}
+        all_headerdicts = {}
+
+        for VCF in self.VCF_paths: #break
+            header, header_section_order, these_colnames, variantrows = parseVCF(VCF)
+            headerdict = dictify_vcf_header(header)
+            all_headerdicts[VCF] = headerdict
+            #print(headerdict)
+            variants, allfilters = sortVariantsKeepFilter(header, these_colnames, variantrows)
+            #print(variants)
+            all_variants = dict(all_variants.items() + variants.items())
+
+        return(all_variants, all_headerdicts)
+            
+
+    def simple(self):
+        '''
+        List all variants with rows corresponding to those in the VCF file(s) in a .cvs file
+        '''
+
+        all_variants, all_headerdicts = self.collect_variants()
+
+        # ['ALT', 'FILTER', 'FORMAT', 'GATKCommandLine', 'INFO', 'contig']
+        genome_IDs = set()
+        for VCF,headerdict in all_headerdicts.items():
+            genome_IDs.update([contig['ID'] for contig in headerdict['contig']])
+
+        print('Chromosomes found: {}'.format(', '.join(genome_IDs)))
+
+        # assert len(genome_IDs) == 1, "only one reference sequence at a time is "\
+                # "implemented for simple summary. {} found: {}".format(len(genome_IDs), 
+                # ', '.join(genome_IDs))
+
+        # collect by position
+        by_position = _defaultdict(dict)
+        for sample,chromsomes in all_variants.items():
+            for chromosome,positions in chromsomes.items():
+                print(sample,chromosome,sorted(positions))
+                for position,((r,q),filters) in positions.items():
+                    try:
+                        by_position[chromosome,position][(r,q)][sample] = filters
+                    except KeyError:
+                        by_position[chromosome,position][(r,q)] = {}
+                        by_position[chromosome,position][(r,q)][sample] = filters
+                        
+        filenameout = 'Simple_summary_for_{}_and_{}_others.csv'.format(sorted(all_variants)[0], 
+                len(all_variants)-1)
+
+        sample_order = sorted(all_variants)
+
+        def quote(v):
+            if str(v).isdigit():
+                return(str(v))
+            else:
+                return('"'+v+'"')
+
+        with open(filenameout, 'w') as fout:
+            print('Writing to {}'.format(filenameout))
+            for (chromosome,position),variants in sorted(by_position.items()):
+                for (r,q),samples in variants.items():
+                    this_row = [chromosome,position,r,q]
+                    for sample in sample_order:
+                        try:
+                            filters = samples[sample]
+                            if len(filters) == 0:
+                                this_row += ['True']
+                            else:
+                                this_row += ['+'.join(filters)]
+                        except KeyError:
+                            this_row += ['False']
+                    
+                    fout.write(','.join(map(quote,this_row))+'\n')
+
 class Checker:
     '''
     Check variants in a VCF against regional de novo assemblies.
