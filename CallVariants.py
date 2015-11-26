@@ -181,7 +181,22 @@ def sortVariantsKeepFilter(header, colnames, variantrows):
         
         for sample,data in sample_data.items():
             if data['GT'] != '.':
-                variants[sample][cols['CHROM']][int(cols['POS'])] = [[cols['REF'], cols['ALT'].split(',')[int(data['GT'])-1]], samples_filtered[sample]]
+                # there can be more than one variant per row
+                # rare for SNPs but can happen for indels
+                freqs = _Counter()
+                alleles = cols['ALT'].split(',')
+                allele_nums = map(int,data['GT'].split('/'))
+                for allele_num in allele_nums:
+                    if allele_num > 0:
+                        freqs[alleles[allele_num-1]] += 1
+                
+                for ALT,freq in freqs.items():
+                    if len(allele_nums) == 1:
+                        # store ALT as single variant character
+                        variants[sample][cols['CHROM']][int(cols['POS'])] = [[cols['REF'], ALT], samples_filtered[sample]]
+                    else:
+                        # store ALT as tuple of variant character, frequency, population_size
+                        variants[sample][cols['CHROM']][int(cols['POS'])] = [[cols['REF'], (ALT,freq,len(allele_nums))], samples_filtered[sample]]
 
     # convert nested defaultdicts to dicts
     variants = dict(variants)
@@ -1308,16 +1323,29 @@ class Summariser:
 
         # collect by chromsome,position
         by_position = _defaultdict(dict)
+        by_position_freqs = _defaultdict(dict)
         annotations = {}
-        for sample,chromsomes in all_variants.items():
-            for chromosome,positions in chromsomes.items():
+        for sample,chromosomes in all_variants.items():
+            for chromosome,positions in chromosomes.items():
                 #print(sample,chromosome,sorted(positions))
                 for pos1,((r,q),filters) in positions.items():
+                    ## this was to keep sortVariantsKeepFilter()
+                    ## compatible with other uses that assume single clone, always 1/1
+                    if isinstance(q, tuple):
+                        ALT,freq,total = q
+                        use_q = ALT
+                    else:
+                        freq,total = 1,1
+                        use_q = q
+                    
                     try:
-                        by_position[chromosome,pos1][(r,q)][sample] = filters
+                        by_position[chromosome,pos1][(r,use_q)][sample] = filters
+                        by_position_freqs[chromosome,pos1][(r,use_q)][sample] = freq,total
                     except KeyError:
-                        by_position[chromosome,pos1][(r,q)] = {}
-                        by_position[chromosome,pos1][(r,q)][sample] = filters
+                        by_position[chromosome,pos1][(r,use_q)] = {}
+                        by_position[chromosome,pos1][(r,use_q)][sample] = filters
+                        by_position_freqs[chromosome,pos1][(r,use_q)] = {}
+                        by_position_freqs[chromosome,pos1][(r,use_q)][sample] = freq,total
                     
                     try:
                         ORFs_info = [(ORF_id,s,e,st,n) for ORF_id,(s,e,st,n) in self.genomes[chromosome].ORF_ranges.items() if s < pos1 < e]
@@ -1356,7 +1384,7 @@ class Summariser:
         sample_order = sorted(all_variants)
 
         def quote(v):
-            if str(v).replace('-','').isdigit():
+            if str(v).replace('-','').replace('.','').isdigit():
                 return(str(v))
             else:
                 return('"'+v+'"')
@@ -1371,6 +1399,7 @@ class Summariser:
             fout.write(','.join(map(quote,colnames))+'\n')
             for (chromosome,pos1),variants in sorted(by_position.items()):
                 for (r,q),samples in variants.items():
+                    
                     try:
                         (ref_codon, var_codon, ref_AA, var_AA, frame1, ORF_id, \
                                 gene_name, strand) = annotations[(chromosome,pos1,r,q)]
@@ -1384,12 +1413,17 @@ class Summariser:
                     freq_filtered = 0
                     for sample in sample_order:
                         try:
+                            freq,total = by_position_freqs[chromosome,pos1][(r,q)][sample]
+                            if freq == total == 1:
+                                val = 1
+                            else:
+                                val = float(freq) / float(total)
                             filters = samples[sample]
                             if \
                                     filters == set(['.']) or \
                                     filters == set(['PASS']) or \
                                     len(filters) == 0:
-                                this_row += [1]
+                                this_row += [val]
                                 freq_filtered += 1
                             else:
                                 this_row += ['+'.join(filters)]
