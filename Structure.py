@@ -357,6 +357,9 @@ class Checker:
                 mean_insert_size = False
                 loaded_from_file = False
                 pass
+        else:
+            mean_insert_size = False
+            loaded_from_file = False
 
         if not mean_insert_size:
             print('Calculating mean insert size from BAM file . . .')
