@@ -1372,7 +1372,7 @@ class Summariser:
                             ORF0_codon_start = ORF0 - ORF0 % 3
                             ref_codon = ORF_seq[ORF0_codon_start:ORF0_codon_start+3]
                             frame1 = ORF0 - ORF0_codon_start + 1
-                            if len(q) == 1:
+                            if len(r) == len(q) == 1:
                                 # substitution
                                 var_codon = list(ref_codon)
                                 var_codon[frame1-1] = q
