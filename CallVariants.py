@@ -1278,14 +1278,28 @@ class Summariser:
             #print(headerdict)
             variants, allfilters = sortVariantsKeepFilter(header, these_colnames, variantrows)
             #print(variants)
-            all_variants = dict(all_variants.items() + variants.items())
+            for sample,chromosomes in variants.items():
+                if sample not in all_variants:
+                    all_variants[sample] = {}
+                for chromosome,positions in chromosomes.items():
+                    if chromosome not in all_variants[sample]:
+                        all_variants[sample][chromosome] = {}
+                    for pos1,info in positions.items():
+                        if pos1 in all_variants[sample][chromosome]:
+                            if all_variants[sample][chromosome][pos1] != info:
+                                print('WARNING: VCFs in conflict for {} in chromosome '\
+                                        '{} at position {}. You could try processing '\
+                                        'VCFs one at a time and compare tables produced.'\
+                                        ''.format(sample,chromosome,pos1))
+                        else:
+                            all_variants[sample][chromosome][pos1] = info
 
         return(all_variants, all_headerdicts)
-            
+
 
     def simple(self):
         '''
-        List all variants with rows corresponding to those in the VCF file(s) in a .cvs file
+        List all variants with rows corresponding to those in the VCF file(s) in a .csv file
         '''
 
         all_variants, all_headerdicts = self.collect_variants()
@@ -1358,19 +1372,31 @@ class Summariser:
                             ORF0_codon_start = ORF0 - ORF0 % 3
                             ref_codon = ORF_seq[ORF0_codon_start:ORF0_codon_start+3]
                             frame1 = ORF0 - ORF0_codon_start + 1
-                            var_codon = list(ref_codon)
-                            var_codon[frame1-1] = q
-                            var_codon = ''.join(var_codon)
-                            assert self.genomes[chromosome].sequence[pos1-1] == ref_codon[frame1-1]
-                            if st == 1:
-                                var_AA = str(_Seq(var_codon).translate())
-                                ref_AA = str(_Seq(ref_codon).translate())
+                            if len(q) == 1:
+                                # substitution
+                                var_codon = list(ref_codon)
+                                var_codon[frame1-1] = q
+                                var_codon = ''.join(var_codon)
+                                assert self.genomes[chromosome].sequence[pos1-1] == ref_codon[frame1-1]
+                                if st == 1:
+                                    var_AA = str(_Seq(var_codon).translate())
+                                    ref_AA = str(_Seq(ref_codon).translate())
+                                else:
+                                    var_AA = str(_Seq(var_codon).reverse_complement().translate())
+                                    ref_AA = str(_Seq(ref_codon).reverse_complement().translate())
+                                    var_codon = str(_Seq(var_codon).reverse_complement())
+                                    ref_codon = str(_Seq(ref_codon).reverse_complement())
+                                    frame1 = 3 - (frame1-1)
                             else:
-                                var_AA = str(_Seq(var_codon).reverse_complement().translate())
-                                ref_AA = str(_Seq(ref_codon).reverse_complement().translate())
-                                var_codon = str(_Seq(var_codon).reverse_complement())
-                                ref_codon = str(_Seq(ref_codon).reverse_complement())
-                                frame1 = 3 - (frame1-1)
+                                # indel
+                                var_codon = '-'
+                                var_AA = '-'
+                                if st == -1:
+                                    frame1 = 3 - (frame1-1)
+                                    ref_AA = str(_Seq(ref_codon).reverse_complement().translate())
+                                    ref_codon = str(_Seq(ref_codon).reverse_complement())
+                                else:
+                                    ref_AA = str(_Seq(ref_codon).translate())
                             
                             annotations[(chromosome,pos1,r,q)] = (ref_codon, var_codon, 
                                     ref_AA, var_AA, frame1, ORF_id, gene_name, strand)
@@ -1378,8 +1404,10 @@ class Summariser:
                         pass
 
 
-        filenameout = 'Simple_summary_for_{}_and_{}_others.csv'.format(sorted(all_variants)[0], 
-                len(all_variants)-1)
+        all_chromosomes = sorted(set([a for b in all_variants.values() for a in b]))
+
+        filenameout = 'Simple_summary_for_{}_and_{}_others__{}.csv'.format(sorted(all_variants)[0], 
+                len(all_variants)-1, '_'.join(all_chromosomes))
 
         sample_order = sorted(all_variants)
 
