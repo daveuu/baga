@@ -1273,6 +1273,9 @@ class Summariser:
 
         for VCF in self.VCF_paths: #break
             header, header_section_order, these_colnames, variantrows = parseVCF(VCF)
+            if len(variantrows) == 0:
+                print('WARNING: no variants found in {}'.format(VCF))
+                continue
             headerdict = dictify_vcf_header(header)
             all_headerdicts[VCF] = headerdict
             #print(headerdict)
@@ -1304,6 +1307,10 @@ class Summariser:
 
         all_variants, all_headerdicts = self.collect_variants()
 
+        if len(all_variants) == 0:
+            print('WARNING: no variants found the supplied VCF files!')
+            return()
+
         # ['ALT', 'FILTER', 'FORMAT', 'GATKCommandLine', 'INFO', 'contig']
         genome_IDs = set()
         for VCF,headerdict in all_headerdicts.items():
@@ -1333,6 +1340,7 @@ class Summariser:
                         ''.format(', '.join(sorted(found_not_requested))))
             if len(annotate_with_these):
                 print('Using {} for annotations'.format(', '.join(sorted(annotate_with_these))))
+
 
 
         # collect by chromsome,position
