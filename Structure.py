@@ -51,6 +51,7 @@ from Bio.SeqRecord import SeqRecord as _SeqRecord
 
 from baga import report_time as _report_time
 from baga import get_exe_path as _get_exe_path
+
 def main():
     pass
 
@@ -119,6 +120,7 @@ def loadCheckerInfo(filein):
             checker_info[member.name] = contents
     
     return(checker_info)
+
 def checkStructure(BAMs, mean_param = 5, min_mapping_quality = 5, resolution = 10, step = 1):
     '''
     check for structural rearrangements . . .
@@ -202,6 +204,7 @@ def checkStructure(BAMs, mean_param = 5, min_mapping_quality = 5, resolution = 1
         _report_time(start_time, cnum, len(checkers))
 
     return(checkers)
+
 class Checker:
     '''
     The Checker class of the Structure module contains a method to check for 
@@ -1952,6 +1955,7 @@ class Collector:
         # return output destination for assembly
         return(r1_out_path, r2_out_path, rS_out_path)
 
+
 class Aligner:
     '''
     Aligner class of the Structure module contains methods to align contigs, 
@@ -2056,6 +2060,7 @@ class Aligner:
                 break
 
         return(num_gaps)
+
     def alignRegions(self, assemblies_by_region, 
                            num_padding_positions = 5000, 
                            pID_window = 100, 
@@ -2065,7 +2070,8 @@ class Aligner:
                            min_pID_aligned = 0.9,
                            single_assembly = False):
         
-        '''Align contigs to reference chromosome regions
+        '''
+        Align contigs to reference chromosome regions
 
         Provided with a dict of chromosome range tuples to contig file paths, 
         align each range to the contigs using seq-align as a subprocess to do 
@@ -2083,6 +2089,9 @@ class Aligner:
             unmapped_read_contigs = set([str(rec.seq) for rec in _SeqIO.parse(path_to_omit_sequences, 'fasta')])
         else:
             unmapped_read_contigs = set()
+
+        assert len(assemblies_by_region) > 0, 'no assemblies by region were provided: '\
+                'cannot align them'
 
         aligned = {}
         for (s,e),contigfile in sorted(assemblies_by_region.items()):
@@ -2177,7 +2186,7 @@ class Aligner:
         text file.
         '''
 
-        assert hasattr(self, 'aligned'), '"aligned" attribute not found. .alignRegions not run?'
+        assert hasattr(self, 'aligned'), '"aligned" attribute not found. .alignRegions() not run?'
 
         if len(self.aligned) == 0:
             print('No alignments to report')

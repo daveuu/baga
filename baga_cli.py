@@ -2030,23 +2030,24 @@ if args.subparser == 'Structure':
                     if not r1_out_path:
                         # if no reads found, False returned
                         # do not add to reads_paths dict for assembly
+                        print('debug: no reads found by collector')
                         continue
                     # put assembly in folder with same name as read files
                     output_folder = '_'.join(r1_out_path.split('_')[:-1]).split(os.path.sep)[-1]
-                    print(output_folder)
                     path_to_contigs = os.path.sep.join(['read_collections', 
                                                         genome_name, 
                                                         output_folder, 
                                                         'contigs.fasta'])
                     assemblies_by_region[s,e] = path_to_contigs
                     if os.path.exists(path_to_contigs) and \
-                       os.path.getsize(path_to_contigs) > 0 and \
-                       not args.force:
+                            os.path.getsize(path_to_contigs) > 0 and \
+                            not args.force:
                         print('Found assembly at {}\nUse --force/-F to overwrite. Skipping . . .'.format(path_to_contigs))
                     else:
                         reads_paths[output_folder] = (r1_out_path, r2_out_path, rS_out_path)
                         reads_path_unmapped[output_folder] = r1_out_path_um, r2_out_path_um, rS_out_path_um
                 
+                print('debug: len(assemblies_by_region) == {}'.format(len(assemblies_by_region)))
                 reads = AssembleReads.DeNovo(paths_to_reads = reads_paths, paths_to_reads2 = reads_path_unmapped)
                 reads.SPAdes(output_folder = ['read_collections', genome_name], mem_num_gigs = use_mem_gigs, single_assembly = single_assembly)
                 # a dict of paths to contigs per region
@@ -2056,9 +2057,19 @@ if args.subparser == 'Structure':
                                                   output_folder_um, 
                                                   'contigs.fasta'])
                 if os.path.exists(unmappedfasta) and os.path.getsize(unmappedfasta) > 0:
-                    # provide dict of range tuples
-                    aligner.alignRegions(assemblies_by_region, use_num_padding_positions, path_to_omit_sequences = unmappedfasta, single_assembly = single_assembly)
-                    aligner.reportAlignments()
+                    if len(assemblies_by_region) > 0:
+                        # provide dict of range tuples
+                        aligner.alignRegions(assemblies_by_region, 
+                                use_num_padding_positions, 
+                                path_to_omit_sequences = unmappedfasta, 
+                                single_assembly = single_assembly)
+                        aligner.reportAlignments()
+                    else:
+                        print('WARNING: no assembled regions found. Either there are '\
+                                'none which is fine, or SPAdes assemblies failed '\
+                                'to finish. You could check SPAdes log files in '\
+                                'folders in {}'.format(os.path.sep.join([
+                                'read_collections', genome_name])))
                 else:
                     print('WARNING: no assembled unmapped and poorly mapped reads found at:\n{}'.format(unmappedfasta))
                     try:
@@ -2076,8 +2087,15 @@ if args.subparser == 'Structure':
                         'conceivable (if ALL reads really did map to reference!).'.format(
                                 r1_out_path_um,r2_out_path_um))
                     print('proceeding with alignment of assembled putatively rearranged regions to reference nonetheless')
-                    aligner.alignRegions(assemblies_by_region, use_num_padding_positions, single_assembly = single_assembly)
-                    aligner.reportAlignments()
+                    if len(assemblies_by_region) > 0:
+                        aligner.alignRegions(assemblies_by_region, use_num_padding_positions, single_assembly = single_assembly)
+                        aligner.reportAlignments()
+                    else:
+                        print('WARNING: no assembled regions found. Either there are '\
+                                'none which is fine, or SPAdes assemblies failed '\
+                                'to finish. You could check SPAdes log files in '\
+                                'folders in {}'.format(os.path.sep.join([
+                                'read_collections', genome_name])))
 
 ### Call Variants ###
 
