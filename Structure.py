@@ -137,11 +137,18 @@ def checkStructure(BAMs,
         indexfile = _os.path.extsep.join([BAM,'bai'])
         if not(_os.path.exists(indexfile) and _os.path.getsize(indexfile) > 0):
             print('indexing {}'.format(BAM))
+            # try:
+                # print('Using pySAM')
+                # _pysam.index(BAM)
+            # except TypeError:
+                # print("pysam didn't like something about this bam . . . "\
+                        # "trying 'samtools index {}' instead.".format(BAM))
             try:
-                _pysam.index(BAM)
-            except TypeError:
-                raise TypeError("pysam didn't like something about this bam . . . "\
-                        "try 'samtools index {}' instead.".format(BAM))
+                print('Using SAMTools')
+                _subprocess.call(['samtools','index',BAM])
+            except OSError:
+                raise OSError("pysam and samtools didn't like something about "\
+                        "this bam . . . ")
         this_checker = Checker(BAM)
         checkers[this_checker.reads_name] = this_checker
 
