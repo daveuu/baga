@@ -128,6 +128,13 @@ def checkStructure(BAMs, mean_param = 5, min_mapping_quality = 5, resolution = 1
     # instantiate Structure Checkers
     checkers = {}
     for BAM in BAMs:
+        indexfile = _os.path.extsep.join([BAM,'bai'])
+        if not(_os.path.exists(indexfile) and _os.path.getsize(indexfile) > 0):
+            print('indexing {}'.format(BAM))
+            try:
+                _pysam.index(BAM)
+            except TypeError:
+                raise TypeError("pysam didn't like something about this bam . . . try 'samtools index {}' instead.".format(BAM))
         this_checker = Checker(BAM)
         checkers[this_checker.reads_name] = this_checker
 
