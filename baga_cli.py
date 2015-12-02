@@ -538,9 +538,9 @@ parser_Structure.add_argument('-r', "--plot_range",
     metavar = 'CHROMOSOME_POSITION')
 
 parser_Structure.add_argument('-t', "--ratio_threshold", 
-    help = "When checking for rearrangements, the ratio of non-proper pair to proper pair assigned reads above this value cause a region of read alignments to be considered rearranged. This ratio tends to zero rhen the distance between aligned paired reads is close to the expectation according to the estimated mean fragment size. It increases to around one adjacent to rearrangements e.g., within a fragment's length of a large deletion in the sample/insertion in the reference. Lower values are more sensitive to rearrangements but might include false positive rearrangements, but these can be examined by local de novo assembly of reads and pairwise alignment of contig with reference. If used to filter regions affected by unreliable short read alignments for variant calling, lower values are more conservative (will exclude more false positive variants) but might cause omission of true positive variants. Default = 0.1",
+    help = "When checking for rearrangements, the ratio of non-proper pair to proper pair assigned reads above this value cause a region of read alignments to be considered rearranged. This ratio tends to zero rhen the distance between aligned paired reads is close to the expectation according to the estimated mean fragment size. It increases to around one adjacent to rearrangements e.g., within a fragment's length of a large deletion in the sample/insertion in the reference. Lower values are more sensitive to rearrangements but might include false positive rearrangements, but these can be examined by local de novo assembly of reads and pairwise alignment of contig with reference. If used to filter regions affected by unreliable short read alignments for variant calling, lower values are more conservative (will exclude more false positive variants) but might cause omission of true positive variants. Default = 0.15",
     type = float,
-    default = 0.1,
+    default = 0.15,
     metavar = 'FLOAT')
 
 parser_Structure.add_argument('-S', "--include_samples", 

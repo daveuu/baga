@@ -126,7 +126,7 @@ def checkStructure(BAMs,
                    depth_resolution = 10, 
                    smoothed_resolution = 10, 
                    smoothed_window = False,
-                   ratio_threshold = 0.1):
+                   ratio_threshold = 0.15):
     '''
     check for structural rearrangements . . .
     smoothed_window defaults to half of estimated fragment length
