@@ -2333,7 +2333,7 @@ if args.subparser == 'FilterVariants':
     
     ## to apply variants, provide one reads group name
     if args.reads_name:
-        if len(args.reads_name) > 1 and not args.report:
+        if len(args.reads_name) > 1:
             sys.exit('Filters can only be applied to one group of reads at a time. Multiple sets can be handled with the --report option, though.')
     
     ## to report effects of filters, provide one or more read group names along with --report 
