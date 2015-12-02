@@ -537,6 +537,12 @@ parser_Structure.add_argument('-r', "--plot_range",
     nargs = 2,
     metavar = 'CHROMOSOME_POSITION')
 
+parser_Structure.add_argument('-t', "--ratio_threshold", 
+    help = "When checking for rearrangements, the ratio of non-proper pair to proper pair assigned reads above this value cause a region of read alignments to be considered rearranged. This ratio tends to zero rhen the distance between aligned paired reads is close to the expectation according to the estimated mean fragment size. It increases to around one adjacent to rearrangements e.g., within a fragment's length of a large deletion in the sample/insertion in the reference. Lower values are more sensitive to rearrangements but might include false positive rearrangements, but these can be examined by local de novo assembly of reads and pairwise alignment of contig with reference. If used to filter regions affected by unreliable short read alignments for variant calling, lower values are more conservative (will exclude more false positive variants) but might cause omission of true positive variants. Default = 0.1",
+    type = float,
+    default = 0.1,
+    metavar = 'FLOAT')
+
 parser_Structure.add_argument('-S', "--include_samples", 
     help = "With --plot or --plot_range, restrict plotting to these samples else if omitted, plots for all samples are produced. With --summarise, either restrict summaries to these ",
     type = str,
@@ -1736,7 +1742,9 @@ if args.subparser == 'Structure':
         
         if args.check:
             # check these genome-aligned read sets
-            checkers = Structure.checkStructure(BAMs, mean_param = 5, min_mapping_quality = 5, resolution = 10, step = 1)
+            checkers = Structure.checkStructure(BAMs, min_mapping_quality = 5, 
+                    smoothed_resolution = 10, 
+                    ratio_threshold = args.ratio_threshold)
         
         if args.plot or args.plot_range:
             if args.plot_range:

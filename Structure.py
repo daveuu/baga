@@ -121,9 +121,15 @@ def loadCheckerInfo(filein):
     
     return(checker_info)
 
-def checkStructure(BAMs, mean_param = 5, min_mapping_quality = 5, resolution = 10, step = 1):
+def checkStructure(BAMs, 
+                   min_mapping_quality = 5, 
+                   depth_resolution = 10, 
+                   smoothed_resolution = 10, 
+                   smoothed_window = False,
+                   ratio_threshold = 0.1):
     '''
     check for structural rearrangements . . .
+    smoothed_window defaults to half of estimated fragment length
     '''
     # instantiate Structure Checkers
     checkers = {}
@@ -134,7 +140,8 @@ def checkStructure(BAMs, mean_param = 5, min_mapping_quality = 5, resolution = 1
             try:
                 _pysam.index(BAM)
             except TypeError:
-                raise TypeError("pysam didn't like something about this bam . . . try 'samtools index {}' instead.".format(BAM))
+                raise TypeError("pysam didn't like something about this bam . . . "\
+                        "try 'samtools index {}' instead.".format(BAM))
         this_checker = Checker(BAM)
         checkers[this_checker.reads_name] = this_checker
 
@@ -145,41 +152,64 @@ def checkStructure(BAMs, mean_param = 5, min_mapping_quality = 5, resolution = 1
 
     start_time = _time.time()
     for cnum,(sample,checker) in enumerate(sorted(checkers.items())):
-        print('Collecting coverage for {} reads aligned to {}'.format(sample, checker.genome_name))
-        checker.getCoverageDepths(min_mapping_quality = min_mapping_quality)
-        print('Calculating mean insert size for {} reads aligned to {}'.format(sample, checker.genome_name))
+        print('Collecting coverage for {} reads aligned to {}'\
+                ''.format(sample, checker.genome_name))
+        # depth collection resolution impacts downstream resolutions
+        # i.e., 1 in 10 here plus 1 in 10 smoothed ratio == 1 in 100 considered
+        depth_resolution = 10
+        checker.getCoverageDepths(min_mapping_quality = min_mapping_quality, 
+                resolution = depth_resolution)
+        
+        # save for plotting
+        checker.depth_resolution = depth_resolution
+        
+        print('Calculating mean insert size for {} reads aligned to {}'\
+                ''.format(sample, checker.genome_name))
         checker.getMeanInsertSize()
         if checker.mean_insert_size == -1:
             print('Skipping: no aligned pairs found')
             continue
         print('mean insert size == {:.1f}'.format(checker.mean_insert_size))
-        print('Collecting non-proper : proper pair ratios for {} reads aligned to {}'.format(sample, checker.genome_name))
-        checker.getProperRatios(resolution)
-        print('Calculating smoothed ratios for {} reads aligned to {}'.format(sample, checker.genome_name))
-        checker.getSmoothedRatios(window = int(round(checker.mean_insert_size)), step = 1, resolution = 10)
+        
+        print('Collecting non-proper : proper pair ratios for {} reads aligned to {}'\
+                ''.format(sample, checker.genome_name))
+        checker.getProperRatios()
+        
+        print('Calculating smoothed ratios for {} reads aligned to {}'\
+                ''.format(sample, checker.genome_name))
+        
+        if not smoothed_window:
+            # window for smoothing here is half estimated mean fragment length
+            use_smoothed_window = int(round(checker.mean_insert_size)/2.0)
+        else:
+            use_smoothed_window = smoothed_window
+        
+        checker.getSmoothedRatios(window = use_smoothed_window, 
+                resolution = smoothed_resolution)
         # omit zero depths and zero/infinite ratios for mean (~ omit NAs)
         use_smoothed_ratios = [m for m in checker.smoothed_ratios if m != 0]
         mean_smoothed_ratios = sum(use_smoothed_ratios) / len(use_smoothed_ratios)
+        # save for plotting
+        checker.smoothed_resolution = smoothed_resolution
         
-        window = int(round(checker.mean_insert_size))
-        checker.threshold = mean_smoothed_ratios * mean_param
+        checker.threshold = ratio_threshold
         
+        offset = int(round(depth_resolution * smoothed_resolution / 2.0))
         filter_name = 'rearrangements'
         test = '>='
         checker.scan_threshold( checker.smoothed_ratios, 
                                 threshold = checker.threshold, 
-                                offset = window / 2 / step, 
+                                offset = offset,
                                 test = test, 
                                 name = filter_name,
-                                resolution = resolution, 
+                                resolution = smoothed_resolution, 
                                 buffer_distance = int(round(checker.mean_insert_size)))
         
         t = len(checker.suspect_regions[filter_name])
         s = sum([(e - s) for s,e in checker.suspect_regions[filter_name]])
-        print('For {} at {} {}*mean nonprop/prop ({:.3f}), excludes {} regions spanning {:,} basepairs'.format(
+        print('For {} at {} {}, excludes {} regions spanning {:,} basepairs'.format(
                                                                         sample, 
                                                                         test, 
-                                                                        mean_param, 
                                                                         checker.threshold, 
                                                                         t, 
                                                                         s))
@@ -190,7 +220,7 @@ def checkStructure(BAMs, mean_param = 5, min_mapping_quality = 5, resolution = 1
         filter_to_extend = 'rearrangements'
         # this was set to less than 0.5 because certain regions with read mapping gaps were 
         # not collected that were between two close disrupted regions
-        checker.extend_regions(filter_name, filter_to_extend, resolution = resolution, threshold = 0.15)
+        checker.extend_regions(filter_name, filter_to_extend, resolution = smoothed_resolution, threshold = 0.15)
         t = len(checker.suspect_regions[filter_name])
         s = sum([(e - s) for s,e in checker.suspect_regions[filter_name]])
         print('For {} between high non-proper proportions, excludes {} regions spanning {:,} basepairs'.format(sample, t, s))
@@ -257,7 +287,10 @@ class Checker:
         #print('%s / %s = %.03f' % (len(both_mapped_proper), (len(both_mapped_proper)+len(both_mapped_notproper)), proportion))
         return(proportion)
 
-    def getCoverageDepths(self, resolution = 10, min_mapping_quality = 30, load = True, save = True):
+    def getCoverageDepths(self, resolution = 10, 
+                                min_mapping_quality = 30, 
+                                load = True, 
+                                save = True):
         '''
         collect per position along genome, aligned read coverage depth that pass a 
         quality standard and those that BWA considers additionally to be in a 
@@ -345,7 +378,10 @@ class Checker:
                 print("Attempt to save scanned coverage depths at {} failed . . .".format(fileout))
 
 
-    def getMeanInsertSize(self, upper_limit = 10000, min_mapping_quality = 30, load = True, save = True):
+    def getMeanInsertSize(self, upper_limit = 10000, 
+                                min_mapping_quality = 30, 
+                                load = True, 
+                                save = True):
         '''
         omits pairs at either end of sequence break point of 
         circular chromosome (by ampplying an upper limit) that 
@@ -407,9 +443,9 @@ class Checker:
         self.mean_insert_size = mean_insert_size
 
 
-    def getProperRatios(self, resolution = 10, include_zeros = False):
+    def getProperRatios(self, include_zeros = False):
         '''
-        Infers ratios non-proper pair to proper pair per position. Optionally 
+        Calculates ratios non-proper pair to proper pair per position. Optionally 
         including regions with zero depths as zero ratio, defaults to excluding.
         Relatively more non-proper pair gives a higher ratio.
         '''
@@ -449,7 +485,8 @@ class Checker:
 
 
 
-    def getSmoothedRatios(self, window = 500, step = 1, resolution = 10):
+    def getSmoothedRatios(self, window = 500, 
+                                resolution = 10):
         '''
         calculate:
             mean, 
@@ -464,7 +501,7 @@ class Checker:
         # omit -1 no depths from ratios below (but include zeros)
         use_ratios = self.ratios
         means = _array('f')
-        for i in range(0, len(use_ratios) * resolution - window, resolution)[::step]:  #break
+        for i in range(0, len(use_ratios) * resolution - window, resolution):  #break
             # collect nt range allowing for resolution of ratios
             these = use_ratios[(i / resolution) : ((i + window) / resolution)]
             # exclude zero ratios from calculation of mean: 
@@ -571,7 +608,10 @@ class Checker:
 
 
 
-    def extend_regions(self, filter_name, filter_to_extend, resolution = 10, threshold = 0.5):
+    def extend_regions(self,    filter_name, 
+                                filter_to_extend, 
+                                resolution = 10, 
+                                threshold = 0.5):
         '''
         Given suspect regions for filtering, extend if adjacent windows have 
         majority positions with ratio -1 for no reads at default settings with
@@ -1299,6 +1339,7 @@ class Plotter:
                           # 'Left' or 'Right'
                           plot_axis = False,
                           max_y_scale = False,
+                          num_ticks = 5,
                           add_sample_label = True,
                           y_axis_label = 'Aligned Reads',
                           font_size = '20pt', 
@@ -1448,8 +1489,8 @@ class Plotter:
             
             self.dwg.add(plot_path)
             
-            # ticks <== vary by divisibility of max_y_scale
-            num_ticks = 5.0
+            # ticks <== vary by divisibility of max_y_scale (implement auto feature?)
+            # num_ticks = 5.0
             
             if max_y_scale > num_ticks**2:
                 make_integers = True
@@ -1463,11 +1504,11 @@ class Plotter:
             for n in range(int(num_ticks) + 1):
                 commands = ['M %s %s' % (
                                             use_x_offset, 
-                                            self.lower_y - (self.lower_y - self.upper_y) * (n/5.0)
+                                            self.lower_y - (self.lower_y - self.upper_y) * (n/float(num_ticks))
                                         ), 
                                         'L %s %s' % (
                                             use_x_offset + tick_offset, 
-                                            self.lower_y - (self.lower_y - self.upper_y) * (n/5.0)
+                                            self.lower_y - (self.lower_y - self.upper_y) * (n/float(num_ticks))
                                         )]
                 
                 plot_path = self.dwg.path(
@@ -1488,7 +1529,7 @@ class Plotter:
                 ticklabel = self.dwg.text('%s' % value, 
                                                   insert = (
                                                     use_x_offset + tick_offset * 1.5, 
-                                                    self.lower_y - (self.lower_y - self.upper_y) * (n/5.0)
+                                                    self.lower_y - (self.lower_y - self.upper_y) * (n/float(num_ticks))
                                                   ),
                                                   fill='black', 
                                                   font_family=use_fontfamily, 
@@ -1607,6 +1648,7 @@ class Plotter:
         lane_lower_y = self.lower_y - lane_num * self.y_per_lane - plot_spacing
         lane_plot_height = lane_lower_y - lane_upper_y
 
+
         # a "y =" line
         # blue for now
         colour = ('80', '10', '10', '%')
@@ -1631,7 +1673,7 @@ class Plotter:
                         plot_chrom_end, 
                         panel = ((1,1),(1,1)), 
                         label = False, 
-                        ratio_max = 0.6):
+                        axis_ratio_max = 1.2):
         
         # reuse max_y_scale for multiple plot on same axis
         self.calc_plot_region(              plot_chrom_start, 
@@ -1672,28 +1714,31 @@ class Plotter:
                               label, 
                               panel = panel,
                               colour = ('0', '100', '0', '%'), 
+                              num_ticks = 4,
                               fill = False,
                               plot_axis = 'Right',
                               y_axis_label = ('Non-Proper Pair :','Proper Pair Reads'),
-                              # set max to 1
-                              max_y_scale = ratio_max,
+                              max_y_scale = axis_ratio_max,
                               add_sample_label = False)
+
+        offset = int(round( self.checker_info['depth_resolution'] * \
+                self.checker_info['smoothed_resolution'] / 2.0))
 
         self.plot_values(     self.checker_info['smoothed_ratios'], 
                               plot_chrom_start, 
                               plot_chrom_end, 
                               label, 
-                              offset = int(round(self.checker_info['mean_insert_size'] / 2)),
+                              offset = offset,
                               panel = panel,
                               colour = ('0', '80', '70', '%'), 
+                              num_ticks = 4,
                               fill = False,
                               plot_axis = False,
-                              # set max to 1
-                              max_y_scale = ratio_max,
+                              max_y_scale = axis_ratio_max,
                               add_sample_label = False)
 
         # plot threshold
-        self.plot_threshold(self.checker_info['threshold'], ratio_max)
+        self.plot_threshold(self.checker_info['threshold'], axis_ratio_max)
 
         # high proportion of non-proper pairs
         self.plot_suspect_regions(       plot_chrom_start, 
