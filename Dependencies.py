@@ -385,9 +385,9 @@ def check_python_package(package, maj_version = False, system = False, package_p
             _sys.stderr.write(result+'\n')
             return(False)
     else:
-        print('Successfully imported {} version {} from {}'.format(package, v, getattr(globals()['_'+package], '__file__')))
-        print("baga's Dependencies module doesn't specify a version for this package so we'll assume it's OK")
-        result = 'Successfully imported {} version {} from {}'.format(package, 
+        #print('Successfully imported {} version {} from {}'.format(package, v, getattr(globals()['_'+package], '__file__')))
+        #print("baga's Dependencies module doesn't specify a version for this package so we'll assume it's OK")
+        result = 'Successfully imported {} version {} from {}\n'.format(package, 
                                             v, getattr(globals()['_'+package], '__file__'))
         result += "baga's Dependencies module doesn't specify a version for this package "\
         "so we'll assume it's OK"
