@@ -108,19 +108,23 @@ def sortVariantsKeepFilter(header, colnames, variantrows):
     pattern = _re.compile('##contig=<ID=([A-Za-z0-9_\.]+),length=([0-9]+)>')
     # for multiple chromosomes iterate here
 
-    genome_ids = []
-    genome_lengths = []
-    for contig in header['contig']:
-        match = _re.match(pattern, contig)
-        if match is None:
-            raise Exception("Failed to identify which chromosome the variants were called on (couldn't find '##contig=' and/or recognise name)")
+    if 'contig' in header:
+        genome_ids = []
+        genome_lengths = []
+        for contig in header['contig']:
+            match = _re.match(pattern, contig)
+            if match is None:
+                raise Exception("Failed to identify which chromosome the variants were called on (couldn't find '##contig=' and/or recognise name)")
+            
+            genome_id, genome_length = match.groups()
+            genome_lengths += [int(genome_length)]
+            genome_ids += [genome_id]
         
-        genome_id, genome_length = match.groups()
-        genome_lengths += [int(genome_length)]
-        genome_ids += [genome_id]
+        for genome_length, genome_id in zip(genome_lengths, genome_ids):
+            print('Variants were called against {:,} bp genome: {}\n'.format(genome_length, genome_id))
+    else:
+        print('WARNING: no contig information found in header (reference free?)')
 
-    for genome_length, genome_id in zip(genome_lengths, genome_ids):
-        print('Variants were called against {:,} bp genome: {}\n'.format(genome_length, genome_id))
 
     parameter_names = colnames[:colnames.index('FORMAT')+1]
     parameter_names[0] = parameter_names[0].lstrip('#')
@@ -1314,9 +1318,16 @@ class Summariser:
         # ['ALT', 'FILTER', 'FORMAT', 'GATKCommandLine', 'INFO', 'contig']
         genome_IDs = set()
         for VCF,headerdict in all_headerdicts.items():
-            genome_IDs.update([contig['ID'] for contig in headerdict['contig']])
+            try:
+                genome_IDs.update([contig['ID'] for contig in headerdict['contig']])
+            except KeyError:
+                print('WARNING: no contig information found in header of {}. Reference free?'.format(VCF))
 
-        print('Chromosomes found: {}'.format(', '.join(genome_IDs)))
+        if len(genome_IDs):
+            print('Chromosomes found: {}'.format(', '.join(genome_IDs)))
+        else:
+            print('No chromsome information found in: {}'.format(', '.join(sorted(all_headerdicts))))
+
 
         # assert len(genome_IDs) == 1, "only one reference sequence at a time is "\
                 # "implemented for simple summary. {} found: {}".format(len(genome_IDs), 
@@ -1338,9 +1349,13 @@ class Summariser:
             elif len(found_not_requested) > 1:
                 print('WARNING: {} were found in VCFs, but not provided for use with annotations'\
                         ''.format(', '.join(sorted(found_not_requested))))
+            if len(genome_IDs) == 0:
+                annotate_with_these = set(self.genomes)
+                print('WARNING: Assuming VCFs were called reference free because no chromosome '\
+                        'information found in VCFs. Cannot check provided chromosomes match '\
+                        'variants VCF: please double check annotations!')
             if len(annotate_with_these):
                 print('Using {} for annotations'.format(', '.join(sorted(annotate_with_these))))
-
 
 
         # collect by chromsome,position
