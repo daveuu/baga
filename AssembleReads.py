@@ -106,7 +106,9 @@ class DeNovo:
             output_folder = ['assemblies','SPAdes'],
             mem_num_gigs = 8, 
             max_cpus = -1,
-            single_assembly = False):
+            single_assembly = False,
+            careful = True,
+            only_assembler = False):
         '''
         de novo assembly of short reads using SPAdes
 
@@ -259,7 +261,10 @@ class DeNovo:
             cmd += ['-o', this_output_path]
             cmd += ['--threads', str(max_processes)]
             cmd += ['--memory', str(mem_num_gigs)]
-            cmd += ['--careful']
+            if only_assembler:
+                cmd += ['--only-assembler']
+            if careful:
+                cmd += ['--careful']
             thetime = _time.asctime( _time.localtime(_time.time()) )
             print('about to launch SPAdes . . . at {}'.format(thetime))
             print(' '.join(cmd))
@@ -315,7 +320,10 @@ class DeNovo:
                 cmd += ['-o', this_output_path]
                 cmd += ['--threads', str(max_processes)]
                 cmd += ['--memory', str(mem_num_gigs)]
-                cmd += ['--careful']
+                if only_assembler:
+                    cmd += ['--only-assembler']
+                if careful:
+                    cmd += ['--careful']
                 thetime = _time.asctime( _time.localtime(_time.time()) )
                 print('about to launch SPAdes . . . at {}'.format(thetime))
                 print(' '.join(cmd))
