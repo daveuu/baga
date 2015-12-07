@@ -1617,16 +1617,27 @@ class Checker:
         import baga
 
         denovo_info = {}
+        all_contigs = {}
         for sample in use_samples:
             denovo_info[sample] = {}
+            all_contigs[sample] = {}
             chromosomes = all_variants[sample]
             for chromosome,variants in chromosomes.items():
-                print('Extracting poorly and unaligned reads for sample {}'.format(sample))
                 collector = Structure.Collector(BAMs_by_ids[(sample, chromosome)])
                 single_assembly = False
-                collector.getUnmapped()
-                r1_out_path_um, r2_out_path_um, rS_out_path_um = \
-                        collector.writeUnmapped(path_to_variant_checks_str)
+                R1 = 'variant_checks/{}/{}__{}_unmapped_R1.fastq'.format(chromosome,sample,chromosome)
+                R2 = 'variant_checks/{}/{}__{}_unmapped_R2.fastq'.format(chromosome,sample,chromosome)
+                RS = 'variant_checks/{}/{}__{}_unmapped_S.fastq'.format(chromosome,sample,chromosome)
+                if _os.path.exists(R1) and _os.path.exists(R2) and \
+                        _os.path.getsize(R1) > 0 and _os.path.getsize(R2) > 0 \
+                        and not force:
+                    print('Found unmapped reads at {} and {}\nUse --force/-F to overwrite'.format(R1,R2))
+                    r1_out_path_um, r2_out_path_um, rS_out_path_um = R1, R2, RS
+                else:
+                    print('Extracting poorly and unaligned reads for sample {}'.format(sample))
+                    collector.getUnmapped()
+                    r1_out_path_um, r2_out_path_um, rS_out_path_um = \
+                            collector.writeUnmapped(path_to_variant_checks_str)
                 import AssembleReads
                 if max_memory:
                     use_mem_gigs = max_memory
@@ -1659,7 +1670,8 @@ class Checker:
                     
                     reads = AssembleReads.DeNovo(paths_to_reads = reads_path_unmapped)
                     reads.SPAdes(output_folder = path_to_variant_checks, 
-                            mem_num_gigs = use_mem_gigs)
+                            mem_num_gigs = use_mem_gigs, only_assembler = True, 
+                            careful = False)
                 # assemble read from each region with poorly/unmapped
                 reads_paths = {}
                 # make a second dict of reads for assembly, all values for unmapped reads
@@ -1667,10 +1679,65 @@ class Checker:
                 # first, collect reads, make fastqs, recording in a dict
                 reads_path_unmapped = {}
                 assemblies_by_variant = {}
-                for pos1,info in sorted(variants.items()):
-                    print('Extracting reads aligned near variant at {} in sample {}'\
-                            ''.format(pos1, sample))
-                    collector.makeCollection(pos1 - 1, pos1, num_padding)
+                
+                # join regions with multiple variants to avoid redundacy in de novo assemblies
+                join_dist = 10000
+                position_regions = []
+                allpositions = sorted(variants)
+                this_region = [allpositions[0]]
+                for pn,pos1 in enumerate(allpositions[:-1]):
+                    if pos1 + join_dist > allpositions[pn+1]:
+                        this_region += [allpositions[pn+1]]
+                    else:
+                        position_regions += [this_region]
+                        this_region = [allpositions[pn+1]]
+                
+                position_regions += [this_region]
+                regions_for_de_novo = []
+                for these_positions in position_regions:
+                    regions_for_de_novo += [(these_positions[0]-500,these_positions[-1]+500)]
+                    if regions_for_de_novo[-1][0] < 0:
+                        regions_for_de_novo[-1][0] = 0
+                    if regions_for_de_novo[-1][1] > len(self.genome.sequence):
+                        ## this bit not compatible with multiple chromosomes
+                        regions_for_de_novo[-1][1] = len(self.genome.sequence)
+                
+                # ensure no very long contigs else PW alignment will not be possible
+                # longer regions more likely for samples more divergent from reference
+                # use ajoining regions with small overlaps instead
+                regions_for_de_novo2 = []
+                # this seems to be maximum length before seq-align seg-faults
+                # about 16GB memory required for these long alignments
+                max_len = 20000
+                for s,e in regions_for_de_novo:
+                    if e - s > max_len:
+                        num_pieces = ((e-s)//float(max_len)+1)
+                        newlen = int((e-s) / num_pieces)
+                        for i in range(int(num_pieces)):
+                            # make internal join overlap incase variant close to a join
+                            pre_pad = 0
+                            end_pad = 0
+                            if i > 0:
+                                pre_pad = 100
+                            if i < num_pieces:
+                                end_pad = 100
+                            new_s,new_e = s+(newlen*i)-pre_pad,s+(newlen*(i+1)+end_pad)
+                            regions_for_de_novo2 += [[new_s,new_e]]
+                    else:
+                        regions_for_de_novo2 += [[s,e]]
+                
+                # print('allpositions',len(allpositions))
+                # print('regions_for_de_novo',len(regions_for_de_novo))
+                # print('regions_for_de_novo2',len(regions_for_de_novo2))
+                num_padding = 0
+                #for pos1,info in sorted(variants.items()):
+                    # print('Extracting reads aligned near variant at {} in sample {}'\
+                            # ''.format(pos1, sample))
+                    # collector.makeCollection(pos1 - 1, pos1, num_padding)
+                for s,e in regions_for_de_novo2:
+                    print('Extracting reads aligned over variant from {} to {} in sample {}'\
+                            ''.format(s, e, sample))
+                    collector.makeCollection(s, e, 0)
                     r1_out_path, r2_out_path, rS_out_path = collector.writeCollection(
                             path_to_variant_checks_str)
                     if not r1_out_path:
@@ -1685,7 +1752,9 @@ class Checker:
                     path_to_contigs = _os.path.sep.join([path_to_variant_checks_str,
                                                         output_folder, 
                                                         'contigs.fasta'])
-                    assemblies_by_variant[pos1 - 1, pos1] = path_to_contigs
+                    # collect all contigs paths to be assembled and aligning
+                    # for summarising below
+                    assemblies_by_variant[s, e] = path_to_contigs
                     if _os.path.exists(path_to_contigs) and \
                             _os.path.getsize(path_to_contigs) > 0 and \
                             not force:
@@ -1705,8 +1774,10 @@ class Checker:
                 reads = AssembleReads.DeNovo(paths_to_reads = reads_paths, 
                         paths_to_reads2 = reads_path_unmapped)
                 reads.SPAdes(output_folder = path_to_variant_checks, 
-                        mem_num_gigs = use_mem_gigs, single_assembly = single_assembly)
+                        mem_num_gigs = use_mem_gigs, single_assembly = single_assembly, 
+                        only_assembler = True, careful = False)
                 
+                all_contigs[sample][chromosome] = assemblies_by_variant
                 # a dict of paths to contigs per region
                 aligner = Structure.Aligner(self.genome)
                 unmappedfasta = _os.path.sep.join([path_to_variant_checks_str, 
@@ -1734,93 +1805,112 @@ class Checker:
                         'aligned reads at:\n{}\n{}\nthis is unexpected but '\
                         'conceivable (if ALL reads really did map to reference!).'.format(
                                 r1_out_path_um,r2_out_path_um))
-                    print('proceeding with alignment of assembled putatively rearranged regions to reference nonetheless')
+                    print('proceeding with alignment of assembled putatively '\
+                            'rearranged regions to reference nonetheless')
                     aligner.alignRegions(assemblies_by_variant, num_padding,
-                            single_assembly = single_assembly, min_region_length = 0)
+                            single_assembly = single_assembly, min_region_length = 0, 
+                            force = False)
                     denovo_info[sample][chromosome] = aligner.reportAlignments()
 
 
-
+        num_padding = 0
 
         # collect all the de novo assembly called variants and compare
-        table_outname = 'Table_of_variants_with_de_novo_comparison.csv'
-        colnames = ['Sample','Chromosome','Position (bp base-1)','Reference','Variant','Corroborated','Filters','Alignment']
+        table_outname = 'variant_checks/{}/Table_of_variants_with_de_novo_comparison__{}_and_{}_others.csv'\
+                ''.format(chromosome,sorted(use_samples)[0],len(use_samples)-1)
+        colnames = ['Sample','Chromosome','Position (bp base-1)','Reference','Variant','Status','Filters','Alignment']
         with open(table_outname,'w') as fout:
             fout.write(','.join(['"{}"'.format(a) for a in colnames])+'\n')
             zeropadding = len(str(len(self.genome.sequence)))
-            got = {}
+            agree = {}
             missing = {}
+            disagree = {}
             for sample in use_samples:
                 chromosomes = all_variants[sample]
-                got[sample] = {}
+                agree[sample] = {}
                 missing[sample] = {}
+                disagree[sample] = {}
                 for chromosome,variants in chromosomes.items():
-                    these_got = {}
+                    these_agree = {}
                     these_missing = {}
-                    for pos1,((ref,query),filters) in sorted(variants.items()):
-                        s, e = pos1 - 1, pos1
-                        ref_region_id = 'ref_{0:0{2}d}_{1:0{2}d}'.format(
-                                s - num_padding,
-                                e + num_padding,
-                                zeropadding)
-                        alignment_name = 'variant_checks/{1}/{0}__{1}_{2:0{4}d}_{3:0{4}d}_multi_alnd.fna'.format(
+                    these_disagree = {}
+                    # first collect all variants among do novo alignments
+                    all_de_novo_vars = {}
+                    vars2alignment = {}
+                    for ref_region_id,alnd_contigs in denovo_info[sample][chromosome]['variants_by_contig'].items():
+                        alignment_name = 'variant_checks/{1}/{0}__{1}_{2}_multi_alnd.fna'.format(
                                 sample,
                                 chromosome,
-                                s - num_padding,
-                                e + num_padding,
-                                zeropadding)
-                        #print(ref_region_id)
-                        if ref_region_id in denovo_info[sample][chromosome]['variants_by_contig']:
-                            for contig_id in denovo_info[sample][chromosome]['variants_by_contig'][ref_region_id]:
-                                # print(sorted(denovo_info[sample][chromosome]['variants_by_contig'][ref_region_id][contig_id]))
-                                # print(sorted(variants))
-                                # print(sorted(set(denovo_info[sample][chromosome]['variants_by_contig'][ref_region_id][contig_id]) & set(variants)))
+                                ref_region_id[4:])
+                        for contig_id,pos0s in alnd_contigs.items():
+                            for pos0,(ref_char,alnd_char) in pos0s.items():
+                                vars2alignment[pos0+1] = alignment_name
                                 try:
-                                    ref_char,alnd_char = denovo_info[sample][chromosome]['variants_by_contig'][ref_region_id][contig_id][pos1-1]
-                                    #print(ref,query,ref_char,alnd_char)
-                                    if query == alnd_char:
-                                        these_got[pos1] = ((ref,query),filters)
-                                    else:
-                                        these_missing[pos1] = ((ref,query),filters)
-                                    corroborated = True
+                                    all_de_novo_vars[pos0+1].add((ref_char,alnd_char))
                                 except KeyError:
-                                    #print('MISSING:',pos1,((ref,query),filters))
-                                    these_missing[pos1] = ((ref,query),filters)
-                                    corroborated = False
-                                
-                                #fout.write(','.join(['"{}"'.format(a) for a in colnames]))
-                                fout.write('"{}","{}",{},"{}","{}","{}","{}","{}"\n'.format(
-                                        sample,
-                                        chromosome,
-                                        pos1,
-                                        ref,
-                                        query,
-                                        corroborated,
-                                        '+'.join(filters),
-                                        alignment_name
-                                        ))
+                                    all_de_novo_vars[pos0+1] = set([(ref_char,alnd_char)])
                     
-                    got[sample][chromosome] = these_got
+                    # then compare to variants and write result to table
+                    for pos1,((ref,query),filters) in sorted(variants.items()):
+                        if pos1 in all_de_novo_vars:
+                            if len(all_de_novo_vars[pos1]) == 1:
+                                ref_char,alnd_char = all_de_novo_vars[pos1].pop()
+                                #assert ref_char == ref, 'reference character mismatch: {},{} {},{}'.format(ref,query,ref_char,alnd_char)
+                                if ref_char != ref:
+                                    print('WARNING: reference character mismatch: {},{} {},{}'.format(ref,query,ref_char,alnd_char))
+                                    print(pos1,vars2alignment[pos1])
+                                if alnd_char == query:
+                                    status = "corroborated"
+                                    these_agree[pos1] = (ref,query),filters
+                                else:
+                                    status = "negative"
+                                    these_disagree[pos1] = (ref,query),filters
+                            else:
+                                status = "ambiguous"
+                                these_disagree[pos1] = (ref,query),filters
+                        else:
+                            status = "absent"
+                            these_missing[pos1] = (ref,query),filters
+                        
+                        try:
+                            alignment = vars2alignment[pos1]
+                        except KeyError:
+                            alignment = 'none'
+                        
+                        fout.write('"{}","{}",{},"{}","{}","{}","{}","{}"\n'.format(
+                                sample,
+                                chromosome,
+                                pos1,
+                                ref,
+                                query,
+                                status,
+                                '+'.join(filters),
+                                alignment
+                                ))
+                    
+                    agree[sample][chromosome] = these_agree
+                    disagree[sample][chromosome] = these_disagree
                     missing[sample][chromosome] = these_missing
 
         print('Wrote variants and whether thay were found in their respective de '\
                 'novo assembled contigs in:\n{}'.format(table_outname))
 
-        #print('summary')
-        for sample,chromosomes in got.items():
-            for chromosome,these_got in chromosomes.items():
+        # #print('summary')
+        for sample,chromosomes in agree.items():
+            for chromosome,these_agree in chromosomes.items():
                 print('{} aligned against {}: {} SNPs called also in de novo '\
                         'assemblies; {} not.'.format(sample, chromosome, 
-                        len(these_got), len(missing[sample][chromosome])))
+                        len(these_agree), len(missing[sample][chromosome])))
 
-        self.got = got
+        self.agree = agree
+        self.disagree = disagree
         self.missing = missing
 
         # generate name from genome + used samples in sorted order
         # should be unique to this combination without needing a specific --read_group X --genome Y combination
         # currently arbitrary VCFs and BAMs can be provided
         # does not allow use of combined chromosomes
-        # could be standadised baga-wide?
+        # could be standardised baga-wide?
         hasher = _md5()
         hasher.update(str([self.genome.id]+sorted(use_samples)))
         unique_name = hasher.hexdigest()

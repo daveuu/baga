@@ -37,6 +37,7 @@ from baga import _json
 from baga import _subprocess
 from baga import _sys
 
+from glob import glob as _glob
 from array import array as _array
 import operator as _operator
 import time as _time
@@ -2069,7 +2070,9 @@ class Aligner:
                 A, B = result.split('\n')[:2]
                 return(A, B)
             except ValueError as e:
-                _sys.exit('There seems to be a problem with the seqalign output:\n{} ({})'.format(err,e))
+                print(seqrecords)
+                _SeqIO.write(seqrecords, 'temp.fasta', 'fasta')
+                _sys.exit('There seems to be a problem with the seqalign output (return code {}):\n{} ({})'.format(proc.returncode,err,e))
 
         else:
             print('WARNING: smith-waterman wrapper is unimplemented: output much more complex and is simply printed to stdout for now')
@@ -2127,7 +2130,8 @@ class Aligner:
                            min_region_length = 200,
                            path_to_omit_sequences = False,
                            min_pID_aligned = 0.9,
-                           single_assembly = False):
+                           single_assembly = False,
+                           force = False):
         
         '''
         Align contigs to reference chromosome regions
@@ -2158,66 +2162,78 @@ class Aligner:
                 ref_chrom_region = _Seq(self.genome.sequence[s-num_padding_positions:e+num_padding_positions].tostring())
                 ref_region_id = 'ref_{:07d}_{:07d}'.format(s-num_padding_positions,e+num_padding_positions)
                 aligned[ref_region_id] = {}
+                # get appropriate filename
                 if single_assembly:
                     # contigfile == .../<sample>__<genome>_<start>-<end>+<padding>/contigs.fasta
                     use_contigfile = '_'.join(contigfile.split('_')[:-1] + ['multi_region']) + _os.path.sep + 'contigs.fasta'
                     # use_contigfile == .../<sample>__<genome>_multi_region/contigs.fasta
                 else:
                     use_contigfile = contigfile
-                try:
-                    num_contigs = 0
-                    for n,rec in enumerate(_SeqIO.parse(use_contigfile,'fasta')):
-                        num_contigs += 1
-                except IOError:
-                    print('WARNING: cannot access {}'.format(use_contigfile))
-                    print('This assembly may have failed . . .')
-                    continue
                 
-                print('Found {} contigs in {} for analysis.'.format(num_contigs, use_contigfile))
-                for n,rec in enumerate(_SeqIO.parse(use_contigfile,'fasta')):
-                    if str(rec.seq) not in unmapped_read_contigs:
-                        print('Aligning novel contig: {} to chromosome region {}-{} bp'.format(rec.id, s, e))
-                        use_seq = rec
-                        #ref_alnd,contig_alnd = self.seqalign(ref_chrom_region, rec.seq, 'smith_waterman')
-                        ref_alnd,contig_alnd = self.seqalign(ref_chrom_region, rec.seq, 'needleman_wunsch')
-                        #print(ref_alnd,contig_alnd)
-                        pIDs = dict(self.get_percent_ID(ref_alnd, contig_alnd, window = pID_window, step = pID_step))
-                        #ref_alnd_rc,contig_alnd_rc = self.seqalign(ref_chrom_region, rec.seq.reverse_complement(), 'smith_waterman')
-                        ref_alnd_rc,contig_alnd_rc = self.seqalign(ref_chrom_region, rec.seq.reverse_complement(), 'needleman_wunsch')
-                        #print(ref_alnd,contig_alnd)
-                        pIDs_rc = dict(self.get_percent_ID(ref_alnd_rc, contig_alnd_rc, window = pID_window, step = pID_step))
-                        retained = False
-                        if sum(pIDs.values()) > sum(pIDs_rc.values()):
-                            if max(pIDs.values()) >= min_pID_aligned:
-                                # only print if contains a pID_window bp window with > 90% identity
-                                fout = _os.path.sep.join(use_contigfile.split(_os.path.sep)[:-1]) + '_{}_vs_contig{:02d}.fna'.format(ref_region_id,n+1)
-                                seqs = []
-                                seqs += [_SeqRecord(seq = _Seq(ref_alnd), 
-                                                    id = ref_region_id)]
-                                seqs += [_SeqRecord(seq = _Seq(contig_alnd), 
-                                                    id = rec.id)]
-                                _SeqIO.write(seqs, fout, 'fasta')
-                                print('Writing: {}'.format(fout))
-                                retained = True
-                                aligned[ref_region_id]['contig{:02d}'.format(n+1)] = (ref_alnd, contig_alnd)
+                # check if already did alignment
+                pattern = _os.path.sep.join(use_contigfile.split(_os.path.sep)[:-1]) + '_{}_vs_contig*.fna'.format(ref_region_id)
+                previous_alignments = _glob(pattern)
+                if len(previous_alignments) > 0 and not force:
+                    print('Found previous alignments for region {}:\n{}'.format(ref_region_id,'\n'.join(previous_alignments)))
+                    print('Use --force/-F to realign and overwrite')
+                    for aln in previous_alignments:
+                        print('contig'+aln[:-4].split('contig')[-1])
+                        aligned[ref_region_id]['contig'+aln[:-4].split('contig')[-1]] = tuple([a.seq for a in _SeqIO.parse(aln, 'fasta')])
+                else:
+                    try:
+                        num_contigs = 0
+                        for n,rec in enumerate(_SeqIO.parse(use_contigfile,'fasta')):
+                            num_contigs += 1
+                    except IOError:
+                        print('WARNING: cannot access {}'.format(use_contigfile))
+                        print('This assembly may have failed . . .')
+                        continue
+                    
+                    print('Found {} contigs in {} for analysis.'.format(num_contigs, use_contigfile))
+                    for n,rec in enumerate(_SeqIO.parse(use_contigfile,'fasta')):
+                        if str(rec.seq) not in unmapped_read_contigs:
+                            print('Aligning novel contig: {} to chromosome region {}-{} bp'.format(rec.id, s, e))
+                            use_seq = rec
+                            #ref_alnd,contig_alnd = self.seqalign(ref_chrom_region, rec.seq, 'smith_waterman')
+                            ref_alnd,contig_alnd = self.seqalign(ref_chrom_region, rec.seq, 'needleman_wunsch')
+                            #print(ref_alnd,contig_alnd)
+                            pIDs = dict(self.get_percent_ID(ref_alnd, contig_alnd, window = pID_window, step = pID_step))
+                            #ref_alnd_rc,contig_alnd_rc = self.seqalign(ref_chrom_region, rec.seq.reverse_complement(), 'smith_waterman')
+                            ref_alnd_rc,contig_alnd_rc = self.seqalign(ref_chrom_region, rec.seq.reverse_complement(), 'needleman_wunsch')
+                            #print(ref_alnd,contig_alnd)
+                            pIDs_rc = dict(self.get_percent_ID(ref_alnd_rc, contig_alnd_rc, window = pID_window, step = pID_step))
+                            retained = False
+                            if sum(pIDs.values()) > sum(pIDs_rc.values()):
+                                if max(pIDs.values()) >= min_pID_aligned:
+                                    # only print if contains a pID_window bp window with > 90% identity
+                                    fout = _os.path.sep.join(use_contigfile.split(_os.path.sep)[:-1]) + '_{}_vs_contig{:02d}.fna'.format(ref_region_id,n+1)
+                                    seqs = []
+                                    seqs += [_SeqRecord(seq = _Seq(ref_alnd), 
+                                                        id = ref_region_id)]
+                                    seqs += [_SeqRecord(seq = _Seq(contig_alnd), 
+                                                        id = rec.id)]
+                                    _SeqIO.write(seqs, fout, 'fasta')
+                                    print('Writing: {}'.format(fout))
+                                    retained = True
+                                    aligned[ref_region_id]['contig{:02d}'.format(n+1)] = (ref_alnd, contig_alnd)
+                            else:
+                                if max(pIDs_rc.values()) >= min_pID_aligned:
+                                    # only print if contains a pID_window bp window with > 90% identity
+                                    fout = _os.path.sep.join(use_contigfile.split(_os.path.sep)[:-1]) + '_{}_vs_contig{:02d}_rc.fna'.format(ref_region_id,n+1)
+                                    seqs = []
+                                    seqs += [_SeqRecord(seq = _Seq(ref_alnd_rc), 
+                                                        id = ref_region_id)]
+                                    seqs += [_SeqRecord(seq = _Seq(contig_alnd_rc), 
+                                                        id = rec.id)]
+                                    _SeqIO.write(seqs, fout, 'fasta')
+                                    print('Writing: {}'.format(fout))
+                                    retained = True
+                                    # only thr contig is reverse complemented here
+                                    aligned[ref_region_id]['contig{:02d}_rc'.format(n+1)] = (ref_alnd_rc, contig_alnd_rc)
+                            if not retained:
+                                print('No alignment with a percent identity >= {:.0%} over a window of {} bp'.format(min_pID_aligned, pID_window))
                         else:
-                            if max(pIDs_rc.values()) >= min_pID_aligned:
-                                # only print if contains a pID_window bp window with > 90% identity
-                                fout = _os.path.sep.join(use_contigfile.split(_os.path.sep)[:-1]) + '_{}_vs_contig{:02d}_rc.fna'.format(ref_region_id,n+1)
-                                seqs = []
-                                seqs += [_SeqRecord(seq = _Seq(ref_alnd_rc), 
-                                                    id = ref_region_id)]
-                                seqs += [_SeqRecord(seq = _Seq(contig_alnd_rc), 
-                                                    id = rec.id)]
-                                _SeqIO.write(seqs, fout, 'fasta')
-                                print('Writing: {}'.format(fout))
-                                retained = True
-                                # only thr contig is reverse complemented here
-                                aligned[ref_region_id]['contig{:02d}_rc'.format(n+1)] = (ref_alnd_rc, contig_alnd_rc)
-                        if not retained:
-                            print('No alignment with a percent identity >= {:.0%} over a window of {} bp'.format(min_pID_aligned, pID_window))
-                    else:
-                        print('Omitting contig from unmapped/poorly mapped reads: {}'.format(rec.id))
+                            print('Omitting contig from unmapped/poorly mapped reads: {}'.format(rec.id))
             
                 print(ref_region_id,len(aligned[ref_region_id]))
                 if len(aligned[ref_region_id]) == 0:
@@ -2402,6 +2418,7 @@ class Aligner:
         info = {'variants_by_contig':variants_by_contig, 
                 'alnd_range_by_contig':alnd_range_by_contig, 
                 'aligned_regions':aligned_regions}
+
 
         return(info)
 
