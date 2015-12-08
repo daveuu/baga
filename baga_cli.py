@@ -2850,7 +2850,7 @@ if args.subparser == 'ComparativeAnalysis':
     if args.infer_recombination:
         assert args.path_to_MSA is not None, '--path_to_MSA is required for --infer_recombination (should be that used to estimate tree at --path_to_tree)'
         assert args.path_to_tree is not None, '--path_to_tree is required for --infer_recombination (should be that estimated from alignment at --path_to_MSA)'
-        phylo_analyser = ComparativeAnalysis.Phylogenetics(args.path_to_MSA, args.path_to_tree)
+        phylo_analyser = ComparativeAnalysis.Phylogenetics(args.path_to_MSA, path_to_tree = args.path_to_tree)
         # bit of a fudge dealing with rooted tree . . . to be improved
         phylo_analyser.collectPhyMLstats(path_to_stats_file = args.path_to_tree.replace('_rooted','').replace('_phyml_tree','') + '_phyml_stats')
         phylo_analyser.infer_recombination(bootstraps = args.num_bootstraps) #, output_suffix = '_rooted')
