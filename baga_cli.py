@@ -2486,9 +2486,21 @@ if args.subparser == 'SummariseVariants':
     from baga import CallVariants
     ## to apply variants, provide one reads group name
     if args.reads_name:
-        assert args.genome_name, "--genome_name is required with --reads_name"
+        assert args.genome_names, "--genome_names is required with --reads_name"
     
     VCFs_for_report = {}
+    
+    # collect genomes
+    # plural genomes is a bit of a hack at the moment and only works here with named VCFs . . .
+    if args.genome_names:
+        from baga import CollectData
+        use_genomes = []
+        for genome_name in args.genome_names:
+            use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', genome_name)
+            assert all([use_path_genome,use_name_genome]), 'Could not locate genome: {}'.format(genome_name)
+            use_genomes += [CollectData.Genome(local_path = use_path_genome, format = 'baga')]
+    else:
+        use_genomes = False
     
     # collect VCFs
     if args.reads_name:
@@ -2540,29 +2552,20 @@ if args.subparser == 'SummariseVariants':
 
     print('Loaded VCF locations:\n{}'.format('\n'.join(VCFs)))
     
-    # collect genomes
-    if args.genome_names:
-        from baga import CollectData
-        use_genomes = []
-        for genome_name in args.genome_names:
-            use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', genome_name)
-            assert all([use_path_genome,use_name_genome]), 'Could not locate genome: {}'.format(genome_name)
-            use_genomes += [CollectData.Genome(local_path = use_path_genome, format = 'baga')]
-    else:
-        use_genomes = False
-    
     message = 'Need --filters FILTER_NAME [FILTER_NAME] for report type "{}"'
     if args.cumulative:
         assert args.filters, message.format('cumulative')
         print('Reporting cumulative variant totals by class and group as '\
                 'filters applied : {}'.format('+'.join(args.filters)))
-        CallVariants.reportCumulative(args.filters, use_name_genome, VCFs_for_report)
+        for genome_name in use_genomes:
+            CallVariants.reportCumulative(args.filters, genome_name, VCFs_for_report)
     
     if args.lists:
         assert args.filters, message.format('lists')
         print('Reporting lists of variants by class and group with filters'\
                 ': {}'.format('+'.join(args.filters)))
-        CallVariants.reportLists(args.filters, use_name_genome, VCFs_for_report)
+        for genome_name in use_genomes:
+            CallVariants.reportLists(args.filters, genome_name, VCFs_for_report)
     
     if args.simple:
         summariser = CallVariants.Summariser(VCFs, genomes = use_genomes)
