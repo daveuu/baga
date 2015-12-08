@@ -381,11 +381,12 @@ def reportCumulative(filter_order, reference_id, VCFs, VCFs_indels = False):
                     print('{} {}'.format(len(by_position[reference_id]), varianttype))
                     this_row[group_name] += [len(by_position[reference_id])]
                     totals_by_type[group_name][varianttype].update([info[0] for info in by_position[reference_id]])
-                    
+        
         # add totals for variant class in columns corresponding to variant_type_order
         for group_name in variant_groups:
             this_row[group_name] += [len(totals_by_type[group_name][varianttype]) for varianttype in variant_type_order]
             rows[group_name] += [this_row[group_name]]
+
 
     for group_name in variant_groups:
         # just the totals by variant class

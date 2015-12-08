@@ -2557,15 +2557,15 @@ if args.subparser == 'SummariseVariants':
         assert args.filters, message.format('cumulative')
         print('Reporting cumulative variant totals by class and group as '\
                 'filters applied : {}'.format('+'.join(args.filters)))
-        for genome_name in use_genomes:
-            CallVariants.reportCumulative(args.filters, genome_name, VCFs_for_report)
+        for genome in use_genomes:
+            CallVariants.reportCumulative(args.filters, genome.id, VCFs_for_report)
     
     if args.lists:
         assert args.filters, message.format('lists')
         print('Reporting lists of variants by class and group with filters'\
                 ': {}'.format('+'.join(args.filters)))
-        for genome_name in use_genomes:
-            CallVariants.reportLists(args.filters, genome_name, VCFs_for_report)
+        for genome in use_genomes:
+            CallVariants.reportLists(args.filters, genome.id, VCFs_for_report)
     
     if args.simple:
         summariser = CallVariants.Summariser(VCFs, genomes = use_genomes)
