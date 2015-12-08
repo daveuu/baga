@@ -2771,6 +2771,7 @@ if args.subparser == 'ComparativeAnalysis':
                         sys.exit('You may need to rerun the analysis that should have generated that file')
             
             MSA_filename = '{}__{}_SNPs'.format(use_name_genome,'_'.join(args.reads_name))
+            paths_to_VCFs = path_to_SNPs_VCFs + path_to_InDels_VCFs
             
         else:
             # list of folders or files provided in args.vcfs_paths
@@ -2816,7 +2817,6 @@ if args.subparser == 'ComparativeAnalysis':
             MSA_filename = '{}__{}_SNPs'.format(use_name_genome,vcf_name)
         
         print('Loaded VCF locations:\n{}'.format('\n'.join(paths_to_VCFs)))
-        
         
         ### now collected required info: build MSA
         print('Loading genome %s' % use_name_genome)
