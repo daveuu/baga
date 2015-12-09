@@ -155,6 +155,42 @@ class MultipleSequenceAlignment:
         filters must be described in CallVarinats.known_filters
         '''
 
+        # to use other functions
+
+        # all_variants = {}
+        # all_headerdicts = {}
+
+        # for VCF_path in self.paths_to_VCFs:
+            # header, header_section_order, these_colnames, variantrows = parseVCF(VCF)
+            # if len(variantrows) == 0:
+                # print('WARNING: no variants found in {}'.format(VCF))
+                # continue
+            # headerdict = dictify_vcf_header(header)
+            # all_headerdicts[VCF] = headerdict
+            # #print(headerdict)
+            # variants, allfilters = sortVariantsKeepFilter(header, these_colnames, variantrows)
+            # #print(variants)
+            # for sample,chromosomes in variants.items():
+                # if sample not in all_variants:
+                    # all_variants[sample] = {}
+                # for chromosome,positions in chromosomes.items():
+                    # if chromosome not in all_variants[sample]:
+                        # all_variants[sample][chromosome] = {}
+                    # for pos1,info in positions.items():
+                        # if pos1 in all_variants[sample][chromosome]:
+                            # if all_variants[sample][chromosome][pos1] != info:
+                                # print('WARNING: VCFs in conflict for {} in chromosome '\
+                                        # '{} at position {}. You could try processing '\
+                                        # 'VCFs one at a time and compare tables produced.'\
+                                        # ''.format(sample,chromosome,pos1))
+                        # else:
+                            # all_variants[sample][chromosome][pos1] = info
+
+        # for sample,chromosomes in all_variants.items():
+            # for chromosome,positions in chromosomes.items():
+                # #print(sample,chromosome,sorted(positions))
+                # for pos1,((r,q),filters) in positions.items():
+
         # some filters like rearrangements are expanded into two sub filters: rearrangements1 and 2
         obeyfilters_INFO = set()
         obeyfilters_FILTER = set()
@@ -240,12 +276,15 @@ class MultipleSequenceAlignment:
                         assert '/' not in GTstate, 'Pooled data with allele frequencies not implemented for MSAs ({})'.format(
                                                                     VCF_path)
                         if GTstate == '.':
-                            try:
-                                if int(INFO['DP']) != 0:
-                                    print('WARNING: absent genotype but some reads present: {}'.format(INFO['DP']))
-                            except KeyError:
-                                # if not DP, no depth, no alignment: indel
-                                query = '-'
+                            ## always because in a multi sample VCF, DP cannot be useful <== but should have obtained own DP
+                            ## means not enough info
+                            query = '-'
+                            # try:
+                                # if int(INFO['DP']) != 0:
+                                    # print('WARNING: absent genotype but some reads present: {}'.format(INFO['DP']))
+                            # except KeyError:
+                                # # if not DP, no depth, no alignment: indel
+                                # query = '-'
                         else:
                             # comma separated variants, but 0 in GT is not variant
                             # so 1 should index first query, 0 causes exclusion of all variants
@@ -741,7 +780,6 @@ class MultipleSequenceAlignment:
                 #variants_not_gaps = set(variant_or_missing) - set(gaps)
                 start = 0
                 for pos1 in variant_or_missing:
-                    #print(s,pos1)
                     # add reference sequence up to this position
                     # seq = 'ccc-ddd-sss'
                     # seq[:4-1]
@@ -755,6 +793,7 @@ class MultipleSequenceAlignment:
                     start = pos1
                     # decide whether to add a variant character or skip position because not in core
                     if any([strt < pos1 <= end for strt,end in gap_ranges]):
+                        print('Assessing a column for sample core . . .')
                         # this position missing somewhere
                         if strict_core or gaps[pos1] == len(self.SNPs):
                             # skip a character because missing in at least one sample (non-core) and strict core requested
@@ -807,7 +846,7 @@ class MultipleSequenceAlignment:
             
             alignment_arrays[sample] = this_sequence
         
-        # print('\n'.join(dropped))
+        print('\n'.join(dropped))
         
         print('{} variable positions found (columns in multiple sequence alignment)'.format(len(variable_positions_pos1)))
         
@@ -822,7 +861,7 @@ class MultipleSequenceAlignment:
             if strict_core:
                 alignment_arrays[self.genome_id] = _array('c', [char for pos0,char in enumerate(ref_genome_seq) if pos0 not in excluded_sites])
             else:
-                # excluded sites if absent in all samples
+                # excluded sites if absent in all samples  <== can't remember why these are the same
                 alignment_arrays[self.genome_id] = _array('c', [char for pos0,char in enumerate(ref_genome_seq) if pos0 not in excluded_sites])
         else:
             if strict_core:
