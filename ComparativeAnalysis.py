@@ -793,7 +793,6 @@ class MultipleSequenceAlignment:
                     start = pos1
                     # decide whether to add a variant character or skip position because not in core
                     if any([strt < pos1 <= end for strt,end in gap_ranges]):
-                        print('Assessing a column for sample core . . .')
                         # this position missing somewhere
                         if strict_core or gaps[pos1] == len(self.SNPs):
                             # skip a character because missing in at least one sample (non-core) and strict core requested
@@ -846,7 +845,7 @@ class MultipleSequenceAlignment:
             
             alignment_arrays[sample] = this_sequence
         
-        print('\n'.join(dropped))
+        #print('\n'.join(dropped))
         
         print('{} variable positions found (columns in multiple sequence alignment)'.format(len(variable_positions_pos1)))
         
