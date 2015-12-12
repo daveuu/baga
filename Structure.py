@@ -2287,10 +2287,10 @@ class Aligner:
                 contig_post_gaps = self.countEndGaps(contig_alnd_seq, pre = False)
                 pre_gaps = max(ref_pre_gaps,contig_pre_gaps)
                 post_gaps = max(ref_post_gaps,contig_post_gaps)
-                print("ref_pre_gaps, ref_post_gaps, contig_pre_gaps, "\
-                        "contig_post_gaps, pre_gaps,post_gaps")
-                print(ref_pre_gaps, ref_post_gaps, contig_pre_gaps, \
-                        contig_post_gaps, pre_gaps,post_gaps)
+                print("ref_pre_gaps: {}, ref_post_gaps: {}, contig_pre_gaps: {}, "\
+                        "contig_post_gaps: {}, pre_gaps: {} ,post_gaps: {}".format(
+                        ref_pre_gaps, ref_post_gaps, contig_pre_gaps, contig_post_gaps, 
+                        pre_gaps, post_gaps))
                 alnd_len = len(ref_alnd_seq)
                 query_insertions = '-' in ref_alnd_seq[pre_gaps:alnd_len-post_gaps]
                 A_alnd = str(ref_alnd_seq[ref_pre_gaps:alnd_len-ref_post_gaps])
@@ -2306,7 +2306,7 @@ class Aligner:
                 for ref in str(ref_alnd_seq[pre_gaps:alnd_len-post_gaps]):
                     if ref != contig_alnd_seq[pre_gaps:][alnpos0]:
                         # save SNPs and indels, but for indels, each contiguous gap is saved separately
-                        print(alnpos0, refpos0, ref, contig_alnd_seq[pre_gaps:][alnpos0], self.genome.sequence[refpos0])
+                        #print(alnpos0, refpos0, ref, contig_alnd_seq[pre_gaps:][alnpos0], self.genome.sequence[refpos0])
                         these_variants[refpos0] = (ref, contig_alnd_seq[pre_gaps:][alnpos0])
                     
                     alnpos0 += 1
@@ -2320,14 +2320,17 @@ class Aligner:
                 
                 ref_sequence_ends_trimmed = []
                 contig_sequence_ends_trimmed = []
+                del_warning = 0
                 for ref,cont in zip(ref_alnd_seq[ref_pre_gaps:len(ref_alnd_seq)-ref_post_gaps], 
                         contig_alnd_seq[ref_pre_gaps:len(ref_alnd_seq)--ref_post_gaps]):
                     if '-' == ref:
-                        print('WARNING: deletions in reference/insertions in sample are '\
-                        'not supported: a gap in reference chromsome region was omitted')
+                        del_warning += 1
                     else:
                         ref_sequence_ends_trimmed += [ref]
                         contig_sequence_ends_trimmed += [cont]
+                if del_warning:
+                    print('WARNING: deletions in reference/insertions in sample are not '\
+                            'supported: {} gap(s) in reference chromsome region was omitted'.format(del_warning))
                 e = '{} vs {} - {} == {}'.format(len(ref_sequence_ends_trimmed), 
                         ref_region_end, ref_region_start, ref_region_end - ref_region_start)
                 assert len(ref_sequence_ends_trimmed) == ref_region_end - ref_region_start, e
