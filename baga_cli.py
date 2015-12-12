@@ -578,6 +578,13 @@ parser_Structure.add_argument('-m', "--max_memory",
     help = "maximum memory to use in gigabytes for each assembly. If not specified, total available at launch time will be used.",
     type = int)
 
+parser_Structure.add_argument('-l', "--min_align_region", 
+    help = "when using --collect, set minimum region to align among those reported as potentially rearranged (by --check).",
+    type = int,
+    default = 200)
+
+
+
 parser_CallVariants = subparser_adder.add_parser(
         'CallVariants',
         formatter_class = argparse.RawDescriptionHelpFormatter,
@@ -2070,7 +2077,8 @@ if args.subparser == 'Structure':
                         aligner.alignRegions(assemblies_by_region, 
                                 use_num_padding_positions, 
                                 path_to_omit_sequences = unmappedfasta, 
-                                single_assembly = single_assembly)
+                                single_assembly = single_assembly,
+                                min_region_length = args.min_align_region)
                         aligner.reportAlignments()
                     else:
                         print('WARNING: no assembled regions found. Either there are '\

@@ -2157,8 +2157,11 @@ class Aligner:
                 'cannot align them'
 
         aligned = {}
+        too_small = []
         for (s,e),contigfile in sorted(assemblies_by_region.items()):
-            if e - s > min_region_length:
+            if e - s < min_region_length:
+                too_small += [(contigfile,e - s)]
+            else:
                 ref_chrom_region = _Seq(self.genome.sequence[s-num_padding_positions:e+num_padding_positions].tostring())
                 ref_region_id = 'ref_{:07d}_{:07d}'.format(s-num_padding_positions,e+num_padding_positions)
                 aligned[ref_region_id] = {}
@@ -2242,12 +2245,22 @@ class Aligner:
         # retain info useful for summarising
         self.aligned = aligned
         self.aligned_from_single_assembly = single_assembly
-        # use_contigfile == .../<sample>__<genome>_multi_region/contigs.fasta
-        s, x = use_contigfile.split(_os.path.sep)[-2].split('__')
-        g = x.split('_')[0]
-        self.aligned_to_sample = s
-        self.aligned_to_genome = g
-        self.path_to_alignments = _os.path.sep.join(use_contigfile.split(_os.path.sep)[:-2])
+        if len(too_small):
+            print('These regions were shorter than "min_region_length" ({} bp) and not aligned:'.format(min_region_length))
+            for r,l in too_small:
+                print('{}: {} bp'.format(r,l))
+        if len(too_small) == len(assemblies_by_region):
+            print('All {} regions too short . . . leaving nothing to align.'.format(len(assemblies_by_region)))
+            self.aligned_to_sample = False
+            self.aligned_to_genome = False
+            self.path_to_alignments = False
+        else:
+            # use_contigfile == .../<sample>__<genome>_multi_region/contigs.fasta
+            s, x = use_contigfile.split(_os.path.sep)[-2].split('__')
+            g = x.split('_')[0]
+            self.aligned_to_sample = s
+            self.aligned_to_genome = g
+            self.path_to_alignments = _os.path.sep.join(use_contigfile.split(_os.path.sep)[:-2])
 
     def reportAlignments(self):
         '''
