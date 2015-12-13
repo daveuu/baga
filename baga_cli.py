@@ -2856,6 +2856,21 @@ if args.subparser == 'ComparativeAnalysis':
                     NotImplementedError('Building multiple alignments from one VCF per sample is not yet implemented: Coming soon!')
                     # see code in ApplyFilters section to collect other per sample VCFs
                 
+                # greedily collect version of each vcf with the most filters applied
+                import re
+                from glob import glob
+                patt = re.compile('(__F_)')
+                path_to_SNPs_VCFs_use = []
+                for path in path_to_SNPs_VCFs:
+                    numfilters = {}
+                    for path2 in glob(path.replace('.vcf','*.vcf').replace('.VCF','*.VCF')):
+                        numfilters[path2] = len(re.findall(patt,path2))
+                    
+                    path_to_SNPs_VCFs_use += [sorted(numfilters, key = numfilters.get)[-1]]
+                
+                print('Using:\n{}'.format('\n'.join(path_to_SNPs_VCFs_use)))
+                path_to_SNPs_VCFs = path_to_SNPs_VCFs_use
+                
                 print('Collecting BAMs for {}'.format(these_reads))
                 alignments = AlignReads.SAMs(baga = 'baga.AlignReads.SAMs-{}.baga'.format(alns_name))
                 for BAM in alignments.ready_BAMs[-1]:
