@@ -93,6 +93,7 @@ def get_download(name, description, source, url, commit, checksum, destination, 
     Download and unpack a dependancy
     '''
     ## 
+    initialdir = _os.path.abspath(_os.curdir)
     try:
         _os.chdir(destination)
     except OSError:
@@ -185,16 +186,21 @@ def get_download(name, description, source, url, commit, checksum, destination, 
                 # this is the only thing that differentiates this prepare()
                 # from others that need some chdir <== this should be improved
                 # see dep dict
+                curdir = _os.path.abspath(_os.curdir)
                 _os.chdir(_os.path.pardir)
                 do_this['function'](*do_this['arguments']['package_list'])
+                # return to previous folder
+                _os.chdir(curdir)
             else:
                 extracted_base_dir = archive.getnames()[0].split(_os.path.sep)[0]
-                _os.chdir(extracted_base_dir)
+                curdir = _os.path.abspath(_os.curdir)
+                # go to installed folder
+                _os.chdir(_os.path.sep.join([destination,extracted_base_dir]))
                 do_this['function'](**do_this['arguments'])
-                _os.chdir(_os.path.pardir)
-                _os.chdir(_os.path.pardir)
-    else:
-        _os.chdir(_os.path.pardir)
+                # return to previous folder
+                _os.chdir(curdir)
+    
+    _os.chdir(initialdir)
 
 def get_other_packages(packages):
     '''Python package dependencies for python packages'''
