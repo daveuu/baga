@@ -627,11 +627,28 @@ class MultipleSequenceAlignment:
                     print("Couldn't find previously scanned coverages at {}".format(filein))
             
             if not found_depths:
+                indexfile = _os.path.extsep.join([BAM.filename,'bai'])
+                if not(_os.path.exists(indexfile) and _os.path.getsize(indexfile) > 0):
+                    print('indexing {}'.format(BAM.filename))
+                    # try:
+                        # print('Using pySAM')
+                        # _pysam.index(BAM)
+                    # except TypeError:
+                        # print("pysam didn't like something about this bam . . . "\
+                                # "trying 'samtools index {}' instead.".format(BAM))
+                    try:
+                        print('Using SAMTools')
+                        _subprocess.call(['samtools','index',BAM.filename])
+                    except OSError:
+                        raise OSError("pysam and samtools didn't like something about "\
+                                "this bam . . . ")
                 print('Scanning coverages from BAM file . . .')
                 # also collect proper pair depths to maintain compatibility with Structure module
                 num_ref_positions = BAM.header['SQ'][0]['LN']
                 depth_total = _array('i', (0,) * (int(num_ref_positions / resolution) + 1))
                 depth_proper = _array('i', (0,) * (int(num_ref_positions / resolution) + 1))
+                # reload to include index
+                BAM = _pysam.Samfile(BAM.filename)
                 pl_iter = BAM.pileup( BAM.references[0] )
                 for x in pl_iter:
                     # Coordinates in pysam are always 0-based.
