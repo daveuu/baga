@@ -209,7 +209,7 @@ class Simulator:
         filename = 'SNPs_per_genome.csv'
         with open(filename, 'w') as fout:
             print('Writing to {}'.format(filename))
-            fout.write('"Replicate","Position","Reference","Variant"')
+            fout.write('"Replicate","Position","Reference","Variant"\n')
             for gn,positions in enumerate(SNPs_per_genome):
                 for pos0,var in positions:
                     fout.write('{},{},"{}","{}"\n'.format(gn+1,pos0,self.genome.sequence[pos0],var))
@@ -276,7 +276,7 @@ class Simulator:
         filename = 'indel_dict_by_pos_pergenome.csv'
         with open(filename, 'w') as fout:
             print('Writing to {}'.format(filename))
-            fout.write('"Replicate","Position","Reference","Variant"')
+            fout.write('"Replicate","Position","Reference","Variant"\n')
             for gn,positions in enumerate(indel_dict_by_pos_pergenome):
                 for pos0,var in sorted(positions.items()):
                     fout.write('{},{},"{}","{}"\n'.format(gn+1,pos0,self.genome.sequence[pos0],var))
