@@ -276,9 +276,9 @@ class MultipleSequenceAlignment:
                         assert '/' not in GTstate, 'Pooled data with allele frequencies not implemented for MSAs ({})'.format(
                                                                     VCF_path)
                         if GTstate == '.':
-                            ## always because in a multi sample VCF, DP cannot be useful <== but should have obtained own DP
-                            ## means not enough info
-                            query = '-'
+                            # means not enough info
+                            # pass absent info on to be written with nodata_char in writeMSA()
+                            query = '.'
                             # try:
                                 # if int(INFO['DP']) != 0:
                                     # print('WARNING: absent genotype but some reads present: {}'.format(INFO['DP']))
@@ -727,7 +727,8 @@ class MultipleSequenceAlignment:
                         strict_core = False, 
                         include_invariants = False, 
                         genome = None, 
-                        missing_char = '?'):
+                        missing_char = '-',
+                        nodata_char = '?'):
         '''
         write SNPs to an alignment . . . 
         optionally including invariant sites and, 
@@ -737,11 +738,13 @@ class MultipleSequenceAlignment:
         
         if include_invariants:
             # do some checks for information needed for entire genome
-            e = 'If including all positions in alignment, original genome must be provided'
+            e = 'If including all positions in alignment, original genome must '\
+                    'be provided'
             assert genome != None, e
             
             # strict: require BAMs and missing regions for full-length multiple sequence alignment
-            # e = 'If including all positions in alignment, BAM files from which VCFs generated must be scanned for missing regions using getCoverageRanges() method'
+            # e = 'If including all positions in alignment, BAM files from which VCFs generated
+            # must be scanned for missing regions using getCoverageRanges() method'
             # assert hasattr(self, 'missing_regions'), e
             
             ref_genome_seq = genome.sequence
@@ -757,7 +760,12 @@ class MultipleSequenceAlignment:
                 gap_ranges = makeRanges(sorted(gaps))
                 #gap_ranges = [(s*10,e*10) for s,e in gap_ranges]
             else:
-                print('WARNING: making a full-length multiple-sequence alignment without checking read alignments for missing pieces of chromosome is a risky assumption! Only proceed if you know there are no missing pieces of chromosome among your samples relative to the reference chromosome and/or BAMs are unavailable.')
+                print('WARNING: making a full-length multiple-sequence alignment '\
+                        'without checking read alignments for missing pieces of '\
+                        'chromosome is a risky assumption! Only proceed if you '\
+                        'know there are no missing pieces of chromosome among '\
+                        'your samples relative to the reference chromosome and/or '\
+                        'BAMs are unavailable.')
                 gaps = {}
                 gap_ranges = []
             
@@ -812,21 +820,28 @@ class MultipleSequenceAlignment:
                     if any([strt < pos1 <= end for strt,end in gap_ranges]):
                         # this position missing somewhere
                         if strict_core or gaps[pos1] == len(self.SNPs):
-                            # skip a character because missing in at least one sample (non-core) and strict core requested
+                            # skip a character because missing in at least one sample
+                            # (non-core) and strict core requested
                             # or skip a character because missing in all the samples
-                            dropped += ['Dropped {}, character {} because missing in {} samples'.format(pos1, ref_genome_seq[pos1 - 1], gaps[pos1])]
+                            dropped += ['Dropped {}, character {} because missing in {} samples'\
+                                    ''.format(pos1, ref_genome_seq[pos1 - 1], gaps[pos1])]
                             excluded_sites.add(pos1 - 1)
                         else:
                             # present in at least one sample
                             if any([strt < pos1 <= end for strt,end in self.missing_regions[sample]]):
-                                # but missing here
+                                # but missing here (known missing chromosome: not missing data)
                                 this_sequence.append(missing_char)
                             else:
                                 # not missing here
                                 try:
                                     # add a variant character if possible
-                                    this_sequence.append(these_variants[pos1][1])
-                                    variable_positions_pos1[len(this_sequence)] = pos1
+                                    if these_variants[pos1][1] == '.':
+                                        # . in VCF is insufficient data to call:
+                                        # the data is missing (unknown)
+                                        this_sequence.append(nodata_char)
+                                    else:
+                                        this_sequence.append(these_variants[pos1][1])
+                                        variable_positions_pos1[len(this_sequence)] = pos1
                                 except KeyError:
                                     # add the wild-type character
                                     this_sequence.append(ref_genome_seq[pos1 - 1])
@@ -834,8 +849,13 @@ class MultipleSequenceAlignment:
                         # in core: either variant or not
                         try:
                             # add a variant character if possible
-                            this_sequence.append(these_variants[pos1][1])
-                            variable_positions_pos1[len(this_sequence)] = pos1
+                            if these_variants[pos1][1] == '.':
+                                # . in VCF is insufficient data to call:
+                                # the data is missing (unknown)
+                                this_sequence.append(nodata_char)
+                            else:
+                                this_sequence.append(these_variants[pos1][1])
+                                variable_positions_pos1[len(this_sequence)] = pos1
                         except KeyError:
                             this_sequence.append(ref_genome_seq[pos1 - 1])
                 
