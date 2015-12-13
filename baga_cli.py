@@ -437,6 +437,65 @@ parser_AlignReads.add_argument('-D', "--delete_intermediates",
     action = 'store_true')
 
 
+parser_SimulateReads = subparser_adder.add_parser('SimulateReads',
+                formatter_class = argparse.RawDescriptionHelpFormatter,
+                description = textwrap.fill('Simulate reads with optional '\
+                        'variants from a reference genome sequence.',
+                        text_width,
+                        replace_whitespace = False),
+                epilog = textwrap.fill('Example usage: "%(prog)s --genome_name FM209186 --num_SNPs 100"\n', 
+text_width, replace_whitespace = False))
+
+parser_SimulateReads.add_argument('-g', "--genome_name", 
+    help = "name of genome obtained by the CollectData option from which to generate reads from",
+    type = str,
+    required = True)
+
+parser_SimulateReads.add_argument('-N', "--max_cpus", 
+    help = "maximum number of cpu cores used when parallel processing",
+    type = int,
+    default = -1)
+
+parser_SimulateReads.add_argument('-G', "--gemsim", 
+    help = "generate reads using GemSIM",
+    action = 'store_true')
+
+parser_SimulateReads.add_argument('-n', "--num_individuals", 
+    help = "genome population size",
+    type = int,
+    default = 1)
+
+parser_SimulateReads.add_argument('-D', "--large_deletions", 
+    help = "ranges of large deletions e.g., prophage in reference missing in "\
+            "samples. If specified, a second set of individuals are generated "\
+            "with these deletions. Currently, total variants are shared among "\
+            "this double sized population. In the future, the second set will "\
+            "probably share same variants as first set, the only difference "\
+            "being the large deletions. e.g., '--large_deletions 10000 20000 "\
+            "80000 90000' will omit regions 10000-20000 bp and 80000-90000 bp.",
+    type = int,
+    nargs = '+',
+    metavar = 'CHROMOSOME_POSITION')
+
+parser_SimulateReads.add_argument('-r', "--random_seed", 
+    help = "set the random seed for the pseudo-random number generator for "\
+            "reproducible variants.",
+    type = int,
+    default = 684651)
+
+parser_SimulateReads.add_argument('-s', "--num_SNPs", 
+    help = "total single nucleotide polymorphisms in population",
+    type = int)
+
+parser_SimulateReads.add_argument('-d', "--num_deletions", 
+    help = "total small deletion polymorphisms in population",
+    type = int)
+
+parser_SimulateReads.add_argument('-i', "--num_insertions", 
+    help = "total small deletion polymorphisms in population",
+    type = int)
+
+
 parser_Repeats = subparser_adder.add_parser('Repeats',
                 formatter_class = argparse.RawDescriptionHelpFormatter,
                 description = textwrap.fill('Detect repetitive regions in a \
@@ -1629,6 +1688,34 @@ if using:
                 print('Saved {:.2f} Gb by deleting intermediate files'.format(total_size/1000000000.0))
             else:
                 print('Nothing deleted.')
+
+if args.subparser == 'SimulateReads':
+    print('\n-- Read Simulation module --')
+    use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
+    e = 'Could not locate a saved baga.CollectData.Genome-<genome_name>.baga for name given: {}'.format(args.genome_name)
+    import baga
+    from baga import CollectData
+    from baga import SimulateReads
+    print('Loading genome %s' % use_name_genome)
+    genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
+    
+    large_deletions = {}
+    x = 1
+    for i in range(len(args.large_deletions))[::2]:
+        large_deletions['Deletion_{}'.format(x)] = tuple(args.large_deletions[i:i+2])
+        x += 1
+    
+    simulator = SimulateReads.Simulator(genome = genome, 
+                   num_individuals = args.num_individuals,
+                   large_deletions = large_deletions,
+                   random_seed = args.random_seed)
+    
+    simulator.do(num_SNPs = args.num_SNPs, num_deletions = args.num_deletions,
+            num_insertions = args.num_insertions)
+    
+    if args.gemsim:
+        simulator.generateReads(max_cpus = args.max_cpus)
+
 
 ### Repeats ###
 
