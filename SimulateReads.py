@@ -480,7 +480,7 @@ class Simulator:
             if not _os.path.exists(o):
                 missing += [o]
 
-        assert len(missing) == o, 'Could not find:\n{}'.format('\n'.join(missing))
+        assert len(missing) == 0, 'Could not find:\n{}'.format('\n'.join(missing))
         print('all finished after {} minutes'.format(int(round((time.time() - start)/60.0))))
 
         outdir = _os.path.sep.join(['simulated_reads',self.genome.id])
