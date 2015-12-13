@@ -743,6 +743,25 @@ dependencies['discosnp'] = {
     'checker': {'function': check_no_error,
                 'arguments':{'path': ['DiscoSNP++-2.2.1-Source', 'run_discoSnp++.sh']}}
     }
+
+dependencies['gemsim'] = {
+    'name': 'GemSIM',
+    'description': 'short read simulator with error models, v1.6',
+    'source': 'download',
+    'url': 'http://downloads.sourceforge.net/project/gemsim/GemSIM_v1.6.tar.gz',
+    'commit': None,
+    'checksum': None,
+    'destination': destination_programs,
+    'preparation': [{'function': prep_python_2,
+                     # these patterns are globbed in the installed folder
+                     'arguments': {'pattern':'*.py'}},
+                    {'function': chmod_xr,
+                     # these patterns are globbed in the installed folder
+                     'arguments': {'pattern':'*.py'}}],
+    'checker': {'function': check_no_error,
+                'arguments':{'path': ['GemSIM_v1.6', 'GemReads.py']}}
+    }
+
 dependencies_notes = {}
 
 dependencies_notes['sickle'] = {
@@ -860,6 +879,12 @@ dependencies_by_task['ComparativeAnalysis'] = [
 'biopython',
 'svgwrite',
 ]
+
+dependencies_by_task['SimulateReads'] = [
+'gemsim',
+]
+
+
 
 
 if __name__ == '__main__':
