@@ -1144,7 +1144,17 @@ class Phylogenetics:
         '''
         Given a list of outgroup labels for rooting (often list of one), reroot phylogeny.
         '''
+        # replace underscores with spaces as per newick specification
+        # limit labels to ten characters as per phylip specification
+        label_list = [label.replace('_',' ')[:10] for label in label_list]
         out_group = set(self.tree.taxon_namespace.get_taxa(label_list, first_match_only = True))
+        if len(out_group) == 0:
+            e = '{} out group not found among labels: {}'.format(','.join(label_list),
+                    ','.join(sorted([t.label for t in self.tree.taxon_namespace])))
+            raise ValueError(e)
+        elif len(out_group) < len(label_list):
+            print('WARNING: only the following were found for outgroup: {}'.format(','.join(sorted([t.label for t in out_group]))))
+
         in_group = set(self.tree.taxon_namespace) - out_group
         in_group_member = self.tree.find_node_with_taxon(lambda t: t == list(in_group)[0])
 
