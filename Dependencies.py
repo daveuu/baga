@@ -25,6 +25,7 @@ It also contains functions to get some of the dependencies.
 # stdlib
 from baga import _subprocess
 from baga import _os
+from glob import glob as _glob
 import sys as _sys
 import urllib2 as _urllib2
 import cStringIO as _cStringIO
@@ -32,6 +33,7 @@ import zipfile as _zipfile
 import tarfile as _tarfile
 import hashlib as _hashlib
 import shutil as _shutil
+import stat as _stat
 
 # put local modules at start to over-ride local versions
 _sys.path.insert(0,_os.path.sep.join([_os.path.abspath(_os.path.curdir),'local_packages']))
@@ -231,6 +233,25 @@ def prep_python_install(extras):
     print('Installing via setup.py . . .')
     # could try here?
     _subprocess.call([_sys.executable, 'setup.py', 'install'] + extras)
+
+def prep_python_2(pattern):
+    print('Ensuring python2 is called . . .')
+    # could try here?
+    files = _glob(pattern)
+    for f in files:
+        print(f)
+        fixed = open(f).read().replace('python ','python2 ')
+        open(f,'w').write(fixed)
+
+def chmod_xr(pattern):
+    print('Setting as executable')
+    files = _glob(pattern)
+    for f in files:
+        print(f)
+        st = _os.stat(f)
+        _os.chmod(f, st.st_mode | _stat.S_IXUSR | _stat.S_IRUSR)
+
+
 
 
 def prep_simple_make(path = False, configure = False, alt_command = False):
