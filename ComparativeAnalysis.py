@@ -2310,8 +2310,10 @@ class Plotter:
         # librsvg-2.40.9.sha256sum
         if outfilename[-3:] not in (format, format.upper()):
             outfilename = _os.path.extsep.join([outfilename,format])
-        
-        _subprocess.call(['rsvg-convert', self.dwg.filename, '--dpi-x', str(dpi), '--dpi-y', str(dpi), '--format', format, '--output', outfilename])
+        try:
+            _subprocess.call(['rsvg-convert', self.dwg.filename, '--dpi-x', str(dpi), '--dpi-y', str(dpi), '--format', format, '--output', outfilename])
+        except OSError:
+            print('rsvg-convert not found: not converting SVG to PNG')
 
     def doPlot(self,    outgroup_label_list = [], 
                         stroke_width = 3, 
