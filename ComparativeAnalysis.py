@@ -2528,7 +2528,7 @@ class Plotter:
             try:
                 name_translate = dict([_re.split(d, l.rstrip(), maxsplit = 1) for l in open(use_names) if len(l) > 2])
             except IOError:
-                _sys.exit('Could not access the requested --use_names file: {}'.format(use_name))
+                raise IOError('Could not access the requested --use_names file: {}'.format(use_names))
             
             # remove underscores for compatibility with DendroPy's Newick handling i.e., with Newick
             name_translate = dict([(a.replace('_',' '),b.replace('_',' ')) for a,b in name_translate.items()])
