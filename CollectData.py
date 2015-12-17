@@ -161,6 +161,8 @@ class Genome:
             or other unambiguous ID that will return a single result
             '''
             
+            from Bio.Entrez.Parser import ValidationError as _ValidationError
+            
             print("WARNING: NCBI's Entrez query system used here can be unreliable. "\
                     "If the download does not start (if you don't see '524,288 bytes "\
                     "...') within a few seconds, press ctrl-c and issue the same "\
@@ -185,7 +187,16 @@ class Genome:
             assert len(result['IdList']) == 1, e
             Assembly_ID = result['IdList'][0]
             handle = _Entrez.esummary(db = "assembly", id = Assembly_ID)
-            info = _Entrez.read(handle)['DocumentSummarySet']['DocumentSummary'][0]
+            # some ways of handling unexpected content from NCBI
+            try:
+                raw = _Entrez.read(handle, validate=True)
+                info = raw['DocumentSummarySet']['DocumentSummary'][0]
+            except _ValidationError as e:
+                print('WARNING: The information about this genome returned by NCBI Entrez failed validation (ValidationError):\n{}'.format(e))
+                print('Trying without validation . . .')
+                handle = _Entrez.esummary(db = "assembly", id = Assembly_ID)
+                info = _Entrez.read(handle, validate=False)['DocumentSummarySet']['DocumentSummary'][0]
+            
             print('Found: {} ({})'.format(info['Organism'],info['AssemblyStatus']))
             
             # collect download links
@@ -216,7 +227,7 @@ class Genome:
                 use_link = genbank_ftp
             
             # collect accessions and versions
-            refseq_ass_acc = info[u'AssemblyAccession']
+            refseq_ass_acc = info['AssemblyAccession']
             e = 'No RefSeq assembly found for {}. You can double check at http://www.ncbi.nlm.nih.gov/assembly'.format(search_id)
             assert refseq_ass_acc[:3] == 'GCF'
             genbank2refseq = {}
