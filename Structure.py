@@ -138,18 +138,26 @@ def checkStructure(BAMs,
         indexfile = _os.path.extsep.join([BAM,'bai'])
         if not(_os.path.exists(indexfile) and _os.path.getsize(indexfile) > 0):
             print('indexing {}'.format(BAM))
-            # try:
-                # print('Using pySAM')
-                # _pysam.index(BAM)
-            # except TypeError:
-                # print("pysam didn't like something about this bam . . . "\
-                        # "trying 'samtools index {}' instead.".format(BAM))
             try:
-                print('Using SAMTools')
-                _subprocess.call(['samtools','index',BAM])
-            except OSError:
+                print('Using pySAM')
+                _pysam.index(BAM)
+            except TypeError as e:
+                print("pysam didn't like something about this bam ({}) . . . "\
+                        "trying 'samtools index {}' instead.".format(e,BAM))
+            except IOError as e:
+                print("pysam didn't like something about this bam ({}) . . . "\
+                        "trying 'samtools index {}' instead.".format(e,BAM))
+            try:
+                print('Attempting to use SAMTools to index: {}'.format(BAM))
+                proc = _subprocess.Popen(['samtools','index',BAM], stdout=_subprocess.PIPE, stderr=_subprocess.PIPE)
+                stdout,stderr = proc.communicate()
+            except OSError as e:
                 raise OSError("pysam and samtools didn't like something about "\
-                        "this bam . . . ")
+                        "this bam: {}".format(e))
+            if 'fail to open' in stderr:
+                raise OSError("pysam and samtools didn't like something about "\
+                        "this bam: {}".format(stderr))
+        
         this_checker = Checker(BAM)
         checkers[this_checker.reads_name] = this_checker
 
