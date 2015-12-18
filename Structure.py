@@ -138,25 +138,29 @@ def checkStructure(BAMs,
         indexfile = _os.path.extsep.join([BAM,'bai'])
         if not(_os.path.exists(indexfile) and _os.path.getsize(indexfile) > 0):
             print('indexing {}'.format(BAM))
+            fail = False
             try:
                 print('Using pySAM')
                 _pysam.index(BAM)
             except TypeError as e:
-                print("pysam didn't like something about this bam ({}) . . . "\
-                        "trying 'samtools index {}' instead.".format(e,BAM))
+                fail = True
+                print("pysam didn't like something about this bam: {}".format(e))
             except IOError as e:
-                print("pysam didn't like something about this bam ({}) . . . "\
-                        "trying 'samtools index {}' instead.".format(e,BAM))
-            try:
-                print('Attempting to use SAMTools to index: {}'.format(BAM))
-                proc = _subprocess.Popen(['samtools','index',BAM], stdout=_subprocess.PIPE, stderr=_subprocess.PIPE)
-                stdout,stderr = proc.communicate()
-            except OSError as e:
-                raise OSError("pysam and samtools didn't like something about "\
-                        "this bam: {}".format(e))
-            if 'fail to open' in stderr:
-                raise OSError("pysam and samtools didn't like something about "\
-                        "this bam: {}".format(stderr))
+                fail = True
+                print("pysam didn't like something about this bam: {}".format(e))
+            if fail:
+                path_to_exe = _get_exe_path('samtools')
+                print("Trying '{} index {}' instead.".format(path_to_exe,BAM))
+                try:
+                    print('Attempting to use SAMTools to index: {}'.format(BAM))
+                    proc = _subprocess.Popen([path_to_exe,'index',BAM], stdout=_subprocess.PIPE, stderr=_subprocess.PIPE)
+                    stdout,stderr = proc.communicate()
+                except OSError as e:
+                    raise OSError("pysam and samtools didn't like something about "\
+                            "this bam: {}".format(e))
+                if 'fail to open' in stderr:
+                    raise OSError("pysam and samtools didn't like something about "\
+                            "this bam: {}".format(stderr))
         
         this_checker = Checker(BAM)
         checkers[this_checker.reads_name] = this_checker
