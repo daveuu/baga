@@ -485,7 +485,7 @@ class Simulator:
 
         outdir = _os.path.sep.join(['simulated_reads',self.genome.id])
         _os.makedirs(outdir)
-        for o in range(raw_out):
+        for o in range(out_raw):
             new = _os.path.sep.join([outdir, o.replace('fir','R1').replace('sec','R2')])
             print('{} ==> {}'.format(o, new))
             _os.rename(o, new)
