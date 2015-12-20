@@ -496,7 +496,7 @@ class Simulator:
         except OSError:
             pass
 
-        for o in range(out_raw):
+        for o in range(len(out_raw)):
             new = _os.path.sep.join([outdir, o.replace('fir','R1').replace('sec','R2')])
             print('{} ==> {}'.format(o, new))
             _os.rename(o, new)
