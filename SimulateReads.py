@@ -460,15 +460,22 @@ class Simulator:
                         '-c', 
                         '-q', 33, '-p',
                         '-o', outprefix]
-            cmd = map(str,cmd)
-            print(' '.join(cmd))
-            processes.add( _subprocess.Popen(cmd, shell=False) )
+            out_raw += [outprefix+'_fir.fastq', outprefix+'_sec.fastq']
+            # this would be better to rename and compress all in one
+            # maybe as a shell script? Then resuming (--force) would be easier.
+            if _os.path.exists(outprefix+'_fir.fastq') and \
+                    _os.path.exists(outprefix+'_sec.fastq'):
+                print('Found output for {}_fir.fastq (and sec), not regenerating, '\
+                'delete these to start from scratch'.format(outprefix))
+            else:
+                cmd = map(str,cmd)
+                print(' '.join(cmd))
+                processes.add( _subprocess.Popen(cmd, shell=False) )
             if len(processes) >= max_processes:
                 (pid, exit_status) = _os.wait()
                 processes.difference_update(
                     [p for p in processes if p.poll() is not None])
             
-            out_raw += [outprefix+'_fir.fastq', outprefix+'_sec.fastq']
 
         # Check if all the child processes were closed
         for p in processes:
@@ -484,7 +491,11 @@ class Simulator:
         print('all finished after {} minutes'.format(int(round((time.time() - start)/60.0))))
 
         outdir = _os.path.sep.join(['simulated_reads',self.genome.id])
-        _os.makedirs(outdir)
+        try:
+            _os.makedirs(outdir)
+        except OSError:
+            pass
+
         for o in range(out_raw):
             new = _os.path.sep.join([outdir, o.replace('fir','R1').replace('sec','R2')])
             print('{} ==> {}'.format(o, new))
