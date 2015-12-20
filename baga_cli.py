@@ -169,8 +169,8 @@ text_width = 70
 
 title = 'Bacterial and Archaeal Genome Analyser'
 subtitle = textwrap.fill('Novel analyses and wrapped tools pipelined for convenient processing of genome sequences', text_width)
-version_date = 'July 10 2015'
-version_num = 0.1
+version_date = 'December 20 2015'
+version_num = 0.2
 authors = 'David Williams'
 email = 'david.williams.at.liv.d-dub.org.uk'
 blurb = '''Work on this software was started at The University of Liverpool, UK 
@@ -178,7 +178,7 @@ with funding from The Wellcome Trust (093306/Z/10) awarded to:
 
 Dr Steve Paterson (The University of Liverpool, UK)
 Dr Craig Winstanley (The University of Liverpool, UK)
-Dr Michael A Brockhurst (University of York, UK)
+Dr Michael A Brockhurst (The University of York, UK)
 
 
 Copyright (C) 2015 David Williams
@@ -3025,7 +3025,7 @@ if args.subparser == 'ComparativeAnalysis':
                              use_names = args.use_names,
                              scale_bar = True,
                              genome_length = genome_length)
-        
+
 
 ### Assemble Reads ###
 
