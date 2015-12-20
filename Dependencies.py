@@ -682,7 +682,11 @@ dependencies['clonalframeml'] = {
     'preparation': [{'function': prep_simple_make,
                 'arguments': {'path': ['src'], 'configure': False}}],
     'checker': {'function': check_no_error,
-                'arguments': {'path': ['clonalframeml', 'src', 'ClonalFrameML']}}
+                'arguments': {'path': ['clonalframeml', 'src', 'ClonalFrameML'],
+                              # usually this is not required: 0 return code
+                              # else is 1, the default success for non-zero
+                              # but 13, as in this case, is unusual
+                              'success_returncode':13}}
     }
 
 dependencies['phyml'] = {
