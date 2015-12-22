@@ -1933,7 +1933,7 @@ class Collector:
                                 r1seq,
                                 r1qual))
                     r2seq,r2qual = reads[2]
-                    r2_out.write('@{}/1\n{}\n+\n{}\n'.format(
+                    r2_out.write('@{}/2\n{}\n+\n{}\n'.format(
                                 read_id,
                                 r2seq,
                                 r2qual))
