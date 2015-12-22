@@ -1817,23 +1817,51 @@ class Collector:
         chromo_name = self.reads.references[0]
         # a pos0 slice from a pos1 index should be s-1,e
         # so this is approximate as pos1 or pos0 not specified
-        reads_iter = self.reads.fetch(chromo_name, 
-                                      chrom_start - num_padding_positions, 
-                                      chrom_end + num_padding_positions)
+        range_min = 0
+        range_max = self.reads.lengths[0]
+        ranges = []
+        range_start = chrom_start - num_padding_positions
+        range_end = chrom_end + num_padding_positions
+
+        if range_start < range_min and range_end > range_max:
+            print('WARNING: requested alignment range ({}-{}bp), which includes '\
+                    'additional padding ({}bp) exceeds alignment (reference sequence) '\
+                    'length: {}. Using all reads in this alignment.'.format(range_start, 
+                    range_end, num_padding_positions, self.reads.lengths[0]))
+            range_start = range_min
+            range_end = range_max
+        elif range_start < range_min:
+            assert range_start < 0, 'range_start should be negative'
+            ranges += [(range_max + range_start, range_max)]
+            range_start = range_min
+        elif range_end > range_max:
+            ranges += [(range_min, range_end - range_max)]
+            range_end = range_max
+
+        if len(ranges) == 1:
+            print('WARNING: Alignment range ({} to {} bp) spans start or end. Chromosome '\
+                    'assumed to be circular so some reads from other end included in '\
+                    'reads collection'.format(chrom_start - num_padding_positions, 
+                    chrom_end + num_padding_positions))
+
+        ranges += [(range_start, range_end)]
 
         read_pairs = {}
-        for r in reads_iter:
-            if r.is_reverse:
-                # SEQ being reverse complemented
-                read_info = (r.query_sequence[::-1].translate(self.transtable), r.qual[::-1])
-            else:
-                read_info = (r.query_sequence, r.qual)
-            
-            try:
-                read_pairs[r.query_name][int(r.is_read2)+1] = read_info
-            except KeyError:
-                read_pairs[r.query_name] = {}
-                read_pairs[r.query_name][int(r.is_read2)+1] = read_info
+        for start,end in ranges:
+            print('Collecting from {} to {} bp in {}'.format(start, end, chromo_name))
+            reads_iter = self.reads.fetch(chromo_name, start, end)
+            for r in reads_iter:
+                if r.is_reverse:
+                    # SEQ being reverse complemented
+                    read_info = (r.query_sequence[::-1].translate(self.transtable), r.qual[::-1])
+                else:
+                    read_info = (r.query_sequence, r.qual)
+                
+                try:
+                    read_pairs[r.query_name][int(r.is_read2)+1] = read_info
+                except KeyError:
+                    read_pairs[r.query_name] = {}
+                    read_pairs[r.query_name][int(r.is_read2)+1] = read_info
 
         self.read_pairs = read_pairs
         self.chrom_start = chrom_start
