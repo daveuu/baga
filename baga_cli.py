@@ -2118,7 +2118,8 @@ if args.subparser == 'Structure':
                         print('Nothing found at {}. Doing assembly.'.format(path_to_bad_unmapped_contigs))
                     
                     reads = AssembleReads.DeNovo(paths_to_reads = reads_path_unmapped)
-                    reads.SPAdes(output_folder = ['read_collections', genome_name], mem_num_gigs = use_mem_gigs)
+                    reads.SPAdes(output_folder = ['read_collections', genome_name], mem_num_gigs = use_mem_gigs,
+                            only_assembler = True, careful = False)
                 
                 # assemble read from each region with poorly/unmapped
                 reads_paths = {}
@@ -2150,8 +2151,11 @@ if args.subparser == 'Structure':
                         reads_path_unmapped[output_folder] = r1_out_path_um, r2_out_path_um, rS_out_path_um
                 
                 print('debug: len(assemblies_by_region) == {}'.format(len(assemblies_by_region)))
-                reads = AssembleReads.DeNovo(paths_to_reads = reads_paths, paths_to_reads2 = reads_path_unmapped)
-                reads.SPAdes(output_folder = ['read_collections', genome_name], mem_num_gigs = use_mem_gigs, single_assembly = single_assembly)
+                reads = AssembleReads.DeNovo(paths_to_reads = reads_paths, 
+                        paths_to_reads2 = reads_path_unmapped)
+                reads.SPAdes(output_folder = ['read_collections', genome_name], 
+                        mem_num_gigs = use_mem_gigs, single_assembly = single_assembly, 
+                        only_assembler = True, careful = False)
                 # a dict of paths to contigs per region
                 aligner = Structure.Aligner(genome)
                 unmappedfasta = os.path.sep.join(['read_collections', 
@@ -3035,7 +3039,8 @@ if args.subparser == 'AssembleReads':
     from baga import AssembleReads
     for this_reads_name in args.reads_name:
         use_path_reads,use_name_reads = check_baga_path('baga.PrepareReads.Reads', this_reads_name)
-        e = 'Could not locate a saved baga.PrepareReads.Reads-<reads_name>.baga for reads group given: {}'.format(this_reads_name)
+        e = 'Could not locate a saved baga.PrepareReads.Reads-<reads_name>.baga '\
+                'for reads group given: {}'.format(this_reads_name)
         assert all([use_path_reads,use_name_reads]), e
         print('Loading processed reads group %s' % use_name_reads)
         prepared_reads = baga.bagaload(use_path_reads)
@@ -3048,7 +3053,9 @@ if args.subparser == 'AssembleReads':
                 # round down available GBs
                 use_mem_gigs = int(baga.get_available_memory())
             
-            reads.SPAdes(mem_num_gigs = use_mem_gigs)
+            # for more reliable: only_assembler = True, careful = False
+            reads.SPAdes(mem_num_gigs = use_mem_gigs, only_assembler = False, 
+                    careful = True)
     
     # if args.delete_intermediates:
         # print('Checking on intermediate fastq files to delete . . .')
