@@ -163,11 +163,6 @@ class Genome:
             
             from Bio.Entrez.Parser import ValidationError as _ValidationError
             
-            print("WARNING: NCBI's Entrez query system used here can be unreliable. "\
-                    "If the download does not start (if you don't see '524,288 bytes "\
-                    "...') within a few seconds, press ctrl-c and issue the same "\
-                    "command again (up-arrow, enter, usually works)\n")
-            
             if '.' in search_id:
                 search_id_unversioned,requested_ver = search_id.split('.')
             else:
@@ -181,10 +176,11 @@ class Genome:
             _Entrez.email = user_email
             handle = _Entrez.esearch(db = "assembly", term = search_id_unversioned)
             result = _Entrez.read(handle)
-            e = 'Your search ID: "{}" returned {} assembly results '\
-            'from ncbi.nlm.nih.gov/assembly but a single result is required.'.format(
-                    search_id, len(result['IdList']))
-            assert len(result['IdList']) == 1, e
+            if len(result['IdList']) != 1:
+                print('WARNING: Your search ID: "{}" returned {} assembly results '\
+                'from ncbi.nlm.nih.gov/assembly but a single result is required.'.format(
+                        search_id, len(result['IdList'])))
+                raise LookupError
             Assembly_ID = result['IdList'][0]
             handle = _Entrez.esummary(db = "assembly", id = Assembly_ID)
             # some ways of handling unexpected content from NCBI
@@ -297,6 +293,35 @@ class Genome:
                     self.sequence = _array('c', seq_record.seq)
                     self.id = seq_record.id
 
+        def getFromEntrezNucleotide(accession, user_email):
+            print("WARNING: NCBI's Entrez query system used here can be unreliable "\
+                    "for data download. If the download does not start (if you "\
+                    "don't see '524,288 bytes ...') within a few seconds, press "\
+                    "ctrl-c and issue the same command again (up-arrow, enter, "\
+                    "usually works)\n")
+            
+            _Entrez.email = user_email
+            handle = _Entrez.efetch(db = "nuccore", rettype = "gb", retmode = "text", 
+                    id = accession)
+            try:
+                records = list(_SeqIO.parse(handle, 'genbank'))
+                #seq_record = _SeqIO.read(handle, "genbank")
+            except ValueError as error_message:
+                print("There was a problem with the genome (accession: {}) downloaded "\
+                        "from NCBI via Entrez: {}. Retry because Entrez can be "\
+                        "unreliable, or try loading from a .gbk file downloaded "\
+                        "manually from e.g., ftp://ftp.ncbi.nih.gov/genomes/Bacteria/"\
+                        "".format(accession, error_message))
+            handle.close()
+            # self.ORF_ranges, self.large_mobile_element_ranges = extractLoci(seq_record)
+            # self.sequence = _array('c', seq_record.seq)
+            # self.id = seq_record.id
+            for seq_record in records:
+                if accession in seq_record.id:
+                    self.ORF_ranges, self.large_mobile_element_ranges = extractLoci(seq_record)
+                    self.sequence = _array('c', seq_record.seq)
+                    self.id = seq_record.id
+
         def loadFrombaga(local_path):
             with _tarfile.open(local_path, "r:gz") as tar:
                 for member in tar:
@@ -316,13 +341,13 @@ class Genome:
             self.sequence = _array('c', seq_record.seq)
             self.id = seq_record.id
         
-        
-        
-        
-        
-        
         if accession and user_email:
-            getFromEntrez(accession, user_email)
+            try:
+                getFromEntrez(accession, user_email)
+            except LookupError:
+                print('Falling back to download from www.ncbi.nlm.nih.gov/nuccore '\
+                        'database via NCBI Entrez.')
+                getFromEntrezNucleotide(accession, user_email)
             
         elif accession and not user_email:
             success = False
