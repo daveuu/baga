@@ -2007,8 +2007,9 @@ if args.subparser == 'Structure':
                 print('Loading from {}'.format(filein))
                 filein.replace('baga.Structure.CheckerInfo-','')
                 this_checker_info = Structure.loadCheckerInfo(filein)
-            except IOError:
-                print('Cannot access provided baga.Structure.CheckerInfo file: {}'.format(f))
+            except IOError as e:
+                print('Cannot access provided baga.Structure.CheckerInfo file: {}'.format(filein))
+                print(e)
             
             e = 'Genome name for checker {} ({}) does not match supplied genome name ({})'.format(
                                                                         filein, 
