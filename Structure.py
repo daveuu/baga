@@ -2260,19 +2260,25 @@ class Aligner:
                                     retained = True
                                     aligned[ref_region_id]['contig{:02d}'.format(n+1)] = (ref_alnd, contig_alnd)
                             else:
-                                if max(pIDs_rc.values()) >= min_pID_aligned:
-                                    # only print if contains a pID_window bp window with > 90% identity
-                                    fout = _os.path.sep.join(use_contigfile.split(_os.path.sep)[:-1]) + '_{}_vs_contig{:02d}_rc.fna'.format(ref_region_id,n+1)
-                                    seqs = []
-                                    seqs += [_SeqRecord(seq = _Seq(ref_alnd_rc), 
-                                                        id = ref_region_id)]
-                                    seqs += [_SeqRecord(seq = _Seq(contig_alnd_rc), 
-                                                        id = rec.id)]
-                                    _SeqIO.write(seqs, fout, 'fasta')
-                                    print('Writing: {}'.format(fout))
-                                    retained = True
-                                    # only thr contig is reverse complemented here
-                                    aligned[ref_region_id]['contig{:02d}_rc'.format(n+1)] = (ref_alnd_rc, contig_alnd_rc)
+                                try:
+                                    if max(pIDs_rc.values()) >= min_pID_aligned:
+                                        # only print if contains a pID_window bp window with > 90% identity
+                                        fout = _os.path.sep.join(
+                                                use_contigfile.split(_os.path.sep)[:-1]) + \
+                                                '_{}_vs_contig{:02d}_rc.fna'.format(ref_region_id,n+1)
+                                        seqs = []
+                                        seqs += [_SeqRecord(seq = _Seq(ref_alnd_rc), 
+                                                            id = ref_region_id)]
+                                        seqs += [_SeqRecord(seq = _Seq(contig_alnd_rc), 
+                                                            id = rec.id)]
+                                        _SeqIO.write(seqs, fout, 'fasta')
+                                        print('Writing: {}'.format(fout))
+                                        retained = True
+                                        # only thr contig is reverse complemented here
+                                        aligned[ref_region_id]['contig{:02d}_rc'.format(n+1)] = (ref_alnd_rc, contig_alnd_rc)
+                                except ValueError:
+                                    # no regions found
+                                    pass
                             if not retained:
                                 print('No alignment with a percent identity >= {:.0%} over a window of {} bp'.format(min_pID_aligned, pID_window))
                         else:
