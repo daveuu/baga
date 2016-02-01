@@ -2380,8 +2380,8 @@ class Aligner:
                 ref_sequence_ends_trimmed = []
                 contig_sequence_ends_trimmed = []
                 del_warning = 0
-                for ref,cont in zip(ref_alnd_seq[ref_pre_gaps:len(ref_alnd_seq)-ref_post_gaps], 
-                        contig_alnd_seq[ref_pre_gaps:len(ref_alnd_seq)--ref_post_gaps]):
+                for ref,cont in zip(ref_alnd_seq[pre_gaps:len(ref_alnd_seq)-post_gaps], 
+                        contig_alnd_seq[pre_gaps:len(ref_alnd_seq)-post_gaps]):
                     if '-' == ref:
                         del_warning += 1
                     else:
@@ -2390,9 +2390,12 @@ class Aligner:
                 if del_warning:
                     print('WARNING: deletions in reference/insertions in sample are not '\
                             'supported: {} gap(s) in reference chromsome region was omitted'.format(del_warning))
+                effective_region_end = min(ref_region_end, ref_region_end - contig_post_gaps)
+                effective_region_start = max(ref_region_start, ref_region_start + contig_pre_gaps)
                 e = '{} vs {} - {} == {}'.format(len(ref_sequence_ends_trimmed), 
-                        ref_region_end, ref_region_start, ref_region_end - ref_region_start)
-                assert len(ref_sequence_ends_trimmed) == ref_region_end - ref_region_start, e
+                        effective_region_end, effective_region_start, 
+                        effective_region_end - effective_region_start)
+                assert len(ref_sequence_ends_trimmed) == effective_region_end - effective_region_start, e
                 these_aligned_regions += [(
                         _SeqRecord(_Seq(''.join(ref_sequence_ends_trimmed)), id = ref_region_id), 
                         _SeqRecord(_Seq(''.join(contig_sequence_ends_trimmed)), id = contig_id))]
