@@ -866,13 +866,14 @@ dependencies_by_task['Structure'] = [
 'pysam',
 'svgwrite',
 'spades',
+'seq-align',
 ]
 
 dependencies_by_task['CallVariants'] = [
 # 'GATK' checked separately when path specified to GATK
 ]
 
-dependencies_by_task['ApplyFilters'] = [
+dependencies_by_task['FilterVariants'] = [
 
 ]
 
