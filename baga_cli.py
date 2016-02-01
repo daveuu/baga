@@ -609,7 +609,7 @@ parser_Structure.add_argument('-S', "--include_samples",
     metavar = 'SAMPLE_NAME')
 
 parser_Structure.add_argument('-s', "--summarise", 
-    help = "summarise regions of putative rearrangements found using '--find' as a .csv file and printed to screen. Requires --genome and --reads_name, optionally with --include_samples. Or just --genome and --include_samples to specify samples with corresponding 'baga.Structure.CheckerInfo-<sample_name>__<genome_name>.baga' available in current folder.",
+    help = "summarise regions of putative rearrangements found using '--check' as a .csv file and printed to screen. Requires --genome and --reads_name, optionally with --include_samples. Or just --genome_name and --include_samples to specify samples with corresponding 'baga.Structure.CheckerInfo-<sample_name>__<genome_name>.baga' available in current folder.",
     action = 'store_true')
 
 parser_Structure.add_argument('-C', "--collect", 
@@ -1999,7 +1999,11 @@ if args.subparser == 'Structure':
             assert len(baga_filenames) > 0, e
             
         else:
-            baga_filenames = dict([(tuple([sample, use_name_genome]),'baga.Structure.CheckerInfo-{}__{}.baga'.format(sample, use_name_genome)) for sample in sample_names])
+            try:
+                baga_filenames = dict([(tuple([sample, use_name_genome]),'baga.Structure.CheckerInfo-{}__{}.baga'.format(sample, use_name_genome)) for sample in sample_names])
+            except NameError:
+                print('need --checkinfos_path or --reads_name')
+                sys.exit(1)
         
         checker_info = {}
         for (sample, genome_name), filein in sorted(baga_filenames.items()):
