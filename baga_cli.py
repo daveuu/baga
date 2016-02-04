@@ -424,6 +424,10 @@ parser_AlignReads.add_argument('-r', "--indelrealign",
     help = "realign read alignments near potential indels using GATK",
     action = 'store_true')
 
+parser_AlignReads.add_argument('-p', "--prepared", 
+    help = "if your reads were trimmed and cleaned etc. already, without using BAGA's PrepareReads options, this option allows you to continue directly after the CollectData options.",
+    action = 'store_true')
+
 parser_AlignReads.add_argument('-P', "--GATK_jar_path", 
     help = "path to Genome Analysis Toolkit (GATK) jar file. See also --JRE_1_7_path if system JAVA is version 1.8",
     type = str)
@@ -1558,19 +1562,39 @@ if using:
 ''')
             sys.exit(1)
         
-        
+        # ensure upstream files are available: genome
         use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
         e = 'Could not locate a saved baga.CollectData.Genome-<genome_name>.baga for name given: {}'.format(args.genome_name)
         assert all([use_path_genome,use_name_genome]), e
-        use_path_reads,use_name_reads = check_baga_path('baga.PrepareReads.Reads', args.reads_name)
-        e = 'Could not locate a saved baga.PrepareReads.Reads-<reads_name>.baga for reads group given: {}'.format(args.reads_name)
-        assert all([use_path_reads,use_name_reads]), e
-        alns_name = '__'.join([use_name_reads, use_name_genome])
         
         import baga
-        
         from baga import AlignReads
         from baga import CollectData
+        # ensure upstream files are available: reads
+        if args.prepared:
+            # not prepared by BAGA, load direct from a CollectData.Reads file
+            use_path_reads,use_name_reads = check_baga_path(
+                    'baga.CollectData.Reads', args.reads_name)
+            e = 'Could not locate a saved baga.CollectData.Reads-<reads_name>.baga '\
+                    'for reads group given: {}'.format(args.reads_name)
+            assert all([use_path_reads,use_name_reads]), e
+            from baga import PrepareReads
+            print('Loading reads group %s' % use_name_reads)
+            downloaded_reads = baga.bagaload('baga.CollectData.Reads-{}'\
+                    ''.format(use_name_reads))
+            reads = PrepareReads.Reads(downloaded_reads)
+            # generate a PreparedReads.Reads file for use below
+            # reads already trimmed etc
+            reads.trimmed_read_files = reads.read_files
+            reads.saveLocal(use_name_reads)
+        
+        # BAGA prepared or just generated
+        use_path_reads,use_name_reads = check_baga_path(
+                'baga.PrepareReads.Reads', args.reads_name)
+        e = 'Could not locate a saved baga.PrepareReads.Reads-<reads_name>.baga '\
+                'for reads group given: {}'.format(args.reads_name)
+        assert all([use_path_reads,use_name_reads]), e
+        alns_name = '__'.join([use_name_reads, use_name_genome])
         
         if args.align:
             print('Loading processed reads group %s' % use_name_reads)
