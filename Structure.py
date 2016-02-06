@@ -2335,6 +2335,9 @@ class Aligner:
             print(ref_region_id, len(alnd_contigs))
             ref_region_start = int(ref_region_id.split('_')[1])
             ref_region_end = int(ref_region_id.split('_')[2])
+            # update if near end of chromosome for calcs below
+            # (perhaps this should happen earlier?)
+            ref_region_end = min(len(self.genome.sequence),ref_region_end)
             ref_region_len = ref_region_end - ref_region_start
             variants_by_contig[ref_region_id] = {}
             alnd_range_by_contig[ref_region_id] = {}
