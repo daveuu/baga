@@ -277,6 +277,12 @@ group_check_or_get.add_argument('-f', "--checkgetfor",
     choices = sorted(Dependencies.dependencies_by_task),
     nargs = '+')
 
+parser_Dependencies.add_argument("-V", "--versions_file", 
+    help="specify file containing versions of software dependencies to use. Defaults to versions.yaml in current folder, falls back to versions.yaml in same folder as baga_cli.py (which might be the same one). If no yaml file specified or found, will use a set of versions built into Dependencies.py that were current in late 2015.", 
+    type = str,
+    default = 'versions.yaml')
+
+
 parser_CollectData = subparser_adder.add_parser('CollectData',
                 formatter_class = argparse.RawDescriptionHelpFormatter,
                 description = textwrap.fill('Download and parse genomes or \
@@ -1175,6 +1181,50 @@ if hasattr(args, 'GATK_jar_path') and args.GATK_jar_path:
 
 if args.subparser == 'Dependencies':
     print('\n-- Dependencies check/get module --')
+    
+    if args.versions_file:
+        try:
+            use_versions_file = args.versions_file
+            versions = open(use_versions_file).read()
+        except IOError:
+            use_versions_file = os.path.sep.join(sys.argv[0].split(os.path.sep)[:-1] + ['versions.yaml'])
+            try:
+                versions = open(use_versions_file).read()
+            except IOError:
+                use_versions_file = False
+        
+        updated = False
+        if use_versions_file:
+            # parse it
+            use_versions = {}
+            main_key = None
+            for line in versions.split('\n'):
+                if not line.startswith('#') and len(line.rstrip('\n')) > 0:
+                    if not line.startswith(' '):
+                        main_key,value = line.rstrip('\n').split(':',1)
+                    else:
+                        this_key,value = line.rstrip('\n').lstrip(' ').split(':',1)
+                        try:
+                            use_versions[main_key][this_key] = value.strip(' ')
+                        except KeyError:
+                            use_versions[main_key] = {this_key : value.strip(' ')}
+            for external_name, info in use_versions.items():
+                for key, new in info.items():
+                    if new == 'None':
+                        new = None
+                    try:
+                        current = Dependencies.dependencies[external_name][key]
+                        updated = True
+                        if current != new:
+                            Dependencies.dependencies[external_name][key] = new
+                            print('{} for {} updated from {} to {}'.format(key, 
+                                    external_name, current, new))
+                    except KeyError:
+                        print('Warning: ignoring unrecognised entry in {}: '\
+                                '{} => {}'.format(use_versions_file,external_name,key))
+        if updated:
+            print('Used {} for version information'.format(os.path.abspath(use_versions_file)))
+    
     def get(name):
         if Dependencies.dependencies[name]['source'] == 'git':
             Dependencies.get_git(**Dependencies.dependencies[name])

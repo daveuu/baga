@@ -1,0 +1,93 @@
+
+# set release versions or commit identifiers for software
+# these can be set per analysis
+
+# values here update a dictionary in Dependencies.py
+# where more information is stored for each piece of software
+
+# git rev-parse --short 981252192272bb5c5381af84ba68207ea8b24816 == 9812521
+
+sickle:
+    source: git
+    url: https://github.com/najoshi/sickle
+    commit: f3d6ae3460e94ed8162d314b74fb470c27624432
+
+cutadapt:
+    source: git
+    url: https://github.com/marcelm/cutadapt
+    commit: 84bd634f674e09bb0cc61a5852ff3c87e0c8dea7
+
+svgwrite:
+    source: download
+    url: https://pypi.python.org/packages/source/s/svgwrite/svgwrite-1.1.6.tar.gz
+    checksum: md5=0d54ccf5584dd1f98fe22b7ac172bef1
+
+pyparsing:
+    source: download
+    url: https://pypi.python.org/packages/source/p/pyparsing/pyparsing-2.0.3.tar.gz
+    checksum: md5=0fe479be09fc2cf005f753d3acc35939
+
+dendropy:
+    source: download
+    url: https://pypi.python.org/packages/source/D/DendroPy/DendroPy-4.0.3.tar.gz
+    checksum: md5=aecd45bb1c5a04a35a812e764001d7ba
+
+bwa:
+    source: git
+    url: https://github.com/lh3/bwa.git
+    commit: 981252192272bb5c5381af84ba68207ea8b24816
+
+htslib:
+    source: git
+    url: https://github.com/samtools/htslib
+    commit: 1f45b1944cc5a9d9132328252c3a99aa259f4df6
+
+samtools:
+    source: git
+    url: https://github.com/samtools/samtools
+    commit: b0525f3e74836004f522c96a26bc7e660e032de4
+
+biopython:
+    source: download
+    url: https://pypi.python.org/packages/source/b/biopython/biopython-1.65.tar.gz
+    checksum: md5=274a00e5629a135e84a8a7dfc0389935
+
+picard:
+    source: download
+    url: https://github.com/broadinstitute/picard/releases/download/1.135/picard-tools-1.135.zip
+    checksum: None
+
+seq-align:
+    source: git
+    url: https://github.com/noporpoise/seq-align
+    commit: 2472ddd774c9d01aed0bbe34b2b64724f6f2bc07
+
+pysam:
+    source: download
+    url: https://pypi.python.org/packages/source/p/pysam/pysam-0.8.3.tar.gz
+    checksum: md5=b1ae2a8ec3c6d20be30b2bc1aa995bbf
+
+clonalframeml:
+    source: git
+    url: https://github.com/xavierdidelot/clonalframeml
+    commit: 2d793a36f5160e311a6d15f18bf5cf89360d5e70
+
+phyml:
+    source: git
+    url: https://github.com/stephaneguindon/phyml
+    commit: e71c55362c32f9fca07b9c2f2288dc05699fed41
+
+spades:
+    source: download
+    url: http://spades.bioinf.spbau.ru/release3.6.1/SPAdes-3.6.1-Linux.tar.gz
+    checksum: None
+
+discosnp:
+    source: download
+    url: http://gatb-tools.gforge.inria.fr/versions/src/DiscoSNP++-2.2.1-Source.tar.gz
+    checksum: None
+
+gemsim:
+    source: download
+    url: http://downloads.sourceforge.net/project/gemsim/GemSIM_v1.6.tar.gz
+    checksum: None
