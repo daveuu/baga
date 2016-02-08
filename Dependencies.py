@@ -871,6 +871,7 @@ dependencies_by_task['Structure'] = [
 
 dependencies_by_task['CallVariants'] = [
 # 'GATK' checked separately when path specified to GATK
+'pysam'
 ]
 
 dependencies_by_task['FilterVariants'] = [
