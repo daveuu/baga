@@ -67,7 +67,7 @@ mkdir baga_analysis
 cd baga_analysis
 git clone http://github.com/daveuu/baga.git
 cd baga
-git checkout a030b99168429a1e0896dc8322f539850a932969
+git checkout a1675f272fd4e369b25e0be1869eb472a7575d90
 cd ..
 ```
 
