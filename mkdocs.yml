@@ -1,0 +1,15 @@
+site_name: BAGA, The Bacterial and Archaeal Genome Analyser
+site_author: David Williams
+
+repo_url: https://github.com/daveuu/baga/
+
+pages:
+- Home: index.md
+- Guides by example:
+    - Introduction: guides.md
+    - Divergent, co-existing Pseudomomans aeruginosa lineages in CF patients: guide1.md
+
+theme: readthedocs
+
+markdown_extensions:
+    - admonition:
