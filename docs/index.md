@@ -29,7 +29,7 @@ To download and explore the BAGA source code visit the [github repository](http:
 
 ## Prerequisites
 
-Although BAGA will install bioinformatics software itself where possible ([GATK](https://www.broadinstitute.org/gatk/download/) exceptionally requires downloading by the user because of license restrictions), there are some prerequisites. Along with installation instructions, they are listed below. If you are using a computing cluster at a research institution, these pieces of software are probably available already (you could go ahead and try some [guided examples](../guides)).
+Although BAGA will install bioinformatics software itself where possible ([GATK](https://www.broadinstitute.org/gatk/download/) exceptionally requires downloading by the user because of license restrictions), there are some prerequisites. Along with installation instructions, they are listed below. If you are using a computing cluster at a research institution, these pieces of software are probably available already (you could go ahead and try some [guided examples](guides)).
 
 !!! note
     If you are not a system administrator where you would like to use BAGA (if the `sudo` command does not work for you), find out who is and ask them to install any missing packages listed below.
