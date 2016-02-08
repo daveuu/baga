@@ -770,7 +770,7 @@ parser_CallVariants.add_argument('-e', "--use_existing_graph",
     action = 'store_true')
 
 parser_CallVariants.add_argument('-A', "--arguments", 
-    help = "Send direct arguments to a wrapped tool. E.g. --arguments DiscoSNP++ '-k 41'",
+    help = "Send direct arguments to a wrapped tool. E.g. --arguments DiscoSNP++ '_k 41'. The leading dashes (-) must be replaced with underscores (_) and the arguments must be in quotations",
     nargs = '*')
 
 
