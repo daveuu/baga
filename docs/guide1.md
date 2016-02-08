@@ -9,7 +9,7 @@ The analysis starts with paired end short sequence reads (now [publically availa
 After applying a pipelined BAGA analysis based on these or other scripts, you might decide to publish your findings. Independent reproduction of your analysis by other people is easily achievable by depositing your BAGA scripts into a public data repository such as [FigShare](http://figshare.com) and including the [DOI](http://www.doi.org/) and citation in your report.
 
 !!! note
-    Short read data is bulky. Some steps in the following analysis are rapid but others can take an hour or longer. You could paste each command into a terminal and wait for completion *e.g.* leave it running overnight, or, provided the [prerequisites](../#prerequisites) are installed, the whole analysis can be run using a single script which you can download [here]. Reading through the material below should help you to understand what happened during the analysis.
+    Short read data is bulky. Some steps in the following analysis are rapid but others can take an hour or longer. You could paste each command into a terminal and wait for completion *e.g.* leave it running overnight, or, provided the [prerequisites](../#prerequisites) are installed, the whole analysis can be run using a single script which you can download [coming soon!]. Reading through the material below should help you to understand what happened during the analysis.
 
 !!! warning
     Because of large amounts of data input/output, unless you have time on your hands, do not attempt over network mounted storage! Use a local 'scratch' disk if running on a compute cluster.
