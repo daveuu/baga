@@ -274,6 +274,8 @@ baga/baga_cli.py Structure \
 --plot
 ```
 
+Similarly `--exclude_samples` can be used to omit a selection from the group defined by `--reads_name`. Both `--include_samples` and `--exclude_samples` can be used with `--check` as well as `-plot`.
+
 If you have found a region of particular interest but would like to plot it in a wider context than the chromosome region that BAGA automatically selects, you can define a region with the `--plot_range` option.
 ```bash
 baga/baga_cli.py Structure \

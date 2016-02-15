@@ -612,8 +612,15 @@ parser_Structure.add_argument('-t', "--ratio_threshold",
     default = 0.15,
     metavar = 'FLOAT')
 
+## these two should probably be in a parent parser inherited for most tasks
 parser_Structure.add_argument('-S', "--include_samples", 
-    help = "With --plot or --plot_range, restrict plotting to these samples else if omitted, plots for all samples are produced. With --summarise, either restrict summaries to these ",
+    help = "With --plot or --plot_range, restrict plotting to these samples else if omitted, plots for all samples are produced.",
+    type = str,
+    nargs = '+',
+    metavar = 'SAMPLE_NAME')
+
+parser_Structure.add_argument('-e', "--exclude_samples", 
+    help = "exclude these samples from the analysis. If omitted, no samples are excluded.",
     type = str,
     nargs = '+',
     metavar = 'SAMPLE_NAME')
@@ -1878,7 +1885,7 @@ if args.subparser == 'Structure':
                     BAMs += [path]
         
         # check on requested samples: crop BAMs accordingly
-        if args.include_samples:
+        if args.include_samples or args.exclude_samples:
             if not args.reads_name:
                 # need sample names so will parse BAMs
                 import pysam
@@ -1886,25 +1893,40 @@ if args.subparser == 'Structure':
                 for BAM in BAMs:
                     sample_names[pysam.Samfile(BAM, 'rb').header['RG'][0]['ID']] = BAM
             
-            missing_labels = sorted(set(args.include_samples) - set(sample_names))
-            found_labels = sorted(set(args.include_samples) & set(sample_names))
-            e = ['None of the requested sample labels were found among the previously checked reads.']
-            e += ['Requested: {}'.format(', '.join(args.include_samples))]
-            e += ['Available: {}'.format(', '.join(sorted(sample_names)))]
-            assert len(found_labels), '\n'.join(e)
-            
-            if len(missing_labels):
-                print('WARNING: could not find the following requested samples among previously checked reads.')
-                print(', '.join(missing_labels))
-            
+            found_labels = sorted(sample_names)
+            if args.include_samples:
+                missing_labels = sorted(set(args.include_samples) - set(sample_names))
+                found_labels = sorted(set(args.include_samples) & set(sample_names))
+                e = ['None of the requested sample labels were found among the '\
+                        'previously checked reads.']
+                e += ['Requested: {}'.format(', '.join(args.include_samples))]
+                e += ['Available: {}'.format(', '.join(sorted(sample_names)))]
+                assert len(found_labels), '\n'.join(e)
+                print('Found {} samples to use after --include_samples: {}'\
+                        ''.format(len(found_labels), ', '.join(found_labels)))
+                
+                if len(missing_labels):
+                    print('WARNING: could not find the following requested '\
+                            'samples among previously checked reads.')
+                    print(', '.join(missing_labels))
+                
+            if args.exclude_samples:
+                print('Found {} samples to use, --exclude_samples provides {} '\
+                        'to remove.'.format(len(found_labels), 
+                        len(args.exclude_samples)))
+                found_labels = sorted(set(found_labels) - set(args.exclude_samples))
+                print('{} samples remain to analyse: {}'.format(len(found_labels), 
+                        ', '.join(found_labels)))
+                
             # update BAMs for args.check
-            print(BAMs)
+            #print(BAMs)
             if not args.reads_name:
                 BAMs = [sample_names[sample] for sample in found_labels]
             else:
-                BAMs = [BAM for BAM in BAMs if BAM.split(os.path.sep)[-1].split('__')[0] in found_labels]
+                BAMs = [BAM for BAM in BAMs if \
+                        BAM.split(os.path.sep)[-1].split('__')[0] in found_labels]
             
-            print(BAMs)
+            #print(BAMs)
             # update sample_names for arg.plot
             sample_names = sorted(found_labels)
         
