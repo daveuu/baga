@@ -716,6 +716,13 @@ class MultipleSequenceAlignment:
                         print('{} bp at {}-{}'.format(e - s, s, e))
             
             these_missing_regions = [these_missing_regions[n:n+2] for n in range(0,len(these_missing_regions),2)]
+            if len(these_missing_regions[-1]) == 1:
+                if these_missing_regions[-1][0] == BAM.header['SQ'][0]['LN']:
+                    # for some reason last position included here? Bug?
+                    these_missing_regions.pop()
+                else:
+                    # missing up to the end of the chromosome
+                    these_missing_regions[-1] += [BAM.header['SQ'][0]['LN']]
             print('{} bp in {} gaps missing from {}'.format(sum([(e-s) for s,e in these_missing_regions]), len(these_missing_regions), sample))
             missing_regions[sample] = these_missing_regions
             # report durations, time left etc
