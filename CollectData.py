@@ -336,7 +336,7 @@ class Genome:
                     setattr(self, member.name, contents)
 
         def loadFromGBK(local_path):
-            seq_record = _SeqIO.read(local_path, "genbank")
+            seq_record = list(_SeqIO.parse(local_path, "genbank"))[0]
             self.ORF_ranges, self.large_mobile_element_ranges = extractLoci(seq_record)
             self.sequence = _array('c', seq_record.seq)
             self.id = seq_record.id
