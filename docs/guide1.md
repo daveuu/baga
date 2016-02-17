@@ -4,7 +4,7 @@
 
 This guide describes how to use BAGA to reproduce some of the findings in a peer reviewed research paper published in the [American Journal for Respiratory Care and Critical Care Medicine](http://www.atsjournals.org/doi/abs/10.1164/rccm.201409-1646OC#.VqtfSknciV4 "Williams, D., Evans, B., Haldenby, S., Walshaw, M. J., Brockhurst, M. A., Winstanley, C. & Paterson, S. (2015) Divergent, Coexisting Pseudomonas aeruginosa Lineages in Chronic Cystic Fibrosis Lung Infections. Am. J. Respir. Crit. Care Med. 191, 775-785"). The study investigated the population structure of chronic *Pseudomonas aeruginosa* infections affecting the airways of a cohort of cystic fibrosis patients using paired-end Illumina short sequencing reads. If you have similar data and aims, you can adapt the instructions here to your own data. By pasting each command below into a terminal logged into a linux computer, you should be able to complete the analysis with little effort (check the [prerequisites](../#prerequisites) if you have problems with the "Dependencies" commands). 
 
-The analysis starts with paired end short sequence reads (now [publically available](https://www.ebi.ac.uk/ena/data/view/ERP006191)) for numerous isolates obtained from the sputum of each patient, and a previously published reference genome sequence. The result, after calling single nucleotide, insertion and deletion variants, is a phylogenetic tree describing the *P. aeruginosa* population structure within and between the patients. Horizontal genetic transfers *via* homologous recombination are also inferred. 
+The analysis starts with paired end short sequence reads (now [publically available](https://www.ebi.ac.uk/ena/data/view/ERP006191) but automatically downloaded here) for numerous isolates obtained from the sputum of each patient, and a previously published reference genome sequence. The result, after calling single nucleotide, insertion and deletion variants, is a phylogenetic tree describing the *P. aeruginosa* population structure within and between the patients. Horizontal genetic transfers *via* homologous recombination are also inferred. 
 
 After applying a pipelined BAGA analysis based on these or other scripts, you might decide to publish your findings. Independent reproduction of your analysis by other people is easily achievable by depositing your BAGA scripts into a public data repository such as [FigShare](http://figshare.com) and including the [DOI](http://www.doi.org/) and citation in your report.
 
@@ -28,7 +28,7 @@ baga/baga_cli.py CallVariants \
 --arguments HaplotypeCaller '__sample_ploidy 1 __heterozygosity 0.001'
 --GATK_jar_path ~/GenomeAnalysisTK.jar --JRE_1_7_path ~/Downloads/jre1.7.0_80/bin/java
 ```
-The above command called the GATK HaplotypeCaller with the options `--sample_ploidy 1 --heterozygosity 0.001`: you must substitute the leading dashes (-) with underscores (_) so as not to confuse BAGA.
+The above command called the GATK HaplotypeCaller with the options `--sample_ploidy 1 --heterozygosity 0.001`. You must substitute the leading dashes (-) with underscores (_) so as not to confuse BAGA.
 
 ```bash
 baga/baga_cli.py CallVariants \
@@ -40,7 +40,7 @@ baga/baga_cli.py CallVariants \
 --GATK_jar_path ~/GenomeAnalysisTK.jar --JRE_1_7_path ~/Downloads/jre1.7.0_80/bin/java
 ```
 
-The above command called the GATK GenotypeGVCFs with the options `--heterozygosity 0.001`. In the following analysis, the default options can be used so the `--arguments` is not used but is worth knowning about.
+The above command called the GATK GenotypeGVCFs with the options `--heterozygosity 0.001`. In the following analysis, the default options can be used so the `--arguments` is not used but is worth knowing about.
 
 ## Get the Genome Analysis Toolkit (GATK)
 
@@ -67,7 +67,7 @@ mkdir baga_analysis
 cd baga_analysis
 git clone http://github.com/daveuu/baga.git
 cd baga
-git checkout a1675f272fd4e369b25e0be1869eb472a7575d90
+git checkout 43c67c308c8fd20bd5f47e0e3b167dbd7629b3d8
 cd ..
 ```
 
