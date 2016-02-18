@@ -738,6 +738,13 @@ parser_CallVariants.add_argument('-m', "--max_memory",
     "available at launch time.",
     type = int)
 
+parser_CallVariants.add_argument('-s', "--callsingles", 
+    help = "call variants in each alignment on a per sample basis (not for a joint "\
+"analysis, see --calleach and --calljoint for that). "\
+"Called 1st time on uncalibrated alignments, called 2nd after base quality score "\
+"recalibration.",
+    action = 'store_true')
+
 parser_CallVariants.add_argument('-c', "--calleach", 
     help = "call variants in each alignment in preparation for a joint analysis. "\
 "Called 1st time on uncalibrated alignments, called 2nd after base quality score "\
@@ -2310,7 +2317,8 @@ if args.subparser == 'Structure':
 if args.subparser == 'CallVariants':
     print('\n-- Variant Calling module --\n')
     # check whether GATK path is needed
-    if any([args.calleach, 
+    if any([args.callsingles,
+            args.calleach, 
             args.calljoint, 
             args.hardfilter, 
             args.recalibrate
@@ -2328,6 +2336,7 @@ if args.subparser == 'CallVariants':
 
 if using any of:
 
+--callsingles
 --calleach
 --calljoint
 --hardfilter
@@ -2405,7 +2414,8 @@ if using any of:
             else:
                 add_prefix = 'noref_' + '+'.join(use_these_names)
             caller.call(use_existing_graph = args.use_existing_graph, add_prefix = add_prefix, arguments = use_arguments)
-        elif any([args.calleach, 
+        elif any([args.callsingles,
+                args.calleach, 
                 args.calljoint, 
                 args.hardfilter, 
                 args.recalibrate
@@ -2469,6 +2479,27 @@ if using any of:
                 print('Because --new, also setting --force to overwrite each output file')
                 args.force = True
             
+            if args.callsingles and (args.calleach or args.calljoint):
+                print('--callsingles for calling variants in individual samples '\
+                        'cannot be used with the --calleach plus --calljoint '\
+                        'combination that is used for joint variant calling for a cohort')
+                sys.exit(1)
+            
+            if args.callsingles:
+                try:
+                    use_arguments = direct_arguments['HaplotypeCaller']
+                except KeyError:
+                    use_arguments = False
+                caller.CallVCFsGATK(
+                            mem_num_gigs = max_memory,
+                            jar = args.GATK_jar_path.split(os.path.sep),
+                            use_java = use_java,
+                            force = args.force, 
+                            max_cpus = args.max_cpus,
+                            arguments = use_arguments)
+                
+                caller.saveLocal(use_name_alns)
+                
             if args.calleach:
                 try:
                     use_arguments = direct_arguments['HaplotypeCaller']

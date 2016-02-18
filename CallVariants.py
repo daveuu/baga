@@ -622,6 +622,113 @@ class CallerGATK:
                         #print('omitting {}'.format(att_name))
                         pass
 
+    def CallVCFsGATK(self, 
+            jar = ['external_programs', 'GenomeAnalysisTK', 'GenomeAnalysisTK.jar'], 
+            local_variants_path = ['variants'],
+            use_java = 'java',
+            force = False,
+            mem_num_gigs = 8, 
+            max_cpus = -1,
+            arguments = False):
+        '''
+        https://www.broadinstitute.org/gatk/guide/best-practices/?bpm=DNAseq
+        max_cpus for this GATK module is "cpu threads per data thread"
+        this method follows the single sample variant calling described here:
+        https://www.broadinstitute.org/gatk/guide/article?id=2803
+        not the joint genotyping (see .CallgVCFsGATK() and .GenotypeGVCFsGATK())
+        '''
+
+        print(self.genome_id)
+
+        genome_fna = 'genome_sequences/%s.fna' % self.genome_id
+        if not _os.path.exists(genome_fna):
+            _SeqIO.write(_SeqRecord(_Seq(self.genome_sequence.tostring()), id = self.genome_id), 
+                    genome_fna, 
+                    'fasta')
+
+        jar = _os.path.sep.join(jar)
+        local_variants_path = _os.path.sep.join(local_variants_path)
+        if not _os.path.exists(local_variants_path):
+            _os.makedirs(local_variants_path)
+
+        local_variants_path_genome = _os.path.sep.join([
+                                        local_variants_path,
+                                        self.genome_id])
+
+        if not _os.path.exists(local_variants_path_genome):
+            _os.makedirs(local_variants_path_genome)
+
+        max_processes = _decide_max_processes( max_cpus )
+
+        start_time = _time.time()
+        paths_to_raw_VCFs = []
+        exe = [use_java, '-Xmx%sg' % mem_num_gigs, '-jar', jar]
+        # call the last set of ready BAMs added
+        for cnum,BAM in enumerate(self.ready_BAMs[-1]):
+            VCF_out = BAM[:-4] + '_unfiltered.VCF'
+            VCF_out = _os.path.sep.join([local_variants_path_genome, VCF_out.split(_os.path.sep)[-1]])
+            if not _os.path.exists(VCF_out) or force:
+                # cmd should be built as 'option':[argument list] dictionary
+                # with None as values for flag options
+                cmd = {}
+                # '-T', 'HaplotypeCaller', '-R', genome_fna, '-I', BAM, #'-L', '20', 
+                cmd['-T'] = ['HaplotypeCaller']
+                cmd['-R'] = [genome_fna]
+                cmd['-I'] = [BAM]
+                # '--genotyping_mode', 'DISCOVERY',
+                cmd['--genotyping_mode'] = ['DISCOVERY']
+                #'--sample_ploidy', '1',
+                cmd['--sample_ploidy'] = ['1']
+                #'--heterozygosity', '0.0001',         # this is less expected diversity than the default 0.001
+                cmd['--heterozygosity'] = ['0.0001']
+                #'--indel_heterozygosity', '0.00001',  # this is less expected diversity than the default 0.0001
+                cmd['--indel_heterozygosity'] = ['0.00001']
+                #'--emitRefConfidence', 'GVCF',        # not for single sample calling
+                #'--variant_index_type', 'LINEAR',
+                cmd['--variant_index_type'] = ['LINEAR']
+                #'--variant_index_parameter', '128000',
+                cmd['--variant_index_parameter'] = ['128000']
+                #'-nct',  str(max_processes),
+                cmd['-nct'] = [str(max_processes)]
+                #'-stand_emit_conf', '10', 
+                cmd['-stand_emit_conf'] = ['10']
+                #'-stand_call_conf', '20', 
+                cmd['-stand_call_conf'] = ['20']
+                #'-o', VCF_out]
+                cmd['-o'] = [VCF_out]
+                
+                if arguments:
+                    # overwrite defaults with direct arguments
+                    # (e.g. via -A/--arguments cli)
+                    from baga import parse_new_arguments
+                    cmd = parse_new_arguments(arguments, cmd)
+                
+                # make commands into a list suitable for subprocess
+                cmds = []
+                for opt,arg in cmd.items():
+                    cmds += [opt]
+                    if arg is not None:
+                        cmds += arg
+                
+                print('Called: %s' % (' '.join(map(str, exe + cmds))))
+                _subprocess.call(exe + cmds)
+                
+            else:
+                print('Found:')
+                print(VCF_out)
+                print('use "force = True" to overwrite')
+            
+            paths_to_raw_VCFs += [VCF_out]
+            
+            # report durations, time left etc
+            _report_time(start_time, cnum, len(self.ready_BAMs[-1]))
+
+        # add to a list because this is done twice
+        if hasattr(self, 'path_to_unfiltered_VCF'):
+            self.path_to_unfiltered_VCF += [paths_to_raw_VCFs]
+        else:
+            self.path_to_unfiltered_VCF = [paths_to_raw_VCFs]
+
     def CallgVCFsGATK(self, 
             jar = ['external_programs', 'GenomeAnalysisTK', 'GenomeAnalysisTK.jar'], 
             local_variants_path = ['variants'],
@@ -633,6 +740,9 @@ class CallerGATK:
         '''
         https://www.broadinstitute.org/gatk/guide/best-practices/?bpm=DNAseq
         max_cpus for this GATK module is "cpu threads per data thread"
+        this method follows the joint genotyping calling described here:
+        https://www.broadinstitute.org/gatk/guide/article?id=3893
+        the method .GenotypeGVCFsGATK() should be called after this.
         '''
 
         print(self.genome_id)
@@ -676,11 +786,11 @@ class CallerGATK:
                 cmd['--genotyping_mode'] = ['DISCOVERY']
                 #'--sample_ploidy', '1',
                 cmd['--sample_ploidy'] = ['1']
-                #'--heterozygosity', '0.0001',         # 650 total SNPs prior in all samples i.e., population <== make this an argument
+                #'--heterozygosity', '0.0001',         # this is less expected diversity than the default 0.001
                 cmd['--heterozygosity'] = ['0.0001']
-                #'--indel_heterozygosity', '0.00001',  # 65 total indels prior in all samples i.e., population
-                cmd['--indel_heterozygosity'] = ['0.00001']  # 65 total indels prior in all samples i.e., population
-                #'--emitRefConfidence', 'GVCF',        # make vcfs appropriate for doing GenotypeGVCFs after
+                #'--indel_heterozygosity', '0.00001',  # this is less expected diversity than the default 0.0001
+                cmd['--indel_heterozygosity'] = ['0.00001']
+                #'--emitRefConfidence', 'GVCF',        # make vcfs appropriate for doing GenotypeGVCFs after <========
                 cmd['--emitRefConfidence'] = ['GVCF']  # make vcfs appropriate for doing GenotypeGVCFs after
                 #'--variant_index_type', 'LINEAR',
                 cmd['--variant_index_type'] = ['LINEAR']
@@ -819,36 +929,65 @@ class CallerGATK:
         e1 = 'Could not find "path_to_unfiltered_VCF" attribute. \
         Before filtering, joint calling of variants is necessary. \
         Please run:\n\
-        GenotypeGVCFsGATK()\n\
+        CallgVCFsGATK and GenotypeGVCFsGATK() or just CallVCFsGATK\n\
         method on this SAMs instance.'
 
         assert hasattr(self, 'path_to_unfiltered_VCF'), e1
 
-        # extract the SNPs
-        raw_SNPs = self.path_to_unfiltered_VCF[-1][:-4] + '_SNPs.vcf'
-        cmd = [use_java, '-jar', jar,
-            '-T', 'SelectVariants',
-            '-R', genome_fna,
-            '-V', self.path_to_unfiltered_VCF[-1],
-            #'-L', '20',
-            '-selectType', 'SNP',
-            '-o', raw_SNPs]
+        ## filtering must be done differently if
+        ## a single joint called VCF is present
+        ## or a set of VCFs are present
 
-        print(' '.join(cmd))
-        _subprocess.call(cmd)
-
-        # filter the SNPs
-        hf_SNPs = (self.path_to_unfiltered_VCF[-1][:-4] + '_SNPs.vcf').replace('unfiltered','hardfiltered')
-        cmd = [use_java, '-jar', jar,
-            '-T', 'VariantFiltration',
-            '-R', genome_fna,
-            '-V', raw_SNPs,
-            '--filterExpression', '"QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0"',
-            '--filterName', '"standard_hard_filter"',
-            '-o', hf_SNPs]
-
-        print(' '.join(cmd))
-        _subprocess.call(cmd)
+        if isinstance(self.path_to_unfiltered_VCF[-1],str):
+            # single item to joint called VCF
+            # extract the SNPs
+            raw_SNPs = self.path_to_unfiltered_VCF[-1][:-4] + '_SNPs.vcf'
+            cmd = [use_java, '-jar', jar,
+                '-T', 'SelectVariants',
+                '-R', genome_fna,
+                '-V', self.path_to_unfiltered_VCF[-1],
+                #'-L', '20',
+                '-selectType', 'SNP',
+                '-o', raw_SNPs]
+            print(' '.join(cmd))
+            _subprocess.call(cmd)
+            # filter the SNPs
+            hf_SNPs = (self.path_to_unfiltered_VCF[-1][:-4] + '_SNPs.vcf').replace('unfiltered','hardfiltered')
+            cmd = [use_java, '-jar', jar,
+                '-T', 'VariantFiltration',
+                '-R', genome_fna,
+                '-V', raw_SNPs,
+                '--filterExpression', '"QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0"',
+                '--filterName', '"standard_hard_filter"',
+                '-o', hf_SNPs]
+        else:
+            # must be a list
+            hf_SNPs = []
+            for unfilteredVCF in self.path_to_unfiltered_VCF[-1]:
+                # single item to joint called VCF
+                # extract the SNPs
+                raw_SNPs = unfilteredVCF[:-4] + '_SNPs.vcf'
+                cmd = [use_java, '-jar', jar,
+                    '-T', 'SelectVariants',
+                    '-R', genome_fna,
+                    '-V', unfilteredVCF,
+                    #'-L', '20',
+                    '-selectType', 'SNP',
+                    '-o', raw_SNPs]
+                print(' '.join(cmd))
+                _subprocess.call(cmd)
+                # filter the SNPs
+                this_hf_SNPs = (unfilteredVCF[:-4] + '_SNPs.vcf').replace('unfiltered','hardfiltered')
+                cmd = [use_java, '-jar', jar,
+                    '-T', 'VariantFiltration',
+                    '-R', genome_fna,
+                    '-V', raw_SNPs,
+                    '--filterExpression', '"QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0"',
+                    '--filterName', '"standard_hard_filter"',
+                    '-o', this_hf_SNPs]
+                hf_SNPs += [this_hf_SNPs]
+                print(' '.join(cmd))
+                _subprocess.call(cmd)
 
         # add to a list because this is done twice
         if hasattr(self, 'path_to_hardfiltered_SNPs'):
@@ -870,36 +1009,65 @@ class CallerGATK:
         e1 = 'Could not find "path_to_unfiltered_VCF" attribute. \
         Before filtering, joint calling of variants is necessary. \
         Please run:\n\
-        GenotypeGVCFsGATK()\n\
+        CallgVCFsGATK and GenotypeGVCFsGATK() or just CallVCFsGATK\n\
         method on this SAMs instance.'
 
         assert hasattr(self, 'path_to_unfiltered_VCF'), e1
 
-        # extract the INDELs
-        raw_INDELs = self.path_to_unfiltered_VCF[-1][:-4] + '_INDELs.vcf'
-        cmd = [use_java, '-jar', jar,
-            '-T', 'SelectVariants',
-            '-R', genome_fna,
-            '-V', self.path_to_unfiltered_VCF[-1],
-            #'-L', '20',
-            '-selectType', 'INDEL',
-            '-o', raw_INDELs]
+        if isinstance(self.path_to_unfiltered_VCF[-1],str):
+            # single item to joint called VCF
+            # extract the INDELs
+            raw_INDELs = self.path_to_unfiltered_VCF[-1][:-4] + '_INDELs.vcf'
+            cmd = [use_java, '-jar', jar,
+                '-T', 'SelectVariants',
+                '-R', genome_fna,
+                '-V', self.path_to_unfiltered_VCF[-1],
+                #'-L', '20',
+                '-selectType', 'INDEL',
+                '-o', raw_INDELs]
+            print(' '.join(cmd))
+            _subprocess.call(cmd)
+            # filter the INDELs
+            hf_INDELs = (self.path_to_unfiltered_VCF[-1][:-4] + '_INDELs.vcf').replace('unfiltered','hardfiltered')
+            cmd = [use_java, '-jar', jar,
+                '-T', 'VariantFiltration',
+                '-R', genome_fna,
+                '-V', raw_INDELs,
+                '--filterExpression', '"QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0"',
+                '--filterName', '"standard_indel_hard_filter"',
+                '-o', hf_INDELs]
+            
+            print(' '.join(cmd))
+            _subprocess.call(cmd)
+        else:
+            # must be a list
+            hf_INDELs = []
+            for unfilteredVCF in self.path_to_unfiltered_VCF[-1]:
+                # single item to joint called VCF
+                # extract the INDELs
+                raw_INDELs = unfilteredVCF[:-4] + '_INDELs.vcf'
+                cmd = [use_java, '-jar', jar,
+                    '-T', 'SelectVariants',
+                    '-R', genome_fna,
+                    '-V', unfilteredVCF,
+                    #'-L', '20',
+                    '-selectType', 'INDEL',
+                    '-o', raw_INDELs]
+                print(' '.join(cmd))
+                _subprocess.call(cmd)
+                # filter the INDELs
+                this_hf_INDELs = (unfilteredVCF[:-4] + '_INDELs.vcf').replace('unfiltered','hardfiltered')
+                cmd = [use_java, '-jar', jar,
+                    '-T', 'VariantFiltration',
+                    '-R', genome_fna,
+                    '-V', raw_INDELs,
+                '--filterExpression', '"QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0"',
+                '--filterName', '"standard_indel_hard_filter"',
+                    '-o', this_hf_INDELs]
+                hf_INDELs += [this_hf_INDELs]
+                print(' '.join(cmd))
+                _subprocess.call(cmd)
 
-        print(' '.join(cmd))
-        _subprocess.call(cmd)
-
-        # filter the INDELs
-        hf_INDELs = (self.path_to_unfiltered_VCF[-1][:-4] + '_INDELs.vcf').replace('unfiltered','hardfiltered')
-        cmd = [use_java, '-jar', jar,
-            '-T', 'VariantFiltration',
-            '-R', genome_fna,
-            '-V', raw_INDELs,
-            '--filterExpression', '"QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0"',
-            '--filterName', '"standard_indel_hard_filter"',
-            '-o', hf_INDELs]
-
-        print(' '.join(cmd))
-        _subprocess.call(cmd)
 
         # add to a list because this is done twice
         if hasattr(self, 'path_to_hardfiltered_INDELs'):
@@ -946,6 +1114,13 @@ class CallerGATK:
 
         for cnum,BAM in enumerate(self.ready_BAMs[-1]):
             table_out_pre = BAM[:-4] + '_baserecal_pre.table'
+            if isinstance(self.path_to_hardfiltered_SNPs[-1],str):
+                # joint calling was used
+                knownSitesVCF = self.path_to_hardfiltered_SNPs[-1]
+            else:
+                # per sample single calling was used
+                knownSitesVCF = self.path_to_hardfiltered_SNPs[-1][cnum]
+            
             if not _os.path.exists(table_out_pre) or force:
                 cmd = [use_java, '-Xmx%sg' % mem_num_gigs, '-jar', jar,
                     '-T', 'BaseRecalibrator',
@@ -953,7 +1128,7 @@ class CallerGATK:
                     '-I', BAM,
                     #'-L', '20',
                     '-nct',  str(max_processes),
-                    '-knownSites', self.path_to_hardfiltered_SNPs[-1],
+                    '-knownSites', knownSitesVCF,
                     #'--validation_strictness', 'LENIENT',
                     '-o', table_out_pre]
                 
@@ -972,7 +1147,7 @@ class CallerGATK:
                     '-I', BAM,
                     #'-L', '20',
                     '-nct',  str(max_processes),
-                    '-knownSites', self.path_to_hardfiltered_SNPs[-1],
+                    '-knownSites', knownSitesVCF,
                     '-BQSR', table_out_pre,
                     '-o', table_out_post]
                 
