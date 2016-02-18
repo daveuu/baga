@@ -896,6 +896,15 @@ class MultipleSequenceAlignment:
         print("Saving alignment column to reference genome variant position mapping.")
         baga.bagasave(variable_positions_pos1, 'baga.ComparativeAnalysis.MSA.{}_dict2ref'.format(MSA_filename))
         
+        if include_invariants:
+            print("Saving alignment columns excluded for mapping any back to reference genome positions.")
+            excluded_sites_ranges = makeRanges(sorted(excluded_sites))
+            baga.bagasave(excluded_sites_ranges, 'baga.ComparativeAnalysis.MSA.{}_omitted_slices'.format(MSA_filename))
+        else:
+            print("Saving alignment columns excluded for mapping not supported when "\
+                    "also excluding invariants (use 'baga.ComparativeAnalysis.MSA.{}_dict2ref' "\
+                    "for now)".format(MSA_filename))
+        
         print("{} sites excluded".format(len(excluded_sites)))
         if not strict_core:
             print("Excluded sites contained data for reference genome only")
@@ -920,6 +929,223 @@ class MultipleSequenceAlignment:
         MSA_filename = MSA_filename.replace('.fna','').replace('.fasta','')
         forMSA = []
         for sample, sequence_array in sorted(alignment_arrays.items()):
+            # without explicitly setting description = '', BioPython adds "<unknown description>" to sequence file
+            # for each record. Some sequence file parsers include "<unknown description>" with id which can confuse
+            # things e.g., ClonalFrameML where tree tip label will not match a sequence
+            forMSA += [_SeqRecord( id = sample, name = '', description = '', seq = _Seq(''.join(sequence_array)) )]
+            if len(sample) > 10:
+                print('WARNING: {} may get truncated to ten characters ({}) in {}.phy because of Phylip specs'.format(
+                                        sample, sample[:10], MSA_filename))
+        
+        MSA = _MultipleSeqAlignment(forMSA)
+        
+        print('Writing multiple nucleotide sequence alignment to Fasta file {}.fna'.format(MSA_filename))
+        _SeqIO.write(MSA,'{}.fna'.format(MSA_filename), 'fasta')
+        print('Writing multiple nucleotide sequence alignment to Phylip file {}.phy'.format(MSA_filename))
+        _SeqIO.write(MSA,'{}.phy'.format(MSA_filename), 'phylip')
+        print('Also writing a compressed Phylip file to {}.phy.gz.'.format(MSA_filename))
+        print('This interleaved format compresses low diversity alignments very well and is a convenient means of archiving large alignments')
+        _SeqIO.write(MSA, _gzip.open('{}.phy.gz'.format(MSA_filename), 'wb'), 'phylip')
+
+    def writeMSA_pos0(self,  MSA_filename = 'multiple_alignment', 
+                        strict_core = False, 
+                        include_invariants = False, 
+                        genome = None, 
+                        missing_char = '-',
+                        nodata_char = '?'):
+        '''
+        write SNPs to an alignment . . . 
+        optionally including invariant sites and, 
+        optionally restricting to core sites
+        indels and missing pieces of genome are treated the same.
+        '''
+        
+        if include_invariants:
+            # do some checks for information needed for entire genome
+            e = 'If including all positions in alignment, original genome must '\
+                    'be provided'
+            assert genome != None, e
+            
+            # strict: require BAMs and missing regions for full-length multiple sequence alignment
+            # e = 'If including all positions in alignment, BAM files from which VCFs generated
+            # must be scanned for missing regions using getCoverageRanges() method'
+            # assert hasattr(self, 'missing_regions'), e
+            
+            ref_genome_seq = genome.sequence
+            if hasattr(self, 'missing_regions'):
+                gaps = _Counter()
+                for sample,ranges in self.missing_regions.items():
+                    for (s,e) in ranges:
+                        for pos0 in xrange(s,e):
+                            gaps[pos0] += 1
+                
+                # turn gap positions into ranges
+                # these are missing chromosome in at least a single sample
+                gap_ranges = makeRanges(sorted(gaps))
+            else:
+                print('WARNING: making a full-length multiple-sequence alignment '\
+                        'without checking read alignments for missing pieces of '\
+                        'chromosome is a risky assumption! Only proceed if you '\
+                        'know there are no missing pieces of chromosome among '\
+                        'your samples relative to the reference chromosome and/or '\
+                        'BAMs are unavailable.')
+                gaps = {}
+                gap_ranges = []
+            
+        else:
+            # prepare appropriate functions and an iterator for only variable positions
+            all_SNP_reference = {}
+            for s,info in self.SNPs.items():
+                for pos1,(r,q) in info.items():
+                    if len(r) == len(q) == 1:
+                        all_SNP_reference[pos1-1] = r
+            
+            all_SNP_reference_sorted = sorted(all_SNP_reference)
+            
+            # get missing info 
+            gaps = _Counter()
+            for s,info in self.SNPs.items():
+                for pos1,(r,q) in info.items():
+                    if q == '-':
+                        gaps[pos1-1] += 1
+        
+        if strict_core:
+            print('Excluding {:,} bp from strict core'.format(len(gaps)))
+        
+        # attempt to add the variant for each variant column;
+        # if no variant, add the wildtype (reference sequence) nucleotide
+        # or '-' if chromsome absent
+        # or '?' if sata absent (these characters can be changed above)
+        alignment_arrays = {}
+        # make a dict of variable column index mapping to reference genome position
+        # needed to find e.g. variants shared by recombination
+        variable_positions_pos1 = {}
+        start_time = _time.time()
+        excluded_sites = set()
+        for snum,(sample,these_variants) in enumerate(self.SNPs.items()):
+            dropped = []
+            print('Building aligned sequence for {} ({} of {})'.format(sample, snum, len(self.SNPs)))
+            this_sequence = _array('c')
+            if include_invariants:
+                variant_or_missing = sorted(set(gaps.keys() + [pos1-1 for pos1 in these_variants.keys()]))
+                #variants_not_gaps = set(variant_or_missing) - set(gaps)
+                start = 0
+                for pos0 in variant_or_missing:
+                    # add reference sequence up to this position
+                    # seq = 'ccc-ddd-sss'
+                    # seq[:4-1]
+                    # seq[4:8-1]
+                    # seq[8:]
+                    if pos0 != start:
+                        # if not in consecutive missing pieces,
+                        # add reference characters since end of last gap
+                        this_sequence.extend(ref_genome_seq[start:pos0])
+                    
+                    start = pos0
+                    # decide whether to add a variant character or skip position because not in core
+                    if any([strt <= pos0 < end for strt,end in gap_ranges]):
+                        # this position missing somewhere
+                        if strict_core or gaps[pos0] == len(self.SNPs):
+                            # skip a character because missing in at least one sample
+                            # (non-core) and strict core requested
+                            # or skip a character because missing in all the samples
+                            dropped += ['Dropped {}, character {} because missing in {} samples'\
+                                    ''.format(pos0, ref_genome_seq[pos0], gaps[pos0])]
+                            excluded_sites.add(pos0)
+                        else:
+                            # present in at least one sample
+                            if any([strt <= pos0 < end for strt,end in self.missing_regions[sample]]):
+                                # but missing here (known missing chromosome: not missing data)
+                                this_sequence.append(missing_char)
+                            else:
+                                # not missing here
+                                try:
+                                    # add a variant character if possible
+                                    if these_variants[pos0+1][1] == '.':
+                                        # . in VCF is insufficient data to call:
+                                        # the data is missing (unknown)
+                                        this_sequence.append(nodata_char)
+                                    else:
+                                        # add the actual variant at this positions for this sample!
+                                        this_sequence.append(these_variants[pos0+1][1])
+                                        variable_positions_pos1[len(this_sequence)] = pos0+1
+                                except KeyError:
+                                    # add the wild-type character
+                                    this_sequence.append(ref_genome_seq[pos0])
+                    else:
+                        # in core: either variant or not
+                        try:
+                            # add a variant character if possible
+                            if these_variants[pos0+1][1] == '.':
+                                # . in VCF is insufficient data to call:
+                                # the data is missing (unknown)
+                                this_sequence.append(nodata_char)
+                            else:
+                                this_sequence.append(these_variants[pos0+1][1])
+                                variable_positions_pos1[len(this_sequence)] = pos0+1
+                        except KeyError:
+                            this_sequence.append(ref_genome_seq[pos0])
+                
+                # add the remaining characters
+                this_sequence.extend(ref_genome_seq[start:])
+                
+                _report_time(start_time, snum, len(self.SNPs))
+                
+            else:
+                # don't include invariants
+                for pos0 in all_SNP_reference_sorted:
+                    if strict_core:
+                        # determine inclusion based on core strictness
+                        if pos0 in gaps:
+                            dropped += ['Dropped {}, character {} because missing in {} samples'.format(pos0, all_SNP_reference[pos0], gaps[pos0])]
+                            excluded_sites.add(pos0)
+                            continue
+                    
+                    try:
+                        this_sequence.append(these_variants[pos1][1])
+                        variable_positions_pos1[len(this_sequence)] = pos0+1
+                    except KeyError:
+                        this_sequence.append(all_SNP_reference[pos0])
+            
+            
+            alignment_arrays[sample] = this_sequence
+        
+        #print('\n'.join(dropped))
+        
+        print('{} variable positions found (columns in multiple sequence alignment)'.format(len(variable_positions_pos1)))
+        
+        print("Saving alignment column to reference genome variant position mapping.")
+        baga.bagasave(variable_positions_pos1, 'baga.ComparativeAnalysis.MSA.{}_dict2ref'.format(MSA_filename))
+        
+        print("Saving alignment columns excluded for mapping any back to reference genome positions.")
+        excluded_sites_ranges = makeRanges(sorted(excluded_sites))
+        baga.bagasave(excluded_sites_ranges, 'baga.ComparativeAnalysis.MSA.{}_omitted_slices'.format(MSA_filename))
+        
+        print("{} sites excluded".format(len(excluded_sites)))
+        if not strict_core:
+            print("Excluded sites contained data for reference genome only")
+        
+        if include_invariants:
+            if strict_core:
+                alignment_arrays[self.genome_id] = _array('c', [char for pos0,char in enumerate(ref_genome_seq) if pos0 not in excluded_sites])
+            else:
+                # excluded sites if absent in all samples  <== can't remember why these are the same
+                alignment_arrays[self.genome_id] = _array('c', [char for pos0,char in enumerate(ref_genome_seq) if pos0 not in excluded_sites])
+        else:
+            if strict_core:
+                alignment_arrays[self.genome_id] = _array('c', [char for pos1,char in sorted(all_SNP_reference.items()) if pos1 not in excluded_sites])
+            else:
+                alignment_arrays[self.genome_id] = _array('c', [char for pos1,char in sorted(all_SNP_reference.items())])
+        
+        print('{} total columns in alignment'.format(len(alignment_arrays[self.genome_id])))
+        
+        # could add InDels but would only really contribute to missing data
+        # unless end-user chooses to encode indels as characters?
+        
+        MSA_filename = MSA_filename.replace('.fna','').replace('.fasta','')
+        forMSA = []
+        for sample, sequence_array in sorted(alignment_arrays.items()):
+            print(sample, len(sequence_array))
             # without explicitly setting description = '', BioPython adds "<unknown description>" to sequence file
             # for each record. Some sequence file parsers include "<unknown description>" with id which can confuse
             # things e.g., ClonalFrameML where tree tip label will not match a sequence
