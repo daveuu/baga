@@ -2762,18 +2762,33 @@ if args.subparser == 'SummariseVariants':
             
             if hasattr(caller, 'path_to_hardfiltered_SNPs') and hasattr(caller, 'path_to_hardfiltered_INDELs'):
                 # only one for VCFs so no overwriting
-                VCFs = [caller.path_to_hardfiltered_SNPs[-1], caller.path_to_hardfiltered_INDELs[-1]]
+                if isinstance(caller.path_to_hardfiltered_SNPs[-1],list):
+                    # called with --callsingle: one sample per VCF
+                    VCFs = caller.path_to_hardfiltered_SNPs[-1] + caller.path_to_hardfiltered_INDELs[-1]
+                else:
+                    # called with --calleach --calljoint: multi-sample VCFs
+                    VCFs = [caller.path_to_hardfiltered_SNPs[-1], caller.path_to_hardfiltered_INDELs[-1]]
                 # more than one can be handled with --report though
                 # only implemented for separate VCFs currently
                 VCFs_for_report[these_reads] = {'SNPs':caller.path_to_hardfiltered_SNPs[-1], 'InDels':caller.path_to_hardfiltered_INDELs[-1]}
             elif hasattr(caller, 'path_to_unfiltered_VCF'):
                 print('WARNING: path to GATK hardfiltered variants not found in {}'.format(filein))
                 print('It is recommended to complete the GATK variant calling with the CallVariants module')
-                VCFs = [caller.path_to_unfiltered_VCF[-1]]
+                if isinstance(caller.path_to_unfiltered_VCF[-1],list):
+                    # called with --callsingle: one sample per VCF
+                    VCFs = caller.path_to_unfiltered_VCF[-1]
+                else:
+                    # called with --calleach --calljoint: multi-sample VCFs
+                    VCFs = [caller.path_to_unfiltered_VCF[-1]]
             elif hasattr(caller, 'paths_to_raw_gVCFs'):
                 print('WARNING: path to GATK joint called variants not found in {}'.format(filein))
                 print('It is recommended to complete the GATK variant calling with the CallVariants module')
-                VCFs = caller.paths_to_raw_gVCFs[-1]
+                if isinstance(caller.paths_to_raw_gVCFs[-1],list):
+                    # called with --callsingle: one sample per VCF
+                    VCFs = caller.paths_to_raw_gVCFs[-1]
+                else:
+                    # called with --calleach --calljoint: multi-sample VCFs
+                    VCFs = [caller.paths_to_raw_gVCFs[-1]]
             else:
                 print('WARNING: path to GATK called variants not found in {}'.format(filein))
                 sys.exit('It seems the analysis described in {} is incomplete. Try completing or rerunning using the CallVariants module'.format(filein))
@@ -2791,7 +2806,7 @@ if args.subparser == 'SummariseVariants':
             else:
                 # add file
                 VCFs += [path]
-
+    
     print('Loaded VCF locations:\n{}'.format('\n'.join(VCFs)))
     
     message = 'Need --filters FILTER_NAME [FILTER_NAME] for report type "{}"'
