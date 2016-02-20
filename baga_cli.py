@@ -26,11 +26,6 @@ import os
 import subprocess
 from collections import defaultdict
 
-# a basic installation keeps the commandline interface in the package folder
-path_to_baga_package = os.path.sep.join(os.path.realpath(__file__).split(os.path.sep)[:-2])
-# so importing the module needs to be done from there
-sys.path.append(path_to_baga_package)
-
 from baga import Dependencies
 
 def check_files(files):
