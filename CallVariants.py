@@ -1472,7 +1472,8 @@ class Summariser:
                             if all_variants[sample][chromosome][pos1] != info:
                                 print('WARNING: VCFs in conflict for {} in chromosome '\
                                         '{} at position {}. You could try processing '\
-                                        'VCFs one at a time and compare tables produced.'\
+                                        'VCFs one at a time and compare tables produced. '\
+                                        'A variant at this position was omitted.'\
                                         ''.format(sample,chromosome,pos1))
                         else:
                             all_variants[sample][chromosome][pos1] = info
@@ -1540,7 +1541,6 @@ class Summariser:
         annotations = {}
         for sample,chromosomes in all_variants.items():
             for chromosome,positions in chromosomes.items():
-                #print(sample,chromosome,sorted(positions))
                 for pos1,((r,q),filters) in positions.items():
                     ## this was to keep sortVariantsKeepFilter()
                     ## compatible with other uses that assume single clone, always 1/1
@@ -1561,9 +1561,15 @@ class Summariser:
                         by_position_freqs[chromosome,pos1][(r,use_q)][sample] = freq,total
                     
                     try:
-                        ORFs_info = [(ORF_id,s,e,st,n) for ORF_id,(s,e,st,n) in self.genomes[chromosome].ORF_ranges.items() if s < pos1 < e]
+                        ORFs_info = [(ORF_id,s,e,st,gene_name) for ORF_id,(s,e,st,gene_name) in \
+                                sorted(self.genomes[chromosome].ORF_ranges.items()) if s < pos1 < e]
                         if len(ORFs_info) > 1:
-                            print('WARNING: variant in more than one ORF (overlapping): not implemented')
+                            print('WARNING: variant in more than one ORF (overlapping). '\
+                                    'Detailed annotations not yet implemented (marked as "multi")')
+                            multi_ORF_IDs = ','.join([ORF_id for ORF_id,s,e,st,gene_name in ORFs_info])
+                            multi_ORF_names = ','.join([gene_name for ORF_id,s,e,st,gene_name in ORFs_info])
+                            annotations[(chromosome,pos1,r,use_q)] = ("multi", "multi", 
+                                    "multi", "multi", "multi", multi_ORF_IDs, multi_ORF_names, "multi")
                         elif len(ORFs_info) == 1:
                             ORF_id,s,e,strand,gene_name = ORFs_info[0]
                             ORF_seq = self.genomes[chromosome].sequence[s:e].tostring()
@@ -1571,10 +1577,10 @@ class Summariser:
                             ORF0_codon_start = ORF0 - ORF0 % 3
                             ref_codon = ORF_seq[ORF0_codon_start:ORF0_codon_start+3]
                             frame1 = ORF0 - ORF0_codon_start + 1
-                            if len(r) == len(q) == 1:
+                            if len(r) == len(use_q) == 1:
                                 # substitution
                                 var_codon = list(ref_codon)
-                                var_codon[frame1-1] = q
+                                var_codon[frame1-1] = use_q
                                 var_codon = ''.join(var_codon)
                                 assert self.genomes[chromosome].sequence[pos1-1] == ref_codon[frame1-1]
                                 if st == 1:
@@ -1597,11 +1603,10 @@ class Summariser:
                                 else:
                                     ref_AA = str(_Seq(ref_codon).translate())
                             
-                            annotations[(chromosome,pos1,r,q)] = (ref_codon, var_codon, 
+                            annotations[(chromosome,pos1,r,use_q)] = (ref_codon, var_codon, 
                                     ref_AA, var_AA, frame1, ORF_id, gene_name, strand)
                     except (KeyError, TypeError):
                         pass
-
 
         all_chromosomes = sorted(set([a for b in all_variants.values() for a in b]))
 
@@ -1626,7 +1631,6 @@ class Summariser:
             fout.write(','.join(map(quote,colnames))+'\n')
             for (chromosome,pos1),variants in sorted(by_position.items()):
                 for (r,q),samples in variants.items():
-                    
                     try:
                         (ref_codon, var_codon, ref_AA, var_AA, frame1, ORF_id, \
                                 gene_name, strand) = annotations[(chromosome,pos1,r,q)]
