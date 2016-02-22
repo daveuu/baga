@@ -2143,8 +2143,11 @@ if args.subparser == 'SimulateReads':
 
 ### Repeats ###
 
-if args.subparser == 'Repeats':
+if task_name == 'Repeats':
     print('\n-- Chromosome repeats detection module --')
+    # configure logger for this Task
+    task_logger, task_log_folder = configureLogger(use_sample_name, main_log_filename, 
+            verbosities[args.verbosity], logger_name = task_name)
     
     e = '-i/--minimum_percent_identity must be between 0 and 100 percent (low values not recommended!)'
     assert 0 < args.minimum_percent_identity <= 100, e
@@ -2159,14 +2162,19 @@ if args.subparser == 'Repeats':
     
     if args.find:
         print('Loading genome %s' % use_name_genome)
-        genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
-        finder = Repeats.Finder(genome)
+        genome = CollectData.Genome(sample_name = use_name_genome, 
+                inherit_from = 'self')
+        finder = Repeats.Finder(genome = genome,
+                task_name = task_name, 
+                console_verbosity_lvl = verbosities[args.verbosity],
+                log_folder = task_log_folder)
+        
         # minimum_percent_identity defaults to 98%, argument takes 0.98 so *0.01
         # minimum_repeat_length defaults to 400
         finder.findRepeats(minimum_percent_identity = args.minimum_percent_identity * 0.01, minimum_repeat_length = args.minimum_repeat_length)
-        finder.saveLocal(use_name_genome)
+        finder.saveLocal()
         # also save just the ranges for filtering
-        baga.bagasave(finder.ambiguous_ranges, 'baga.Repeats.filter_regions-{}'.format(use_name_genome))
+        #baga.bagasave(finder.ambiguous_ranges, 'baga.Repeats.filter_regions-{}'.format(use_name_genome))
     
     if args.plot:
         # if not args.find:
