@@ -339,45 +339,96 @@ parser_Dependencies.add_argument("-V", "--versions_file",
 
 
 parser_CollectData = subparser_adder.add_parser('CollectData',
-                formatter_class = argparse.RawDescriptionHelpFormatter,
-                description = textwrap.fill('Download and parse genomes or \
-download short reads for analysis by {}'.format(title),
-                                            text_width,
-                                            replace_whitespace = False),
-                epilog = textwrap.fill('Genomes can be loaded from genbank \
-files with user provided paths or downloaded from the National Center for \
-Biotechnology Information (NCBI) with user provided accession numbers. Short \
-reads can be downloaded from the European Nucleotide Archive with user provided \
-Run Accession numbers\n\nExample usage: "%(prog)s -r \
-ERR953490,ERR953494,ERR953501,ERR953509,ERR953491,ERR953513"\n'\
-.format(title), text_width, replace_whitespace = False))
-
+        formatter_class = argparse.RawDescriptionHelpFormatter,
+        parents = [common_module_arguments],
+        description = textwrap.fill('Download and parse genomes or download '\
+        'short reads for analysis by {}'.format(title), text_width, 
+        replace_whitespace = False),
+        epilog = textwrap.fill('Genomes can be loaded from genbank files with '\
+        'user provided paths or downloaded from the National Center for '\
+        'Biotechnology Information (NCBI) with Assembly databse search terms, '\
+        'usually accession numbers or strain, species or genus names. '\
+        'Short reads can be downloaded from the European Nucleotide Archive '\
+        'with user provided Run Accession numbers\n\nExample usage: '\
+        '"%(prog)s -r ERR953490,ERR953494,ERR953501"\n'.format(title), 
+        text_width, replace_whitespace = False))
 
 mutually_exclusive_group = parser_CollectData.add_mutually_exclusive_group()
 
 # could use nargs='+' or similar here to get a list directly,
 # but not sure about spaces in paths
 mutually_exclusive_group.add_argument("-g", "--genomes", 
-    help="(down)load and parse genomes for analysis", 
+    help="(down)load and parse genomes for analysis. Requires one or more "\
+    "filename paths ending .gbk or .gbff or search terms to query the NCBI "\
+    "Assembly database. Alternatively the path to a single text file with an "\
+    "Assembly accession or other single-result search term per line (that will "\
+    "also be used as sample_name and used in a filename). A typical file is "\
+    "generated after downloading from Entrez to help with reproducibility (more "\
+    "general search terms can return inconsistent results over time). All results "\
+    "will be downloaded unless exclusions specified e.g., --complete_only. Genomes "\
+    "are saved to an fast internal format unless --keep_gbk is specified in which "\
+    "case the full .gbk files are also saved to disk. \n E.g., '--genomes "\
+    "Campylobacter --complete_only' will download all complete bacterial genomes "\
+    "of the genus 'Campylobacter'",
     type = str,
     nargs = '+')
+
+parser_CollectData.add_argument('-G', "--keep_gbk", 
+    help = "retain the original genbank file from NCBI and save to disk in "\
+    "addition to the fast internal format",
+    action = 'store_true')
+
+parser_CollectData.add_argument('-S', "--refseq_only", 
+    help = "only download if sequence is part of the RefSeq collection, "\
+    "ignore if in GenBank only",
+    action = 'store_true')
+
+assembly_status_filters = parser_CollectData.add_mutually_exclusive_group()
+
+assembly_status_filters.add_argument('-C', "--complete_only", 
+    help = "only download complete genome sequences",
+    action = 'store_true')
+
+assembly_status_filters.add_argument('-D', "--draft_only", 
+    help = "only download partial genome sequences in contigs or scaffolds",
+    action = 'store_true')
+
+
+
+mutually_exclusive_group.add_argument("-t", "--taxonomy", 
+    help="download and update local version of the NCBI taxonomy. "\
+    "An alternative URL can be provided but should not be necessary.", 
+    type = str,
+    nargs = '?',
+    default = None,
+    const = 'ftp://ftp.ncbi.nih.gov/pub/taxonomy/taxdump.tar.gz',
+    metavar = 'URL')
+
+
 
 mutually_exclusive_group.add_argument("-r", "--reads_download", 
     help="download short reads for analysis", 
     type = str,
-    nargs = '+')
+    nargs = '+',
+    metavar = 'ACCESSION_NUMBER')
+
+
+
 
 mutually_exclusive_group.add_argument("-R", "--reads_path", 
     help="path to local short reads in fastq files for analysis. All read files will be collcted. Alternatively, a pattern containing '*' '?' and other shell expansion characters or an explicit list of read files can also be supplied.", 
     type = str,
     nargs = '+')
 
-
-parser_CollectData.add_argument('-e', "--email_address", 
-    help = "required for downloading from NCBI")
-
 parser_CollectData.add_argument('-n', "--reads_group_name", 
     help = "optional for downloading from NCBI, required for loading from local path")
+
+
+
+parser_CollectData.add_argument('-e', "--email_address", 
+    type = str,
+    help = "required for downloading from NCBI")
+
 
 parser_PrepareReads = subparser_adder.add_parser('PrepareReads',
                 formatter_class = argparse.RawDescriptionHelpFormatter,
@@ -1468,58 +1519,222 @@ if args.subparser == 'Dependencies':
 
 ### Download Genomes ###
 
-if args.subparser == 'CollectData':
-    print('\n-- Data collection module --')
-    if args.genomes is not None:
-        from baga import CollectData
-        # work out what accessions and/or paths to genbank files were provided
-        if ',' in args.genomes:
-            # allow for single string with ',' delimiter
-            use_genome = args.genomes.split(',')
+if task_name == 'CollectData':
+    baga_cli.info('\t-- Data collection task --')
+    from baga import CollectData
+    # configure logger for this Task
+    task_logger, task_log_folder = configureLogger(use_sample_name, 
+            main_log_filename, verbosities[args.verbosity], 
+            logger_name = task_name)
+    ### Download Genomes ###
+    if args.genomes:
+        # first check if we're downloading from a list in a file
+        if len(args.genomes) == 1 and os.path.exists(args.genomes[0]) and \
+                not re.search('\.gbk|\.GBK|\.gbff|\.GBFF', args.genomes[0]):
+            baga_cli.info('Found {} - will attempt to parse for search terms and '\
+                    'URLs'.format(args.genomes[0]))
+            raw = open(args.genomes[0]).readlines()
+            accs_urls_dict = {}
+            for n,line in enumerate(raw):
+                k_v = re.split('[\t ]+', line.rstrip())
+                if len(k_v) == 2:
+                    accs_urls_dict[k_v[0]] = k_v[1]
+                elif len(k_v) == 1:
+                    accs_urls_dict[k_v[0]] = ''
+                else:
+                    baga_cli.error('Failed to parse {} at line {}: {}'.format(
+                            args.genomes[0], n+1, line))
+                    sys.exit(1)
+            baga_cli.log(PROGRESS, 'Found {} genomes to download'.format(
+                    len(accs_urls_dict)))
+            try:
+                genome = CollectData.Genome(task_name = task_name, 
+                        console_verbosity_lvl = verbosities[args.verbosity],
+                        log_folder = task_log_folder)
+            except ValueError as e:
+                baga_cli.error(e)
+                sys.exit(1)
+            downloaded = genome.downloadFromList(accs_urls_dict, force = args.force, 
+                    retain_gbk = args.keep_gbk, user_email = args.email_address, 
+                    path = args.analysis_path)
+            if set(downloaded) != set(accs_urls_dict):
+                failed = sorted(set(accs_urls_dict) - set(downloaded))
+                baga_cli.error('Failed to download these: {}. See logs for '\
+                        'details in {}'.format(', '.join(failed), 
+                        task_log_folder))
+                sys.exit(1)
         else:
-            use_genome = args.genomes
-        
-        load_gbks = []
-        load_bagas = []
-        collect_accessions = []
-        for g in use_genome:
-            genome_no_quotes = g.strip('"').strip("'")
-            if re.search('\.gbk|\.GBK', genome_no_quotes):
-                load_gbks += [genome_no_quotes]
-            elif re.search('\.baga|\.baga', genome_no_quotes):
-                load_bagas += [genome_no_quotes]
+            # work out what accessions and/or paths to genbank files were provided
+            if ',' in args.genomes:
+                # allow for single string with ',' delimiter
+                use_genome = args.genomes.split(',')
+                ### what if its a single single and not a list?
             else:
-                # anything that isn't .gbk or .baga is assumed to be an accession number
-                collect_accessions += [genome_no_quotes]
+                use_genome = args.genomes
+            load_gbks = []
+            search_terms = []
+            for g in use_genome:
+                genome_no_quotes = g.strip('"').strip("'")
+                if re.search('\.gbk|\.GBK|\.gbff|\.GBFF', genome_no_quotes):
+                    load_gbks += [genome_no_quotes]
+                    task_logger.debug("Will attempt to load genbank file: {}"\
+                            "".format(genome_no_quotes))
+                else:
+                    # anything that isn't *.gbk or *.gbff is assumed to be an
+                    # accession number
+                    search_terms += [genome_no_quotes]
+                    task_logger.debug("Will query NCBI Assembly database with: {}"\
+                            "".format(genome_no_quotes))
+            
+            # check email address provided for Entrez, if any accession found
+            if args.email_address is None and len(search_terms) > 0:
+                task_logger.error('User email address is required for '\
+                'downloading from NCBI with accession numbers. Detected {} items '\
+                'without ".gbk" or ".GBK" and assumed to be search terms'\
+                ''.format(len(search_terms)))
+                sys.exit(1)
+            
+            loaded_genomes = {}
+            genome = CollectData.Genome(task_name = task_name, 
+                    console_verbosity_lvl = verbosities[args.verbosity],
+                    log_folder = task_log_folder)
+            for gbk in load_gbks:
+                task_logger.info('Loading {}'.format(gbk))
+                genome.loadFromGBK(gbk)
+                # attempt to find a sensible sample_name
+                patt = '(GC[FA]_[0-9]{9}\.[0-9]{1,2})_'
+                m = re.match(patt,gbk)
+                if m is not None and len(m.groups()) == 1:
+                    task_logger.debug('Matched {} in {}'.format(patt,gbk))
+                    # Assembly accession in filename
+                    sample_name = m.groups()[0]
+                else:
+                    task_logger.debug('Did not match {} in {}'.format(patt,gbk))
+                    # else just filename without a conventional extensions
+                    # if present
+                    sample_name = gbk.replace('.gbk','').replace('.gbff','')
+                
+                task_logger.debug('will use sample name: {}'.format(sample_name))
+                genome.sample_name = sample_name
+                use_filename = 'baga.{}.Genome-{}.baga'.format(task_name, sample_name)
+                task_logger.debug('will use filename: {}'.format(use_filename))
+                genome.file_name = use_filename
+                genome.source = gbk
+                genome.saveLocal()
+                task_logger.info('Saved from {} to {}'.format(gbk, use_filename))
+            
+            download_urls = {}
+            for search_term in search_terms:
+                task_logger.info('Searching with: {}'.format(search_term))
+                genome.queryEntrezAssembly(search_term, args.email_address)
+                include_complete = True
+                include_scaffolds = True
+                include_contigs = True
+                if args.complete_only:
+                    include_scaffolds = False
+                    include_contigs = False
+                elif args.draft_only:
+                    include_complete = False
+                
+                total = len(genome.assemblies_info)
+                # download results of query
+                filenames = []
+                genome_identifiers = []
+                not_downloaded = []
+                c = 0
+                try:
+                    while True:
+                        c += 1
+                        task_logger.info('Fetching {} of {}'.format(c, total))
+                        res = genome.downloadNextAssembly(
+                                include_complete = include_complete, 
+                                include_scaffolds = include_scaffolds, 
+                                include_contigs = include_contigs, 
+                                refseq_only = args.refseq_only, 
+                                force = args.force, 
+                                retain_gbk = args.keep_gbk,
+                                path = args.analysis_path)
+                        if genome.file_name:
+                            # False if not DLd
+                            genome_identifiers += [res]
+                            filenames += [genome.file_name]
+                            download_urls[genome.sample_name] = genome.source
+                            genome.saveLocal(exclude = ["assemblies_info", 
+                                    "assemblies_problems"])
+                            if args.analysis_path != '.':
+                                new_path = os.path.sep.join([args.analysis_path,
+                                        genome.file_name])
+                                genome.logger.log(PROGRESS, 
+                                        'Moving to new path: {}'.format(new_path))
+                                os.rename(genome.file_name, new_path)
+                        else:
+                            not_downloaded += [res]
+                except StopIteration:
+                    task_logger.info('Completed downloads for search term: {}. {} '\
+                            'downloaded, {} not downloaded'.format(search_term, 
+                            len(filenames), len(not_downloaded)))
+                    pass
+            
+            if len(search_terms):
+                # save a record of downloaded genomes
+                filename = '{}{}genome_accessions_downloaded.txt'.format(
+                        task_log_folder, os.path.sep)
+                with open(filename,'w') as fout:
+                    for accession,url in sorted(download_urls.items()):
+                        fout.write('{}\t{}\n'.format(accession,url))
+                    task_logger.info('Put a list of accessions with download '\
+                            'URLs in {}'.format(filename))
+    ### old genomes ###
+    # if args.genomes is not None:
+        # from baga import CollectData
+        # # work out what accessions and/or paths to genbank files were provided
+        # if ',' in args.genomes:
+            # # allow for single string with ',' delimiter
+            # use_genome = args.genomes.split(',')
+        # else:
+            # use_genome = args.genomes
         
-        # check email address provided for Entrez, if any accession found
-        if args.email_address is None and len(collect_accessions) > 0:
-            print(textwrap.fill('User email address is required for downloading from NCBI \
-with accession numbers. Detected %s items without ".gbk" or ".GBK" and assumed to be \
-accession numbers' % (len(collect_accessions)), text_width))
-            sys.exit(1)
+        # load_gbks = []
+        # load_bagas = []
+        # collect_accessions = []
+        # for g in use_genome:
+            # genome_no_quotes = g.strip('"').strip("'")
+            # if re.search('\.gbk|\.GBK', genome_no_quotes):
+                # load_gbks += [genome_no_quotes]
+            # elif re.search('\.baga|\.baga', genome_no_quotes):
+                # load_bagas += [genome_no_quotes]
+            # else:
+                # # anything that isn't .gbk or .baga is assumed to be an accession number
+                # collect_accessions += [genome_no_quotes]
         
-        loaded_genomes = {}
+        # # check email address provided for Entrez, if any accession found
+        # if args.email_address is None and len(collect_accessions) > 0:
+            # print(textwrap.fill('User email address is required for downloading from NCBI \
+# with accession numbers. Detected %s items without ".gbk" or ".GBK" and assumed to be \
+# accession numbers' % (len(collect_accessions)), text_width))
+            # sys.exit(1)
         
-        for gbk in load_gbks:
-            print('Loading {}'.format(gbk))
-            genome = CollectData.Genome(local_path = gbk, format = 'genbank')
-            print('Storing for future use . . .')
-            genome.saveLocal()
-            #loaded_genomes[genome.id] = genome
+        # loaded_genomes = {}
         
-        for baga in load_bagas:
-            print('Loading {}'.format(baga))
-            genome = CollectData.Genome(local_path = gbk, format = 'baga')
-            print('Storing for future use . . .')
-            genome.saveLocal()
-            #loaded_genomes[genome.id] = genome
+        # for gbk in load_gbks:
+            # print('Loading {}'.format(gbk))
+            # genome = CollectData.Genome(local_path = gbk, format = 'genbank')
+            # print('Storing for future use . . .')
+            # genome.saveLocal()
+            # #loaded_genomes[genome.id] = genome
         
-        for genome_accession in collect_accessions:
-            print('Fetching {}'.format(genome_accession))
-            genome = CollectData.Genome(accession = genome_accession, user_email = args.email_address)
-            print('Storing for future use . . .')
-            genome.saveLocal()
+        # for baga in load_bagas:
+            # print('Loading {}'.format(baga))
+            # genome = CollectData.Genome(local_path = gbk, format = 'baga')
+            # print('Storing for future use . . .')
+            # genome.saveLocal()
+            # #loaded_genomes[genome.id] = genome
+        
+        # for genome_accession in collect_accessions:
+            # print('Fetching {}'.format(genome_accession))
+            # genome = CollectData.Genome(accession = genome_accession, user_email = args.email_address)
+            # print('Storing for future use . . .')
+            # genome.saveLocal()
             #loaded_genomes[genome.id] = genome
         
         # # download genomes from NCBI
