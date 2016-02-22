@@ -809,8 +809,12 @@ class Genome(_MetaSample):
             self.logger.log(PROGRESS, '. . . checksum {} passed!'.format(checksum))
             
             data.seek(0)
-            gbk_content = _TextIOWrapper(_gzip.GzipFile(mode="rb", fileobj = data), 
-                    encoding = 'utf-8')
+            if _PY3:
+                gbk_content = _TextIOWrapper(_gzip.GzipFile(mode="rb", fileobj = data), 
+                        encoding = 'utf-8')
+            else:
+                gbk_content = _gzip.GzipFile(mode="rb", fileobj = data)
+                        #encoding = 'utf-8')
             self.loadFromGBK(gbk_content)
             if retain_gbk:
                 gbk_content.seek(0)
@@ -1339,9 +1343,13 @@ class Genome(_MetaSample):
         return(ORF_ranges, large_mobile_element_ranges, ordinate_offset)
 
     def _DL(self, url, verbose = True):
-        req = _request.urlopen(url)
         CHUNK = 16 * 1024 * 32
-        data = _BytesIO()
+        if _PY3:
+            req = _request.urlopen(url)
+            data = _BytesIO()
+        else:
+            req = _urllib2.urlopen(url)
+            data = _StringIO()
         c = 0
         for chunk in iter(lambda: req.read(CHUNK), ''):
             if c == 0:

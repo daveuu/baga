@@ -1653,7 +1653,7 @@ if task_name == 'CollectData':
                                 refseq_only = args.refseq_only, 
                                 force = args.force, 
                                 retain_gbk = args.keep_gbk,
-                                path = args.analysis_path)
+                                path = '.') # args.analysis_path
                         if genome.file_name:
                             # False if not DLd
                             genome_identifiers += [res]
@@ -1661,12 +1661,13 @@ if task_name == 'CollectData':
                             download_urls[genome.sample_name] = genome.source
                             genome.saveLocal(exclude = ["assemblies_info", 
                                     "assemblies_problems"])
-                            if args.analysis_path != '.':
-                                new_path = os.path.sep.join([args.analysis_path,
-                                        genome.file_name])
-                                genome.logger.log(PROGRESS, 
-                                        'Moving to new path: {}'.format(new_path))
-                                os.rename(genome.file_name, new_path)
+                            # no option to save to other folder yet
+                            # if args.analysis_path != '.':
+                                # new_path = os.path.sep.join([args.analysis_path,
+                                        # genome.file_name])
+                                # genome.logger.log(PROGRESS, 
+                                        # 'Moving to new path: {}'.format(new_path))
+                                # os.rename(genome.file_name, new_path)
                         else:
                             not_downloaded += [res]
                 except StopIteration:
