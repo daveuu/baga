@@ -1927,8 +1927,11 @@ if args.subparser == 'PrepareReads':
 
 ### Align Reads ###
 
-if args.subparser == 'AlignReads':
+if task_name == 'AlignReads':
     print('\n-- Read Aligning module --')
+    # configure logger for this Task
+    task_logger, task_log_folder = configureLogger(use_sample_name, main_log_filename, 
+            verbosities[args.verbosity], logger_name = task_name)
     if args.reads_name is not None and args.genome_name is not None:
         # first check whether GATK path is needed
         if args.indelrealign and not args.GATK_jar_path:
@@ -1980,12 +1983,16 @@ if using:
         
         if args.align:
             print('Loading processed reads group %s' % use_name_reads)
-            #prepared_reads = baga.bagaload('baga.PrepareReads.Reads-%s' % use_name_reads)
             prepared_reads = baga.bagaload(use_path_reads)
             print('Loading genome %s' % use_name_genome)
-            genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
+            genome = CollectData.Genome(sample_name = use_name_genome, 
+                    inherit_from = 'self')
             # create alignment object
-            alignments = AlignReads.SAMs(reads = prepared_reads, genome = genome)
+            alignments = AlignReads.SAMs(sample_name = alns_name, 
+                    reads = prepared_reads, genome = genome,
+                    task_name = task_name, 
+                    console_verbosity_lvl = verbosities[args.verbosity],
+                    log_folder = task_log_folder)  # use inherit from here?, inherit_from = upstreams)
             print('\nAligning reads . . .')
             # let BWA estimate insert size and assign proper_pairs
             try:
@@ -1999,14 +2006,17 @@ if using:
                 exe_fail('samtools')
             
             # need to include the genome name for aligning a group of reads sets to more than one genome
-            alignments.saveLocal(alns_name)
+            alignments.saveLocal()
         
         
         if args.deduplicate:
             if not args.align:
                 # add an exception here and inform to use --align first
                 print('Loading previously processed read alignments: %s' % alns_name)
-                alignments = AlignReads.SAMs(baga = 'baga.AlignReads.SAMs-{}.baga'.format(alns_name))
+                alignments = AlignReads.SAMs(sample_name = alns_name, 
+                        task_name = task_name, 
+                        console_verbosity_lvl = verbosities[args.verbosity],
+                        log_folder = task_log_folder, inherit_from = 'self')
                 
             try:
                 alignments.removeDuplicates(force = args.force, max_cpus = args.max_cpus)
@@ -2018,28 +2028,36 @@ if using:
             except OSError:
                 exe_fail('samtools')
             
-            alignments.saveLocal(alns_name)
+            alignments.saveLocal()
         
         if args.indelrealign:
             if not args.deduplicate:
                 # add an exception here and inform to use --align first
                 print('Loading previously processed read alignments: %s' % alns_name)
-                alignments = AlignReads.SAMs(baga = 'baga.AlignReads.SAMs-{}.baga'.format(alns_name))
+                alignments = AlignReads.SAMs(sample_name = alns_name, 
+                        task_name = task_name, 
+                        console_verbosity_lvl = verbosities[args.verbosity],
+                        log_folder = task_log_folder, inherit_from = 'self')
             
             try:
                 os.makedirs('genome_sequences')
             except OSError:
                 pass
             
-            genome_fna = 'genome_sequences/%s.fna' % alignments.genome_id
+            # seems not to save .genome in alignments?
+            genome_fna = 'genome_sequences/%s.fna' % alignments.genome_name
+            #genome_fna = 'genome_sequences/{}.fna'.format(use_name_genome)
             
             if not os.path.exists(genome_fna):
                 from Bio import SeqIO
                 from Bio.Seq import Seq
                 from Bio.SeqRecord import SeqRecord
-                SeqIO.write(SeqRecord(Seq(alignments.genome_sequence.tostring()), id = alignments.genome_id), 
-                            genome_fna, 
-                            'fasta')
+                records_to_write = []
+                for seq_id,seq_array in alignments.genome_sequence.items():
+                    records_to_write += [SeqRecord(Seq(seq_array.tostring()), 
+                            id = seq_id, description = self.genome_names[seq_id])]
+                
+                SeqIO.write(records_to_write, genome_fna, 'fasta')
             
             alignments.IndelRealignGATK(
                         jar = args.GATK_jar_path.split(os.path.sep), 
@@ -2047,7 +2065,7 @@ if using:
                         force = args.force, 
                         max_cpus = args.max_cpus)
             
-            alignments.saveLocal(alns_name)
+            alignments.saveLocal()
         
         if args.delete_intermediates:
             print('Checking on intermediate alignment files to delete . . .')
