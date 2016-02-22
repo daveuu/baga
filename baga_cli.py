@@ -1181,14 +1181,69 @@ if '--nosplash' not in sys.argv:
 
 args = parser.parse_args()
 
+task_name = args.subparser
     
 
+# generate folder for logs and path to main log file
+# includes CLI-provided sample_name in log filename path:
+# ensure no awkward characters for filename path
+if hasattr(args, 'sample_name') and args.sample_name is not None:
+    use_sample_name, sanitised = sanitize_filename(args.sample_name)
+elif task_name == 'Dependencies':
+    # allow for CLI use without a sample name e.g. checking Dependencies
+    # logging file paths will include 'dependencycheck'
+    use_sample_name, sanitised = 'dependencycheck', ''
+elif task_name == 'CollectData' and args.taxonomy is not None:
+    use_sample_name, sanitised = 'taxonomy', ''
+elif task_name == 'CollectData' and args.genomes is not None:
+    use_sample_name, sanitised = 'getgenomes', ''
+else:
+    # fall back
+    # logging file paths will include 'nosample'
+    use_sample_name, sanitised = 'nosample', ''
 
-# if args.verbose:
-    # print("verbosity turned on")
+# timestamped folder so sorting by time places it ahead of log for module usage
+time_for_main_log = datetime.now().strftime("%y-%m-%d_%H-%M-%S")
+main_log_folder = os.path.sep.join([
+        'baga-{}_logs'.format(use_sample_name),
+        # 00 so it sorts above other log folders made immediately after
+        '{}_0_CLI'.format(time_for_main_log)])
+try:
+    os.makedirs(main_log_folder)
+except FileExistsError:
+    pass
 
-# if args.quiet:
-    # print("output suppressed")
+main_log_filename = os.path.sep.join([main_log_folder,'main.log'])
+
+# NB CL options increase with verbosity, logging level decreases!
+# make a dict to convert CLI verbosity amount 0-4 to logging level 
+# threshold 0-50
+from baga import PROGRESS
+verbosities = {}
+verbosities[0] = logging.ERROR
+verbosities[1] = logging.WARNING
+verbosities[2] = logging.INFO
+verbosities[3] = PROGRESS
+verbosities[4] = logging.DEBUG
+
+baga_cli, main_log_folder = configureLogger(use_sample_name, main_log_filename, 
+        verbosities[args.verbosity])
+
+
+# start logging
+time_start = datetime.now()
+time_stamp = time_start.strftime("%H:%M:%S on %a %d %b, %Y")
+baga_cli.info('')
+baga_cli.info('|=== Starting baga analysis at {} ===|'.format(time_stamp))
+baga_cli.info('')
+
+# now main logging set up, inform if sample name contained any funky characters
+# that had to be omitted
+if len(sanitised):
+    baga_cli.warning('Sample name changed for use in filenames: {} changed '\
+            'to {} by replacing {} with _'.format(args.sample_name, 
+            use_sample_name, ','.join(sanitised)))
+
 
 
 if hasattr(args, 'GATK_jar_path') and args.GATK_jar_path:
@@ -3255,3 +3310,20 @@ if args.subparser == 'AssembleReads':
         # else:
             # print('Nothing deleted.')
 
+
+# work out how long it took
+time_end = datetime.now()
+time_stamp = time_end.strftime("%H:%M:%S on %a %d %b, %Y")
+
+baga_cli.info('')
+baga_cli.info('|====== Finished tasks at {} =======|'.format(time_stamp))
+baga_cli.info('')
+
+run_time = time_end - time_start
+seconds = int(run_time.total_seconds())
+hours, remainder = divmod(seconds,60*60)
+minutes, seconds = divmod(remainder,60)
+baga_cli.info('Total run time: {} hours, {} minutes, {} seconds  (PID:{})'.format(
+        hours, minutes, seconds, os.getpid()))
+
+logging.shutdown()
