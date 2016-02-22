@@ -24,9 +24,23 @@ import sys
 import re
 import os
 import subprocess
+import logging
+from datetime import datetime
 from collections import defaultdict
 
+# needed by logging bits in baga
+try:
+    # get width for wrapping
+    info = subprocess.check_output(['stty','size'])
+    rows, text_width = map(int,info.rstrip().split())
+except FileNotFoundError:
+    # else pick a narrow one
+    rows, text_width = 30, 70
+
 from baga import Dependencies
+from baga import configureLogger
+from baga import InheritanceFileNotFoundError
+from baga import NCBItaxonomyFileNotFoundError
 
 def check_files(files):
     have_these = set()
@@ -221,11 +235,57 @@ group.add_argument('--splash',
     action = 'store_true',
     default = True)
 
-# group = parser.add_mutually_exclusive_group()
-# group.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
-# group.add_argument("-q", "--quiet", help="suppress output", action="store_true")
+parser.add_argument('-v', '--verbosity', 
+    type = int, 
+    help = "set verbosity output to console: 0 for silent except errors, 1 to "\
+            "include warnings, 2 to include updates on progress, 3 to report "\
+            "general progress, 4 to include lots of detail (maximum verbosity "\
+            "for debugging). More detail is always provided in log files.",
+    default = 2,
+    choices = [0,1,2,3,4])
 
 subparser_adder = parser.add_subparsers(title = 'Analyses', dest="subparser")
+
+# arguments common to all modules (except Dependencies)
+common_module_arguments = subparser_adder.add_parser('common', add_help=False)
+
+common_module_arguments.add_argument('-F', "--force", 
+    help = "even if output files present before an analysis, repeat analysis "\
+    "and overwrite them. Default behaviour is to continue to next step with "\
+    "repeating. If e.g., repeating with different parameters, you may want "\
+    "'--force' to overwrite with new output.",
+    action = 'store_true')
+
+
+common_module_arguments.add_argument('-c', "--max_cpus", 
+    help = "maximum number of cpus (or threads) to use where parallelisation "\
+            "possible. Negative values are less than total CPUs. Default is -1 "\
+            "i.e., one less than total.",
+    type = int,
+    default = -1)
+
+### not sure which are universal in baga yet
+
+# arguments required for all data processing modules (--sample_name)
+# (optional for CollectData so specified separately)
+sample_name_argument = subparser_adder.add_parser('sample_name_argument', 
+        add_help=False)
+sample_name_argument.add_argument('-n', "--reads_name", 
+    help = "name of sample for which data will be loaded (originally used in a "\
+            "CollectData command). This is required.",
+    required = True)
+
+# consider this as CollectData only?
+# or retain option to alter --analysis_path? <== not yet implemented
+# usually inherited from upstream.
+# common_module_arguments.add_argument('-p', "--analysis_path", 
+    # help = "name of path in which to write input data. Ideally fast storage "\
+    # "such as a hard disk installed in the device doing the computations. Avoid "\
+    # "network storage (because it is slower), solid state disks are typically "\
+    # "fastest. Defaults to current working directory",
+    # type = str,
+    # default = '.',
+    # metavar = 'PATH')
 
 
 parser_Dependencies = subparser_adder.add_parser('Dependencies',
