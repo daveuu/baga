@@ -600,8 +600,7 @@ class SAMs(_MetaSample):
         for pairname,SAM in self.aligned_read_files.items():
             BAM_out = SAM[:-4] + '.bam'
             if not _os.path.exists(BAM_out) or force:
-                #cmd = '{0} view -buh {1} | {0} sort - {2}; {0} index {2}.bam'.format(path_to_exe, SAM, SAM[:-4])
-                cmd = '{0} view -buh {1} | {0} sort -o {2} -; {0} index {2}.bam'.format(path_to_exe, SAM, SAM[:-4])
+                cmd = '{0} view -buh {1} | {0} sort -o {2}.bam; {0} index {2}.bam'.format(path_to_exe, SAM, SAM[:-4])
                 print('Called: %s' % cmd)
                 processes.add( _subprocess.Popen(cmd, shell=True) )
                 if len(processes) >= max_processes:
@@ -679,8 +678,7 @@ class SAMs(_MetaSample):
         for SAM in self.paths_to_BAMs_dd:
             BAM_out = SAM[:-4] + '_si.bam'
             if not _os.path.exists(BAM_out) or force:
-                #cmd = '{0} sort {1} {2}_si; {0} index {2}_si.bam'.format(path_to_exe, SAM, SAM[:-4])
-                cmd = '{0} sort -o {2}_si {1}; {0} index {2}_si.bam'.format(path_to_exe, SAM, SAM[:-4])
+                cmd = '{0} sort -o {2}_si.bam {1}; {0} index {2}_si.bam'.format(path_to_exe, SAM, SAM[:-4])
                 print('Called: %s' % cmd)
                 processes.add( _subprocess.Popen(cmd, shell=True) )
                 if len(processes) >= max_processes:
