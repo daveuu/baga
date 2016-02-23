@@ -186,12 +186,20 @@ class Genome:
             # some ways of handling unexpected content from NCBI
             try:
                 raw = _Entrez.read(handle, validate=True)
-                info = raw['DocumentSummarySet']['DocumentSummary'][0]
             except _ValidationError as e:
                 print('WARNING: The information about this genome returned by NCBI Entrez failed validation (ValidationError):\n{}'.format(e))
-                print('Trying without validation . . .')
+                print('Trying without validation . . .\n')
                 handle = _Entrez.esummary(db = "assembly", id = Assembly_ID)
-                info = _Entrez.read(handle, validate=False)['DocumentSummarySet']['DocumentSummary'][0]
+                raw = _Entrez.read(handle, validate=False)
+            
+            if len(raw) == 0:
+                print('NCBIs Entrez system returned an empty result for record '\
+                        'id {} in the Assembly database. Will attempt to '\
+                        'download direct from nucleotide database'\
+                        ''.format(Assembly_ID))
+                raise RuntimeError("Empty record from Entrez")
+            else:
+                info = raw['DocumentSummarySet']['DocumentSummary'][0]
             
             print('Found: {} ({})'.format(info['Organism'],info['AssemblyStatus']))
             
@@ -336,17 +344,23 @@ class Genome:
                     setattr(self, member.name, contents)
 
         def loadFromGBK(local_path):
-            seq_record = _SeqIO.read(local_path, "genbank")
+            seq_record = list(_SeqIO.parse(local_path, "genbank"))[0]
             self.ORF_ranges, self.large_mobile_element_ranges = extractLoci(seq_record)
             self.sequence = _array('c', seq_record.seq)
             self.id = seq_record.id
         
         if accession and user_email:
+            print('Attempting to obtain genome from NCBI via Entrez. If the '\
+                    'Entrez service is unavailable (warnings below from baga '\
+                    'and stalling on downloads), consider manually downloading '\
+                    'the genbank file using your browser and the web interface '\
+                    'at www.ncbi.nlm.nih.gov and then providing baga with the '\
+                    'local path to that file instead of an accession\n')
             try:
                 getFromEntrez(accession, user_email)
-            except LookupError:
+            except (LookupError, RuntimeError):
                 print('Falling back to download from www.ncbi.nlm.nih.gov/nuccore '\
-                        'database via NCBI Entrez.')
+                        'database via NCBI Entrez.\n')
                 getFromEntrezNucleotide(accession, user_email)
             
         elif accession and not user_email:
