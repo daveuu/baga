@@ -2188,9 +2188,11 @@ if task_name == 'Repeats':
         Repeats.summariseRepeats(use_name_genome)
 
 ### Structure ###
-
-if args.subparser == 'Structure':
-    print('\n-- Chromosome sequence rearrangement detection module --\n')
+if task_name == 'Structure':
+    print('\n-- Chromosome sequence rearrangement detection module --')
+    # configure logger for this Task
+    task_logger, task_log_folder = configureLogger(use_sample_name, main_log_filename, 
+            verbosities[args.verbosity], logger_name = task_name)
     import baga
     from baga import Structure
     from baga import CollectData
@@ -2213,8 +2215,11 @@ if args.subparser == 'Structure':
             use_name_group = args.reads_name.replace('baga.AlignReads.SAMs-', '' , 1).replace('.p.gz', '').replace('.baga', '')
             
             print('Loading alignments information for: {}__{} from AlignReads output'.format(use_name_group, use_name_genome))
+            
             from baga import AlignReads
-            alignments = AlignReads.SAMs(baga = 'baga.AlignReads.SAMs-{}__{}.baga'.format(use_name_group, use_name_genome))
+            alns_name = '{}__{}'.format(use_name_group, use_name_genome)
+            alignments = AlignReads.SAMs(sample_name = alns_name, 
+                    inherit_from = 'self')
             
             e = 'the reads for "--reads_name/-n {}" seem to not have been fully processed by the AlignReads module: they are missing the "ready_BAMs" attribute. Please ensure the AlignReads commands "--align --deduplicate --indelrealign" have been performed.'.format(args.reads_name)
             assert hasattr(alignments, 'ready_BAMs'), e
@@ -2286,7 +2291,23 @@ if args.subparser == 'Structure':
             # check these genome-aligned read sets
             checkers = Structure.checkStructure(BAMs, min_mapping_quality = 5, 
                     smoothed_resolution = 10, 
-                    ratio_threshold = args.ratio_threshold)
+                    ratio_threshold = args.ratio_threshold, 
+                    genome_name = use_name_genome)
+            
+            # this would be a new style object . . BUT should be able to use inherit_from = 'AlignReads.Aligner'
+            # that would make CLI much simpler . . . or should 'AlignReads.Aligner' be a 
+            # default to be over-ridden by 'self'?
+            
+            # would also need to be more OO with a do function callable from here . .
+            # each do() should have a good doc string describing the order and why
+            
+            # checkers = Structure.checkStructure(sample_name = alns_name, 
+                    # BAMs, min_mapping_quality = 5, 
+                    # smoothed_resolution = 10, 
+                    # ratio_threshold = args.ratio_threshold,
+                    # task_name = task_name, 
+                    # console_verbosity_lvl = verbosities[args.verbosity],
+                    # log_folder = task_log_folder)
         
         if args.plot or args.plot_range:
             if args.plot_range:

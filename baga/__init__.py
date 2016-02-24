@@ -331,7 +331,7 @@ def save(metadata, file_name):
                 try:
                     #log.debug
                     print('Attempting store in {}: "{}", {}'.format(file_name, 
-                            att_name, att))
+                            att_name, type(att)))
                     if PY3:
                         ioob = _BytesIO()
                     else:
@@ -349,7 +349,7 @@ def save(metadata, file_name):
                             att_name, att))
                 except TypeError:
                     #log.debug
-                    print('Not JSONable: "{}", {}'.format(att_name, att))
+                    print('Not JSONable: "{}", {}'.format(att_name, type(att)))
                     # ignore non-jsonable things like functions
                     # include unicodes, strings, lists etc etc
                     omissions += [att_name]
