@@ -256,7 +256,7 @@ def load(file_name):
         all others for integer
     '''
     def loadArray(member_name,contents):
-        if member_name.startswith('sequence'):
+        if 'sequence' in member_name:
             if PY3:
                 array_data = _array('b', contents.getvalue())
                 # saved as bytes for space saving
