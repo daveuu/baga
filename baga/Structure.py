@@ -213,8 +213,7 @@ def checkStructure(BAMs,
                 resolution = smoothed_resolution)
         
         
-        ######### got to here multi
-        
+        ## apparently not used?
         # omit zero depths and zero/infinite ratios for mean (~ omit NAs)
         # use_smoothed_ratios = {}
         # for name,info in checker.smoothed_ratios

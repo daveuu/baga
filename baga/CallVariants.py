@@ -1453,15 +1453,30 @@ class Summariser:
         # allow genomes to be provided as single object for 1 replicon
         # or list or tuple for one or more
         # or False
+        self.replicons = {}
         if isinstance(genomes, list) or isinstance(genomes, tuple):
-            self.genomes = {genome.id:genome for genome in genomes}
+            for genome in genomes:
+                for replicon_id,sequence in genome.sequence.items():
+                    if replicon_id in self.replicons:
+                        # raise an exception
+                        print('Error: different genomes share this chromosome: {}'.format(replicon_id))
+                    else:
+                        self.replicons[replicon_id] = {}
+                        self.replicons[replicon_id]['sequence'] = genome.sequence[replicon_id]
+                        self.replicons[replicon_id]['ORFs'] = genome.annotations[replicon_id][0]
         elif genomes:
-            self.genomes = {genomes.id:genomes}
+            for replicon_id,sequence in genomes.sequence.items():
+                if replicon_id in self.replicons:
+                    # raise an exception
+                    print('Error: different genomes share this chromosome: {}'.format(replicon_id))
+                else:
+                    self.replicons[replicon_id] = {}
+                    self.replicons[replicon_id]['sequence'] = genome.sequence[replicon_id]
+                    self.replicons[replicon_id]['ORFs'] = genome.annotations[replicon_id][0]
         else:
             self.genomes = genomes
-            
-            
-        
+
+
 
 
     def collect_variants(self):
@@ -1513,15 +1528,15 @@ class Summariser:
             return()
 
         # ['ALT', 'FILTER', 'FORMAT', 'GATKCommandLine', 'INFO', 'contig']
-        genome_IDs = set()
+        replicon_IDs = set()
         for VCF,headerdict in all_headerdicts.items():
             try:
-                genome_IDs.update([contig['ID'] for contig in headerdict['contig']])
+                replicon_IDs.update([contig['ID'] for contig in headerdict['contig']])
             except KeyError:
                 print('WARNING: no contig information found in header of {}. Reference free?'.format(VCF))
 
-        if len(genome_IDs):
-            print('Chromosomes found: {}'.format(', '.join(genome_IDs)))
+        if len(replicon_IDs):
+            print('Chromosomes found: {}'.format(', '.join(replicon_IDs)))
         else:
             print('No chromsome information found in: {}'.format(', '.join(sorted(all_headerdicts))))
 
@@ -1530,10 +1545,10 @@ class Summariser:
                 # "implemented for simple summary. {} found: {}".format(len(genome_IDs), 
                 # ', '.join(genome_IDs))
 
-        if self.genomes:
-            annotate_with_these = set(self.genomes) & genome_IDs
-            requested_not_found = set(self.genomes) - genome_IDs
-            found_not_requested = genome_IDs - set(self.genomes)
+        if self.replicons:
+            annotate_with_these = set(self.replicons) & replicon_IDs
+            requested_not_found = set(self.replicons) - replicon_IDs
+            found_not_requested = replicon_IDs - set(self.replicons)
             if len(requested_not_found) == 1:
                 print('WARNING: {} was requested for use with annotations, but not found in VCFs'\
                         ''.format(sorted(requested_not_found)[0]))
@@ -1546,8 +1561,8 @@ class Summariser:
             elif len(found_not_requested) > 1:
                 print('WARNING: {} were found in VCFs, but not provided for use with annotations'\
                         ''.format(', '.join(sorted(found_not_requested))))
-            if len(genome_IDs) == 0:
-                annotate_with_these = set(self.genomes)
+            if len(replicon_IDs) == 0:
+                annotate_with_these = set(self.replicons)
                 print('WARNING: Assuming VCFs were called reference free because no chromosome '\
                         'information found in VCFs. Cannot check provided chromosomes match '\
                         'variants VCF: please double check annotations!')
@@ -1559,8 +1574,8 @@ class Summariser:
         by_position = _defaultdict(dict)
         by_position_freqs = _defaultdict(dict)
         annotations = {}
-        for sample,chromosomes in all_variants.items():
-            for chromosome,positions in chromosomes.items():
+        for sample,replicons in all_variants.items():
+            for replicon_id,positions in replicons.items():
                 #print(sample,chromosome,sorted(positions))
                 for pos1,((r,q),filters) in positions.items():
                     ## this was to keep sortVariantsKeepFilter()
@@ -1573,21 +1588,21 @@ class Summariser:
                         use_q = q
                     
                     try:
-                        by_position[chromosome,pos1][(r,use_q)][sample] = filters
-                        by_position_freqs[chromosome,pos1][(r,use_q)][sample] = freq,total
+                        by_position[replicon_id,pos1][(r,use_q)][sample] = filters
+                        by_position_freqs[replicon_id,pos1][(r,use_q)][sample] = freq,total
                     except KeyError:
-                        by_position[chromosome,pos1][(r,use_q)] = {}
-                        by_position[chromosome,pos1][(r,use_q)][sample] = filters
-                        by_position_freqs[chromosome,pos1][(r,use_q)] = {}
-                        by_position_freqs[chromosome,pos1][(r,use_q)][sample] = freq,total
+                        by_position[replicon_id,pos1][(r,use_q)] = {}
+                        by_position[replicon_id,pos1][(r,use_q)][sample] = filters
+                        by_position_freqs[replicon_id,pos1][(r,use_q)] = {}
+                        by_position_freqs[replicon_id,pos1][(r,use_q)][sample] = freq,total
                     
                     try:
-                        ORFs_info = [(ORF_id,s,e,st,n) for ORF_id,(s,e,st,n) in self.genomes[chromosome].ORF_ranges.items() if s < pos1 < e]
+                        ORFs_info = [(ORF_id,s,e,st,n) for ORF_id,(s,e,st,n) in self.replicons[replicon_id]['ORFs'].items() if s < pos1 < e]
                         if len(ORFs_info) > 1:
                             print('WARNING: variant in more than one ORF (overlapping): not implemented')
                         elif len(ORFs_info) == 1:
                             ORF_id,s,e,strand,gene_name = ORFs_info[0]
-                            ORF_seq = self.genomes[chromosome].sequence[s:e].tostring()
+                            ORF_seq = self.replicons[replicon_id]['sequence'][s:e].tostring()
                             ORF0 = pos1 - 1 - s
                             ORF0_codon_start = ORF0 - ORF0 % 3
                             ref_codon = ORF_seq[ORF0_codon_start:ORF0_codon_start+3]
@@ -1597,7 +1612,7 @@ class Summariser:
                                 var_codon = list(ref_codon)
                                 var_codon[frame1-1] = q
                                 var_codon = ''.join(var_codon)
-                                assert self.genomes[chromosome].sequence[pos1-1] == ref_codon[frame1-1]
+                                assert self.replicons[replicon_id]['sequence'][pos1-1] == ref_codon[frame1-1]
                                 if st == 1:
                                     var_AA = str(_Seq(var_codon).translate())
                                     ref_AA = str(_Seq(ref_codon).translate())
@@ -1618,16 +1633,16 @@ class Summariser:
                                 else:
                                     ref_AA = str(_Seq(ref_codon).translate())
                             
-                            annotations[(chromosome,pos1,r,q)] = (ref_codon, var_codon, 
+                            annotations[(replicon_id,pos1,r,q)] = (ref_codon, var_codon, 
                                     ref_AA, var_AA, frame1, ORF_id, gene_name, strand)
                     except (KeyError, TypeError):
                         pass
 
 
-        all_chromosomes = sorted(set([a for b in all_variants.values() for a in b]))
+        all_replicon_ids = sorted(set([a for b in all_variants.values() for a in b]))
 
         filenameout = 'Simple_summary_for_{}_and_{}_others__{}.csv'.format(sorted(all_variants)[0], 
-                len(all_variants)-1, '_'.join(all_chromosomes))
+                len(all_variants)-1, '_'.join(all_replicon_ids))
 
         sample_order = sorted(all_variants)
 
@@ -1645,23 +1660,23 @@ class Summariser:
         with open(filenameout, 'w') as fout:
             print('Writing to {}'.format(filenameout))
             fout.write(','.join(map(quote,colnames))+'\n')
-            for (chromosome,pos1),variants in sorted(by_position.items()):
+            for (replicon_id,pos1),variants in sorted(by_position.items()):
                 for (r,q),samples in variants.items():
                     
                     try:
                         (ref_codon, var_codon, ref_AA, var_AA, frame1, ORF_id, \
-                                gene_name, strand) = annotations[(chromosome,pos1,r,q)]
+                                gene_name, strand) = annotations[(replicon_id,pos1,r,q)]
                     except KeyError:
                         (ref_codon, var_codon, ref_AA, var_AA, frame1, ORF_id, \
                                 gene_name, strand) = '', '', '', '', -1, '', '', 0
                     
-                    this_row = [chromosome,pos1,r,q] + [ORF_id, gene_name, strand, ref_codon, \
+                    this_row = [replicon_id,pos1,r,q] + [ORF_id, gene_name, strand, ref_codon, \
                             var_codon, ref_AA, var_AA, frame1]
                     freq_all = 0
                     freq_filtered = 0
                     for sample in sample_order:
                         try:
-                            freq,total = by_position_freqs[chromosome,pos1][(r,q)][sample]
+                            freq,total = by_position_freqs[replicon_id,pos1][(r,q)][sample]
                             if freq == total == 1:
                                 val = 1
                             else:

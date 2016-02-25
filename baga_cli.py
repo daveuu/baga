@@ -3106,7 +3106,7 @@ if args.subparser == 'SummariseVariants':
         for genome_name in args.genome_names:
             use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', genome_name)
             assert all([use_path_genome,use_name_genome]), 'Could not locate genome: {}'.format(genome_name)
-            use_genomes += [CollectData.Genome(local_path = use_path_genome, format = 'baga')]
+            use_genomes += [CollectData.Genome(use_name_genome, inherit_from = 'self')]
     else:
         use_genomes = False
     
@@ -3127,10 +3127,13 @@ if args.subparser == 'SummariseVariants':
             caller = CallVariants.CallerGATK(baga = filein)
             
             if hasattr(caller, 'path_to_hardfiltered_SNPs') and hasattr(caller, 'path_to_hardfiltered_INDELs'):
-                # only one for VCFs so no overwriting
-                VCFs = [caller.path_to_hardfiltered_SNPs[-1], caller.path_to_hardfiltered_INDELs[-1]]
-                # more than one can be handled with --report though
-                # only implemented for separate VCFs currently
+                if isinstance(caller.path_to_hardfiltered_SNPs[-1], list):
+                    # --callsingles
+                    VCFs = caller.path_to_hardfiltered_SNPs[-1] + caller.path_to_hardfiltered_INDELs[-1]
+                else:
+                    # --calleach --calljoint
+                    VCFs = [caller.path_to_hardfiltered_SNPs[-1], caller.path_to_hardfiltered_INDELs[-1]]
+                # ?
                 VCFs_for_report[these_reads] = {'SNPs':caller.path_to_hardfiltered_SNPs[-1], 'InDels':caller.path_to_hardfiltered_INDELs[-1]}
             elif hasattr(caller, 'path_to_unfiltered_VCF'):
                 print('WARNING: path to GATK hardfiltered variants not found in {}'.format(filein))
