@@ -1599,7 +1599,12 @@ class Summariser:
                     try:
                         ORFs_info = [(ORF_id,s,e,st,n) for ORF_id,(s,e,st,n) in self.replicons[replicon_id]['ORFs'].items() if s < pos1 < e]
                         if len(ORFs_info) > 1:
-                            print('WARNING: variant in more than one ORF (overlapping): not implemented')
+                            print('WARNING: variant in more than one ORF (overlapping). '\
+                                    'Detailed annotations not yet implemented (marked as "multi")')
+                            multi_ORF_IDs = ','.join([ORF_id for ORF_id,s,e,st,gene_name in ORFs_info])
+                            multi_ORF_names = ','.join([gene_name for ORF_id,s,e,st,gene_name in ORFs_info])
+                            annotations[(replicon_id,pos1,r,use_q)] = ("multi", "multi", 
+                                    "multi", "multi", "multi", multi_ORF_IDs, multi_ORF_names, "multi")
                         elif len(ORFs_info) == 1:
                             ORF_id,s,e,strand,gene_name = ORFs_info[0]
                             ORF_seq = self.replicons[replicon_id]['sequence'][s:e].tostring()
