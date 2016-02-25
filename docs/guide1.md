@@ -9,7 +9,7 @@ The analysis starts with paired end short sequence reads (now [publically availa
 After applying a pipelined BAGA analysis based on these or other scripts, you might decide to publish your findings. Independent reproduction of your analysis by other people is easily achievable by depositing your BAGA scripts into a public data repository such as [FigShare](http://figshare.com) and including the [DOI](http://www.doi.org/) and citation in your report.
 
 !!! note
-    Short read data is bulky. Some steps in the following analysis are rapid but others can take an hour or longer. You could paste each command into a terminal and wait for completion *e.g.* leave it running overnight, or, provided the [prerequisites](../#prerequisites) are installed, the whole analysis can be run using a single script which you can download [coming soon!]. Reading through the material below should help you to understand what happened during the analysis.
+    Short read data is bulky. Some steps in the following analysis are rapid but others can take an hour or longer. You could paste each command into a terminal and wait for completion *e.g.* leave it running overnight, or, provided the [prerequisites](../#prerequisites) are installed, the whole analysis can be run using a single script which you can download (right click [here](baga_guide1_script.sh) and 'save as...'). Reading through the material below should help you to understand what happened during the analysis.
 
 !!! warning
     Because of large amounts of data input/output, unless you have time on your hands, do not attempt over network mounted storage! Use a local 'scratch' disk if running on a compute cluster.
@@ -144,7 +144,7 @@ baga/baga_cli.py PrepareReads \
 
 The file 'baga.PrepareReads.Reads-Liverpool.baga' will be created where BAGA stores analysis metadata.
 
-Remove adaptor sequences and trim by position specific quality scores. This will generate an additional 27.6 GB of data(!).
+Remove adaptor sequences and trim by position specific quality scores. This will generate an additional 27.6 GB of data(!). Adjust `--max_cpus 7` here and in future commands to the number of processes you'd like to run at once. If you have a quad core CPU a value of 3 or 4 should be fine.
 ```bash
 baga/baga_cli.py PrepareReads \
 --reads_name Liverpool \
@@ -353,6 +353,10 @@ Other aspects of these repeats plots include: for each region, percent nucleotid
     GATK (HaplotypeCaller)
 
 The commands below will use the GATK Haplotype Caller to perform joint genotype calling with quality score recalibration and hard filtering as recommended in the [Best Practices](https://www.broadinstitute.org/gatk/guide/best-practices) work flow provided by the Broad Institute where the software was made. See the [Get the Genome Analysis Toolkit](#get-the-genome-analysis-toolkit-gatk) section above regarding the `--GATK_jar_path` and `--JRE_1_7_path` options.
+
+!!! note
+    The joint genotyping is appropriate if you think your samples will share variants relative to the reference genome. These might include the shared ancestry among your samples since the most recent ancestor in common with the reference genome. In an evolution experiment in which a well characterised "lab rat" strain has been evolved, sequencing may include a single isolate plus a pool of genomic DNA from several isolates from each replicate. In that case it would be more suitable to use single sample genotyping for each isolate and pool: replace `--calleach --calljoint` with `--callsingles`. For convenience, all pooled can be in a single `--reads_name` group and all isolates in another.
+
 ```bash
 baga/baga_cli.py CallVariants \
 --reads_name Liverpool \
@@ -376,6 +380,9 @@ baga/baga_cli.py CallVariants \
 --max_cpus 7 --max_memory 8 \
 --GATK_jar_path ~/GenomeAnalysisTK.jar --JRE_1_7_path ~/Downloads/jre1.7.0_80/bin/java
 ```
+
+!!! note 
+    If your isolates are not expected to share variants relative to the reference genome sequence, which would be the case for single representatives of a set of experimental replicates, the 'joint genotyping' feature of GATK's HaploType caller would not be appropriate. Instead use `--callsingles` instead of `--calleach --calljoint` to perform the genotyping separately.
 
 ### Citations
 - GATK
@@ -425,7 +432,7 @@ baga/baga_cli.py ComparativeAnalysis \
 --out_group NC_011770.
 ```
 
-The `--out_group NC_011770.` command is intentionally missing the last digit because the label was truncated to 10 digits to appease the ancient [Phylip sequence format](http://evolution.genetics.washington.edu/phylip/doc/sequence.html).
+The `--out_group NC_011770.` command is intentionally missing the last digit because the label was truncated to 10 digits to appease the legendary [Phylip sequence format](http://evolution.genetics.washington.edu/phylip/doc/sequence.html).
 
 ### Citations
 - PhyML: Guindon, S., Dufayard, J., Lefort, V., Anisimova, M., Hordijk, W. & O., G. (2010) New algorithms and methods to estimate maximum-likelihood phylogenies: assessing the performance of PhyML 3.0 *Syst. Biol.* **59** 307-21
@@ -455,7 +462,8 @@ baga/baga_cli.py ComparativeAnalysis \
 --plot_transfers \
 --path_to_tree NC_011770.1__Liverpool_SNPs_rooted.phy_phyml_tree \
 --use_names "phylogeny_sample_names.txt" \
---genome_name NC_011770.1
+--genome_name NC_011770.1 \
+--out_group NC_011770.
 ```
 
 ![NC_011770.1__Liverpool_SNPs_rooted_transfers.svg](images/NC_011770.1__Liverpool_SNPs_rooted_transfers.svg)
