@@ -1204,30 +1204,31 @@ class Finder(_MetaSample):
             with open(_os.path.sep.join([local_repeats_path, sam_name]), "wb") as out:
                 _subprocess.call(cmd, stdout = out)
             
-            bam_name = sam_name[:-4] + '_unsorted.bam'
-            cmd = [self.exe_samtools, 'view', '-bS', _os.path.sep.join([local_repeats_path, sam_name])]
-            print('Called: {}\nPiping to {}'.format(' '.join(cmd), bam_name))
-            with open(_os.path.sep.join([local_repeats_path, bam_name]), "wb") as out:
+            sam_name_path = _os.path.sep.join([local_repeats_path, sam_name])
+            bam_sorted_name = sam_name.replace('.sam', '.bam')
+            bam_sorted_name_path = _os.path.sep.join([local_repeats_path, bam_sorted_name])
+            bam_unsorted_name = sam_name[:-4] + '_unsorted.bam'
+            bam_unsorted_name_path = _os.path.sep.join([local_repeats_path, bam_unsorted_name])
+            cmd = [self.exe_samtools, 'view', '-bS', sam_name_path]
+            print('Called: {}\nPiping to {}'.format(' '.join(cmd), bam_unsorted_name_path))
+            with open(bam_unsorted_name_path , "wb") as out:
                 _subprocess.call(cmd, stdout = out)
             
-            cmd = [self.exe_samtools, 'sort', _os.path.sep.join([local_repeats_path, bam_name]), 
-                    _os.path.sep.join([local_repeats_path, sam_name[:-4]])] ##### where does output end up (which path?)
+            cmd = [self.exe_samtools, 'sort', '-o', bam_sorted_name_path, 
+                    bam_unsorted_name_path]
             print('Called: {}'.format(' '.join(cmd)))
             _subprocess.call(cmd)
             
-            bam_name_sorted = sam_name.replace('.sam', '.bam')
-            bam_names_sorted[replicon_id] = bam_name_sorted
-            cmd = [self.exe_samtools, 'index', _os.path.sep.join([local_repeats_path, bam_name_sorted])]
+            bam_names_sorted[replicon_id] = bam_sorted_name
+            cmd = [self.exe_samtools, 'index', bam_sorted_name_path]
             print('Called: {}'.format(' '.join(cmd)))
             _subprocess.call(cmd)
             
-            f = _os.path.sep.join([local_repeats_path, sam_name])
-            print('Removing: {}'.format(f))
-            _os.unlink(f)
+            print('Removing: {}'.format(sam_name_path))
+            _os.unlink(sam_name_path)
             
-            f = _os.path.sep.join([local_repeats_path, bam_name])
-            print('Removing: {}'.format(f))
-            _os.unlink(f)
+            print('Removing: {}'.format(bam_unsorted_name_path))
+            _os.unlink(bam_unsorted_name_path)
 
 
         #### parse and analyse ORF-chromosome alignment ####
