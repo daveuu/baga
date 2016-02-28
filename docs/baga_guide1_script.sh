@@ -205,7 +205,7 @@ $BAGA_CLI ComparativeAnalysis \
 
 $BAGA_CLI ComparativeAnalysis \
 --infer_phylogeny \
---path_to_MSA $GENOME__$READSNAME_SNPs.phy \
+--path_to_MSA $GENOME"__"$READSNAME"_SNPs.phy" \
 --out_group ${GENOME:0:10}
 
 
@@ -213,8 +213,8 @@ $BAGA_CLI ComparativeAnalysis \
 
 $BAGA_CLI ComparativeAnalysis \
 --infer_recombination \
---path_to_MSA $GENOME__$READSNAME_SNPs.phy \
---path_to_tree $GENOME__$READSNAME_SNPs_rooted.phy_phyml_tree
+--path_to_MSA $GENOME"__"$READSNAME"_SNPs.phy" \
+--path_to_tree $GENOME"__"$READSNAME"_SNPs_rooted.phy_phyml_tree"
 
 
 ## 11. Summarise: plot tree and generate tables
@@ -222,7 +222,7 @@ $BAGA_CLI ComparativeAnalysis \
 $BAGA_CLI ComparativeAnalysis \
 --plot_phylogeny \
 --plot_transfers \
---path_to_tree $GENOME__$READSNAME_SNPs_rooted.phy_phyml_tree \
+--path_to_tree $GENOME"__"$READSNAME"_SNPs_rooted.phy_phyml_tree" \
 --use_names "phylogeny_sample_names.txt" \
 --genome_name $GENOME \
 --out_group ${GENOME:0:10}
@@ -236,5 +236,5 @@ $BAGA_CLI SummariseVariants \
 $BAGA_CLI SummariseVariants \
 --simple  \
 --genome_names $GENOME \
---vcfs_paths variants/$GENOME/$READSNAME__$GENOME_2_samples_hardfiltered_[SI]*s__F_genome_repeats__F_rearrangements.vcf
+--vcfs_paths variants/$GENOME/$READSNAME"__"$GENOME"_2_samples_hardfiltered_"[SI]*s"__F_genome_repeats__F_rearrangements.vcf"
 
