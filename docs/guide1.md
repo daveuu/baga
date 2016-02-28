@@ -141,6 +141,8 @@ baga/baga_cli.py PrepareReads \
 --reads_name Liverpool \
 --subsample_to_cov 80 6601757
 ```
+!!! note
+    If you do not want to subsample your reads, use `--adaptors fullsample` below instead of just `--adaptors`.
 
 The file 'baga.PrepareReads.Reads-Liverpool.baga' will be created where BAGA stores analysis metadata.
 
