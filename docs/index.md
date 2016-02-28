@@ -55,7 +55,7 @@ Next check if the required packages are installed.
 
 For SuSE:
 ```bash
-sudo zypper search -t pattern python python-Cython git devel_basis
+sudo zypper search -t pattern python python-Cython git devel_basis libtool
 ```
 
 If any are missing, follow the instuctions below to install them. Otherwise, you are in luck and can have a look at some of the [guided BAGA examples](../guides).
@@ -111,15 +111,15 @@ These are general purpose software libraries BAGA needs for compiling and instal
 
 For Debian:
 ```bash
-sudo apt-get install build-essentials cython
+sudo apt-get install build-essential cython libtool
 ```
 
 For Redhat:
 ```bash
-sudo yum groupinstall "Development Tools" && sudo yum install cython
+sudo yum groupinstall "Development Tools" && sudo yum install cython libtool
 ```
 
 For SuSE:
 ```bash
-sudo zypper install -t pattern devel_basis && sudo zypper install python-Cython
+sudo zypper install -t pattern devel_basis && sudo zypper install python-Cython libtool
 ```
