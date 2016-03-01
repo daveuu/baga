@@ -2997,23 +2997,37 @@ if args.subparser == 'ComparativeAnalysis':
                 caller = CallVariants.CallerGATK(baga = filein)
                 
                 if hasattr(caller, 'path_to_hardfiltered_SNPs') and hasattr(caller, 'path_to_hardfiltered_INDELs'):
-                    checkthis = caller.path_to_hardfiltered_SNPs[-1]
-                    try:
-                        with open(checkthis) as fin:
-                            path_to_SNPs_VCFs += [checkthis]
-                            print('Found: {}'.format(checkthis))
-                    except IOError:
-                        print('Could not find: {}'.format(checkthis))
-                        sys.exit('You may need to rerun the analysis that should have generated that file')
+                    if isinstance(caller.path_to_hardfiltered_SNPs[-1],list):
+                        # called with --callsingle: one sample per VCF
+                        VCFs = caller.path_to_hardfiltered_SNPs[-1]
+                    else:
+                        # called with --calleach --calljoint: multi-sample VCFs
+                        VCFs = [caller.path_to_hardfiltered_SNPs[-1]]
+                    for checkthis in VCFs:
+                        try:
+                            with open(checkthis) as fin:
+                                #### list
+                                path_to_SNPs_VCFs += [checkthis]
+                                print('Found: {}'.format(checkthis))
+                        except IOError:
+                            print('Could not find: {}'.format(checkthis))
+                            sys.exit('You may need to rerun the analysis that should have generated that file')
                     
-                    checkthis = caller.path_to_hardfiltered_INDELs[-1]
-                    try:
-                        with open(checkthis) as fin:
-                            path_to_InDels_VCFs += [checkthis]
-                            print('Found: {}'.format(checkthis))
-                    except IOError:
-                        print('Could not find: {}'.format(checkthis))
-                        sys.exit('You may need to rerun the analysis that should have generated that file')
+                    if isinstance(caller.path_to_hardfiltered_SNPs[-1],list):
+                        # called with --callsingle: one sample per VCF
+                        VCFs = caller.path_to_hardfiltered_INDELs[-1]
+                    else:
+                        # called with --calleach --calljoint: multi-sample VCFs
+                        VCFs = [caller.path_to_hardfiltered_INDELs[-1]]
+
+                    for checkthis in VCFs:
+                        try:
+                            with open(checkthis) as fin:
+                                path_to_InDels_VCFs += [checkthis]
+                                print('Found: {}'.format(checkthis))
+                        except IOError:
+                            print('Could not find: {}'.format(checkthis))
+                            sys.exit('You may need to rerun the analysis that should have generated that file')
                 else:
                     print('ERROR: path to GATK hardfiltered variants not found in {}'.format(filein))
                     print('It seems the analysis described in {} is incomplete. Try completing or rerunning using the CallVariants module'.format(filein))

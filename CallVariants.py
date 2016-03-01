@@ -141,6 +141,12 @@ def sortVariantsKeepFilter(header, colnames, variantrows):
         if INFO['Description'].strip('"')[:len('FILTER:')] == 'FILTER:':
             INFOfilters.add(INFO['ID'].strip('\'"'))
 
+    allfilters = FILTERfilters | INFOfilters
+
+    if len(variantrows) == 0:
+        variants = {}
+        return(variants, allfilters)    
+
     cols = dict(zip(parameter_names, variantrows[0].rstrip().split('\t')[:len(parameter_names)]))
 
     e = 'Could not find FORMAT column in this VCF file. Probably no genotype data.'
@@ -209,7 +215,6 @@ def sortVariantsKeepFilter(header, colnames, variantrows):
         for k2,v2 in variants[k1].items():
             variants[k1][k2] = dict(v2)
 
-    allfilters = FILTERfilters | INFOfilters
 
     return(variants, allfilters)
 
@@ -278,9 +283,10 @@ def to_by_position_filtered(variants, filters_applied, summarise = True):
         for f1 in sorted(filters_applied):
             print('-- {} --'.format(f1))
             these = []
-            for position,reference,query,f2 in sorted(by_position_filtered[chromosome]):
-                if f1 == f2:
-                    these += ['{}: {} => {}, {}'.format(position,reference,query,f2)]
+            if len(variants):
+                for position,reference,query,f2 in sorted(by_position_filtered[chromosome]):
+                    if f1 == f2:
+                        these += ['{}: {} => {}, {}'.format(position,reference,query,f2)]
             
             print('Total: {}'.format(len(these)))
             print('\n'.join(these))
@@ -323,18 +329,26 @@ def reportCumulative(filter_order, reference_id, VCFs, VCFs_indels = False):
     VCFs_use = {}
     for dataset,varianttypes in sorted(VCFs.items()):
         VCFs_use[dataset] = {}
-        for varianttype,filename in varianttypes.items():
-            bits = filename.split(_os.path.extsep)
-            pattern = _os.path.extsep.join(bits[:-1]) + '*' + bits[-1]
-            for checkthis in _glob(pattern):
-                filter_present = []
-                for fltr in collect_baga_filters:
-                    if 'F_'+fltr in checkthis:
-                        filter_present += [fltr]
-                
-                if set(filter_present) >= set(collect_baga_filters):
-                    # OK if additional filters included in a VCF
-                    VCFs_use[dataset][varianttype] = checkthis
+        for varianttype,fname in varianttypes.items():
+            VCFs_use[dataset][varianttype] = []
+            if not isinstance(fname, list):
+                # --calleach --calljoint
+                filenames = [fname]
+            else:
+                # --callsingles
+                filenames = fname
+            for filename in filenames:
+                bits = filename.split(_os.path.extsep)
+                pattern = _os.path.extsep.join(bits[:-1]) + '*' + bits[-1]
+                for checkthis in _glob(pattern):
+                    filter_present = []
+                    for fltr in collect_baga_filters:
+                        if 'F_'+fltr in checkthis:
+                            filter_present += [fltr]
+                    
+                    if set(filter_present) >= set(collect_baga_filters):
+                        # OK if additional filters included in a VCF
+                        VCFs_use[dataset][varianttype] += [checkthis]
 
     ### need to know (i) how many samples per dataset which may span VCF files or may not . . .
 
@@ -365,22 +379,22 @@ def reportCumulative(filter_order, reference_id, VCFs, VCFs_indels = False):
         for dataset,varianttypes in sorted(VCFs_use.items()):
             print('dataset: {}'.format(dataset))
             for varianttype in variant_type_order:
-                filename = varianttypes[varianttype]
-                header, header_section_order, these_colnames, variantrows = parseVCF(filename)
-                variants, allfilters = sortVariantsKeepFilter(header, these_colnames, variantrows)
-                # divide variants into those among sample only, those between sample
-                # and reference
-                variants_divided = sortAmongBetweenReference(variants, sample_size = len(these_colnames[9:]))
-                variants_divided['all'] = variants
-                # cumulative filters applied here
-                for group_name in variant_groups:
-                    by_position, by_position_filtered = to_by_position_filtered(
-                            variants_divided[group_name], cumulative_filters)
-                    
-                    # reference_id is the chromosome ID
-                    print('{} {}'.format(len(by_position[reference_id]), varianttype))
-                    this_row[group_name] += [len(by_position[reference_id])]
-                    totals_by_type[group_name][varianttype].update([info[0] for info in by_position[reference_id]])
+                for filename in varianttypes[varianttype]:
+                    header, header_section_order, these_colnames, variantrows = parseVCF(filename)
+                    variants, allfilters = sortVariantsKeepFilter(header, these_colnames, variantrows)
+                    # divide variants into those among sample only, those between sample
+                    # and reference
+                    variants_divided = sortAmongBetweenReference(variants, sample_size = len(these_colnames[9:]))
+                    variants_divided['all'] = variants
+                    # cumulative filters applied here
+                    for group_name in variant_groups:
+                        by_position, by_position_filtered = to_by_position_filtered(
+                                variants_divided[group_name], cumulative_filters)
+                        
+                        # reference_id is the chromosome ID
+                        print('{} {}'.format(len(by_position[reference_id]), varianttype))
+                        this_row[group_name] += [len(by_position[reference_id])]
+                        totals_by_type[group_name][varianttype].update([info[0] for info in by_position[reference_id]])
         
         # add totals for variant class in columns corresponding to variant_type_order
         for group_name in variant_groups:

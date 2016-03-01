@@ -716,6 +716,8 @@ class MultipleSequenceAlignment:
                         print('{} bp at {}-{}'.format(e - s, s, e))
             
             these_missing_regions = [these_missing_regions[n:n+2] for n in range(0,len(these_missing_regions),2)]
+            ## FIXME occasionally single value very near end of chromosome . . .
+            these_missing_regions = [p for p in these_missing_regions if len(p) == 2]
             print('{} bp in {} gaps missing from {}'.format(sum([(e-s) for s,e in these_missing_regions]), len(these_missing_regions), sample))
             missing_regions[sample] = these_missing_regions
             # report durations, time left etc
