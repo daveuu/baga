@@ -969,7 +969,7 @@ class CallerGATK:
                 '-T', 'VariantFiltration',
                 '-R', genome_fna,
                 '-V', raw_SNPs,
-                '--filterExpression', '"QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0"',
+                '--filterExpression', 'QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0',
                 '--filterName', '"standard_hard_filter"',
                 '-o', hf_SNPs]
         else:
@@ -994,7 +994,7 @@ class CallerGATK:
                     '-T', 'VariantFiltration',
                     '-R', genome_fna,
                     '-V', raw_SNPs,
-                    '--filterExpression', '"QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0"',
+                    '--filterExpression', 'QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0',
                     '--filterName', '"standard_hard_filter"',
                     '-o', this_hf_SNPs]
                 hf_SNPs += [this_hf_SNPs]
@@ -1051,7 +1051,7 @@ class CallerGATK:
                 '-T', 'VariantFiltration',
                 '-R', genome_fna,
                 '-V', raw_INDELs,
-                '--filterExpression', '"QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0"',
+                '--filterExpression', 'QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0',
                 '--filterName', '"standard_indel_hard_filter"',
                 '-o', hf_INDELs]
             
@@ -1079,7 +1079,7 @@ class CallerGATK:
                     '-T', 'VariantFiltration',
                     '-R', genome_fna,
                     '-V', raw_INDELs,
-                '--filterExpression', '"QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0"',
+                '--filterExpression', 'QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0',
                 '--filterName', '"standard_indel_hard_filter"',
                     '-o', this_hf_INDELs]
                 hf_INDELs += [this_hf_INDELs]
