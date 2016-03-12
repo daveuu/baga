@@ -1052,7 +1052,7 @@ class CallerGATK:
                 '-R', genome_fna,
                 '-V', raw_INDELs,
                 '--filterExpression', 'QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0',
-                '--filterName', '"standard_indel_hard_filter"',
+                '--filterName', 'standard_indel_hard_filter',
                 '-o', hf_INDELs]
             
             print(' '.join(cmd))
@@ -1080,7 +1080,7 @@ class CallerGATK:
                     '-R', genome_fna,
                     '-V', raw_INDELs,
                 '--filterExpression', 'QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0',
-                '--filterName', '"standard_indel_hard_filter"',
+                '--filterName', 'standard_indel_hard_filter',
                     '-o', this_hf_INDELs]
                 hf_INDELs += [this_hf_INDELs]
                 print(' '.join(cmd))
