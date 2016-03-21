@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 #
 # This file is part of the Bacterial and Archaeal Genome Analyser
-# Copyright (C) 2015 David Williams
+# Copyright (C) 2015-2016 David Williams
 # david.williams.at.liv.d-dub.org.uk
 # License GPLv3+: GNU GPL version 3 or later
 # This is free software: you are free to change and redistribute it
