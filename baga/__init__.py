@@ -15,7 +15,6 @@
 # Dr Michael A Brockhurst (The University of York, UK)
 #
 
-import cPickle as _cPickle
 import gzip as _gzip
 import json as _json
 import os as _os
@@ -26,6 +25,7 @@ import re as _re
 import tarfile as _tarfile
 import json as _json
 import time as _time
+from glob import glob as _glob
 from datetime import datetime as _datetime
 import shlex as _shlex
 from hashlib import md5 as _md5
@@ -36,13 +36,15 @@ import textwrap as _textwrap
 PY3 = _sys.version_info > (3,)
 
 if PY3:
-    from urllib import request as _request
     from urllib.error import URLError as _URLError
+    from urllib.request import urlopen as _urlopen
     from io import BytesIO as _BytesIO
+    import pickle as _pickle
 else:
-    import urllib2 as _request
+    from urllib import urlopen as _urlopen
     from urllib2 import URLError as _URLError
     from cStringIO import StringIO as _StringIO
+    import cPickle as _pickle
   
 
 
@@ -235,13 +237,13 @@ def configureLogger(sample_name, main_log_filename, console_verbosity_lvl,
 
 
 def bagasave(object_tuple,file_name):
-    _cPickle.dump(object_tuple, _gzip.open('%s.baga' % file_name,'wb'))
+    _pickle.dump(object_tuple, _gzip.open('%s.baga' % file_name,'wb'))
 
 def bagaload(file_name):
     if file_name[-5:] == '.baga':
-        return _cPickle.load(_gzip.open('%s' % file_name,'rb'))
+        return _pickle.load(_gzip.open('%s' % file_name,'rb'))
     else:
-        return _cPickle.load(_gzip.open('%s.baga' % file_name,'rb'))
+        return _pickle.load(_gzip.open('%s.baga' % file_name,'rb'))
 
 
 def load(file_name):
