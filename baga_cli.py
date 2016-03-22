@@ -292,53 +292,55 @@ sample_name_argument.add_argument('-n', "--reads_name",
 
 parser_Dependencies = subparser_adder.add_parser('Dependencies',
                 formatter_class = argparse.RawDescriptionHelpFormatter,
-                description = textwrap.fill('Check required external programs \
-are available and optionally get them.',
+                description = textwrap.fill('Check required external programs '\
+                        'are available and optionally get them.',
                                             text_width,
                                             replace_whitespace = False))
-                # epilog = textwrap.fill('Groups of read data sets from the \
-# CollectData option are loaded by providing the file name.\n\n\
-# Example usage: "%(prog)s PrepareReads --reads_name ERR953490plus5others --adaptors --trim --align FM209186"\n'\
-# .format(title), text_width, replace_whitespace = False))
 
 group_check_or_get = parser_Dependencies.add_mutually_exclusive_group()
 
 group_check_or_get.add_argument('-c', "--check", 
-    help = "check BAG Analyser has access to a dependency either in the system path or locally",
+    help = "check baga has access to a dependency either in the system path or locally",
     type = str,
     choices = sorted(Dependencies.dependencies),
     nargs = '+')
 
 group_check_or_get.add_argument('-p', "--checkpackage", 
-    help = "check BAG Analyser has access to a python package dependency. Sometimes required if baga just installed a package and a fresh Python instance is required to check it",
+    help = "check baga has access to a python package dependency. Sometimes "\
+    "required if baga just installed a package and a fresh Python instance is "\
+    "required to check it",
     type = str,
-    #choices = sorted(Dependencies.dependencies),
     choices = sorted([name for name,info in Dependencies.dependencies.items() if \
-                info['checker']['function'] == Dependencies.check_python_package]))
+                info[info['default_source']]['checker']['function'] == \
+                Dependencies.check_python_package]))
 
 group_check_or_get.add_argument('-g', "--get", 
-    help = "get (or explain how to get) a dependency for BAG Analyser",
+    help = "get (or explain how to get) a dependency for baga",
     type = str,
     choices = sorted(Dependencies.dependencies),
     nargs = '+')
 
 group_check_or_get.add_argument('-C', "--checkget", 
-    help = "check a dependency for BAG Analyser and attempt to get if not available",
+    help = "check a dependency for baga and attempt to get if not available",
     type = str,
     choices = sorted(Dependencies.dependencies),
     nargs = '+')
 
 group_check_or_get.add_argument('-f', "--checkgetfor", 
-    help = "check a set of dependencies for a BAG Analyser task and attempt to get those that are not available",
+    help = "check a set of dependencies for an baga task and attempt to get "\
+    "those that are not available",
     type = str,
     choices = sorted(Dependencies.dependencies_by_task),
     nargs = '+')
-
+    
 parser_Dependencies.add_argument("-V", "--versions_file", 
-    help="specify file containing versions of software dependencies to use. Defaults to versions.yaml in current folder, falls back to versions.yaml in same folder as baga_cli.py (which might be the same one). If no yaml file specified or found, will use a set of versions built into Dependencies.py that were current in late 2015.", 
-    type = str,
-    default = 'versions.yaml')
-
+    help="specify file containing versions of software dependencies to use. "\
+    "Defaults to versions.yaml in current folder, falls back to versions.yaml "\
+    "in same folder as baga_cli.py (which might be the same one). If no yaml "\
+    "file specified or found, will use a set of versions built into "\
+    "Dependencies.py that were current as of the last baga version.", 
+        type = str,
+        default = 'versions.yaml')
 
 parser_CollectData = subparser_adder.add_parser('CollectData',
         formatter_class = argparse.RawDescriptionHelpFormatter,
@@ -1356,10 +1358,16 @@ if hasattr(args, 'GATK_jar_path') and args.GATK_jar_path:
 
 ### Check Dependencies ###
 
-if args.subparser == 'Dependencies':
-    print('\n-- Dependencies check/get module --')
+if task_name == 'Dependencies':
+    baga_cli.info('\t-- Dependencies check/get module --')
     
-    if args.versions_file:
+    # configure logger for this Task
+    task_logger, task_log_folder = configureLogger(use_sample_name, 
+            main_log_filename, verbosities[args.verbosity], 
+            logger_name = task_name)
+    
+    #if args.versions_file: temporary block
+    if False:
         try:
             use_versions_file = args.versions_file
             versions = open(use_versions_file).read()
@@ -1402,129 +1410,93 @@ if args.subparser == 'Dependencies':
         if updated:
             print('Used {} for version information'.format(os.path.abspath(use_versions_file)))
     
-    def get(name):
-        if Dependencies.dependencies[name]['source'] == 'git':
-            Dependencies.get_git(**Dependencies.dependencies[name])
-        elif Dependencies.dependencies[name]['source'] == 'download':
-            Dependencies.get_download(**Dependencies.dependencies[name])
-    
-    def check(name):
-        # this would need changing with the dependencies dict in Dependencies
-        if 'local_packages' in Dependencies.dependencies[name]['destination']:
-            checker = Dependencies.dependencies[name]['checker']['function']
-            checker_args = Dependencies.dependencies[name]['checker']['arguments']
-            result = checker(Dependencies.dependencies[name]['name'], **checker_args)
-            #checker(dependencies[name]['name'], system = True)
-        elif 'external_programs' in Dependencies.dependencies[name]['destination']:
-            checker = Dependencies.dependencies[name]['checker']['function']
-            checker_args = Dependencies.dependencies[name]['checker']['arguments']
-            result = checker(**checker_args)
-        else:
-            sys.exit('The destination for this package or program is unknown: {}\n'.format(
-                                            Dependencies.dependencies[name]['destination'])
-                                            )
-        return(result)
-    
-    def checkpackage(name):
-        '''this calls a conventional --check for checking new python packages'''
-        import subprocess
-        cmd = [sys.argv[0], '--nosplash', 'Dependencies', '--check', name]
-        proc = subprocess.Popen(cmd, stdout = subprocess.PIPE, stderr = subprocess.PIPE )
-        o,e = proc.communicate()
-        #print(e)
-        if proc.returncode == 1:
-            return(False)
-        elif proc.returncode == 0:
-            return(True)
-    
-    def checkget(checkgetthese):
-        check_summary = []
-        check_results = []
-        for name in checkgetthese:
-            print('\nChecking for {}:\n'.format(name))
-            alreadygot = check(name)
-            
-            if alreadygot:
-                check_summary += ['\n{}: found!'.format(name)]
-                check_results += [alreadygot]
-            else:
-                check_summary += ['\n{0}: not found . . . \nAttempting to install.\n'.format(name, sys.argv[0])]
-                get(name)
-                if 'local_packages' in Dependencies.dependencies[name]['destination']:
-                    # it's a python package so need to forget the import if it was an older version and re-import
-                    # imported as _name to avoid collisions . . .
-                    try:
-                        del sys.modules[name]
-                        #del globals()['_'+name]
-                    except KeyError:
-                        pass
-                
-                if Dependencies.dependencies[name]['checker']['function'] == Dependencies.check_python_package:
-                    gotnow = checkpackage(name)
-                else:                
-                    gotnow = check(name)
-                
-                if gotnow:
-                    check_summary[-1] += "Installed successfully: found!"
-                else:
-                    check_summary[-1] += "Failed to install . . . there may be dependencies missing or some other problem . . ."
-                
-                check_results += [gotnow]
-            
-        return(check_summary,check_results)
-    
     if args.get:
+        task_logger.log(PROGRESS, 'Will get: {}'.format(', '.join(args.get)))
         for name in args.get:
-            get(name)
+            Dependencies.get(name, task_log_folder)
+            task_logger.info('Finished getting: {}'.format(name))
     
     if args.check:
+        task_logger.log(PROGRESS, 'Will check: {}'.format(', '.join(args.check)))
         check_summary = []
         check_results = []
         for name in args.check:
-            print('\nChecking for {}:\n'.format(name))
-            check_results += [check(name)]
+            baga_cli.log(PROGRESS, 'Checking for {}:'.format(name))
+            check_results += [Dependencies.check(name, task_log_folder)]
             if check_results[-1]:
-                check_summary += ['\n{}: found!'.format(name)]
+                task_logger.info('Found: {}'.format(name))
+                check_summary += ['\t{}: found!'.format(name)]
             else:
-                check_summary += ['\n{0}: not found . . . \nTry "{1} Dependencies --get {0}"'.format(name, sys.argv[0])]
-            
-            print(check_summary[-1])
+                task_logger.log(PROGRESS, 'Not found: {}'.format(name))
+                task_logger.log(PROGRESS, 'Try "{} Dependencies --get {}"'\
+                        ''.format(sys.argv[0], name))
+                check_summary += [
+                        '\t{}: not found . . . '.format(name),
+                        'Try "{} Dependencies --get {}"'.format(sys.argv[0], name)
+                        ]
         
-        if len(check_summary) > 1:
-            print(''.join(['\n\nSummary:\n'] + sorted(check_summary))+'\n')
+        if len(args.check) > 1:
+            # if more than one item was tested, reproduce a summary
+            baga_cli.info('')
+            baga_cli.info('Summary:')
+            for l in sorted(check_summary):
+                baga_cli.info(l)
         
         if not all(check_results):
-            sys.exit('\n\nOne or more dependencies are unavailable . . . \n')
+            baga_cli.warning('One or more dependencies are unavailable'\
+                    ' . . .')
+            sys.exit(1)
     
     if args.checkpackage:
         # call baga to do a conventional check on a python package
-        result = checkpackage(args.checkpackage)
+        result = Dependencies.checkpackage(args.checkpackage)
         if result:
-            print('\n{}: found!'.format(args.checkpackage))
+            baga_cli.log(PROGRESS, '\t{}: found!'.format(args.checkpackage))
         else:
-            print('\n{0}: not found . . . \nTry "{1} Dependencies --get {0}"'.format(args.checkpackage, sys.argv[0]))
-            
+            baga_cli.warning('{0}: not found . . . '.format(
+                    args.checkpackage))
+            baga_cli.warning('Try "{} Dependencies --get {}"'.format(
+                    sys.argv[0], args.checkpackage))
     
     if args.checkget:
-        check_summary,check_results = checkget(args.checkget)
+        # to implement: specify "download", "repository" or
+        # "DVCS" e.g. git as source
+        check_summary,check_results = Dependencies.checkget(
+                [(name, 'default_source') for name in args.checkget], 
+                task_log_folder)
         
-        if len(check_summary):
-            print(''.join(['\n\nSummary:\n'] + sorted(check_summary))+'\n')
+        if len(args.checkget) > 1:
+            baga_cli.info('')
+            baga_cli.info('Summary:')
+            for l in sorted(check_summary):
+                baga_cli.info(l)
         
         if not all(check_results):
-            sys.exit('\n\nOne or more baga dependencies are unavailable and could not be installed . . . \n')
+            baga_cli.error('One or more i4m dependencies are '\
+                    'unavailable and could not be installed . . .')
+            sys.exit(1)
     
     if args.checkgetfor:
-        for task in args.checkgetfor: 
-            checkthese = sorted(Dependencies.dependencies_by_task[task])
-            print('Checking on dependencies for {} ({})'.format(task, ', '.join(checkthese)))
-            check_summary,check_results = checkget(checkthese)
+        for task in args.checkgetfor:
+            # to implement: specify "download", "repository" or "DVCS" e.g. git
+            source = 'default_source'
+            checkthese = []
+            for name in sorted(Dependencies.dependencies_by_task[task]):
+                checkthese += [(name,source)]
+                baga_cli.info('Will check dependencies for {} ({})'.format(
+                        name, source))
+            check_summary,check_results = Dependencies.checkget(checkthese, 
+                    task_log_folder)
             
             if len(check_summary):
-                print(''.join(['\n\nSummary for {}:\n'.format(task)] + sorted(check_summary))+'\n')
+                baga_cli.info('Summary for {}:'.format(task))
+                for l in sorted(check_summary):
+                    baga_cli.info(l)
             
             if not all(check_results):
-                sys.exit('\n\nOne or more baga dependencies are unavailable and could not be installed . . . \n')
+                baga_cli.error('One or more baga dependencies are '\
+                        'unavailable and could not be installed . . .')
+                sys.exit(1)
 
 ### Download Genomes ###
 
