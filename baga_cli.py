@@ -533,6 +533,19 @@ parser_Repeats.add_argument('-f', "--find",
     help = "find repeats using Burrows-Wheeler Aligner (BWA) alignments",
     action = 'store_true')
 
+parser_Repeats.add_argument('-m', "--method", 
+    help = "The baga method (default) can be used as part of a variant "\
+    "calling pipeline by providing a variant filter at regions that are "\
+    "so similar, they might cause ambiguous read alignment. The nucmer "\
+    "method (nucmer_check) is to provide a means to compare a previous BAGA "\
+    "repeats analysis with the 'classic' nucmer method from the MUMmer "\
+    "package. The BAGA method is much slower but performs optimal global "\
+    "alignments between repeats and performs codon alignments where "\
+    "appropriate, so is more accurate than nucmer but much slower.",
+    type = str,
+    default = "baga",
+    choices = ["baga","nucmer_check"])
+
 parser_Repeats.add_argument('-i', "--minimum_percent_identity", 
     help = "the lowest nucleotide percent identity permitted repeat over regions",
     type = int,
@@ -1812,12 +1825,12 @@ if args.subparser == 'SimulateReads':
 if args.subparser == 'Repeats':
     print('\n-- Chromosome repeats detection module --')
     
-    e = '-i/--minimum_percent_identity must be between 0 and 100 percent (low values not recommended!)'
-    assert 0 < args.minimum_percent_identity <= 100, e
-    
     import baga
     from baga import Repeats
     from baga import CollectData
+    
+    e = '-i/--minimum_percent_identity must be between 0 and 100 percent (low values not recommended!)'
+    assert 0 < args.minimum_percent_identity <= 100, e
     
     use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
     e = 'Could not locate a saved baga.CollectData.Genome-<genome_name>.baga for name given: {}'.format(args.genome_name)
@@ -1827,12 +1840,21 @@ if args.subparser == 'Repeats':
         print('Loading genome %s' % use_name_genome)
         genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
         finder = Repeats.Finder(genome)
-        # minimum_percent_identity defaults to 98%, argument takes 0.98 so *0.01
-        # minimum_repeat_length defaults to 400
-        finder.findRepeats(minimum_percent_identity = args.minimum_percent_identity * 0.01, minimum_repeat_length = args.minimum_repeat_length)
-        finder.saveLocal(use_name_genome)
-        # also save just the ranges for filtering
-        baga.bagasave(finder.ambiguous_ranges, 'baga.Repeats.filter_regions-{}'.format(use_name_genome))
+        if args.method == 'baga':
+            # minimum_percent_identity defaults to 98%, argument takes 0.98 so *0.01
+            # minimum_repeat_length defaults to 400
+            finder.findRepeats(minimum_percent_identity = args.minimum_percent_identity * 0.01, 
+                    minimum_repeat_length = args.minimum_repeat_length,
+                    max_extensions = 25)
+            finder.saveLocal(use_name_genome)
+            # also save just the ranges for filtering
+            baga.bagasave(finder.ambiguous_ranges, 'baga.Repeats.filter_regions-{}'.format(use_name_genome))
+        elif args.method == 'nucmer_check':
+            finder.findRepeatsNucmer(minimum_percent_identity = args.minimum_percent_identity * 0.01, 
+                          minimum_repeat_length = args.minimum_repeat_length)
+            
+            finder.compareRepeatRegions()
+        
     
     if args.plot:
         # if not args.find:

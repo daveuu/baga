@@ -97,6 +97,7 @@ class Genome:
             '''
             
             ORF_ranges = {}
+            rRNA_ranges = {}
             large_mobile_element_ranges = {}
             
             GI_prophage = _re.compile('[Ii]sland|[Pp]hage|GI')
@@ -108,8 +109,19 @@ class Genome:
                     except KeyError:
                         thisgene = ''
                     
-                    ORF_ranges[f.qualifiers['locus_tag'][0]] = (f.location.start.position,f.location.end.position,f.location.strand, thisgene)
+                    ORF_ranges[f.qualifiers['locus_tag'][0]] = (f.location.start.position,
+                            f.location.end.position,f.location.strand, thisgene)
+                
+                if f.type == 'rRNA':
+                    try:
+                        # product contains "5S.." etc not "gene" for rRNA
+                        thisgene = f.qualifiers['product'][0]
+                    except KeyError:
+                        thisgene = ''
                     
+                    rRNA_ranges[f.qualifiers['locus_tag'][0]] = (f.location.start.position,
+                            f.location.end.position,f.location.strand, thisgene)
+                
                 if f.type == 'misc_feature':
                     try:
                         # not all misc_features have a "note"
@@ -135,7 +147,10 @@ class Genome:
             for ORF in inner_ORFs:
                 del ORF_ranges[ORF]
             
-            return(ORF_ranges, large_mobile_element_ranges)
+            return(ORF_ranges, rRNA_ranges, large_mobile_element_ranges)
+
+
+
 
         def DL(url, verbose = True):
             req = _urllib2.urlopen(url)
@@ -297,7 +312,8 @@ class Genome:
             records = list(_SeqIO.parse(archive, 'genbank'))
             for seq_record in records:
                 if use_name == seq_record.id:
-                    self.ORF_ranges, self.large_mobile_element_ranges = extractLoci(seq_record)
+                    self.ORF_ranges, self.rRNA_ranges, \
+                            self.large_mobile_element_ranges = extractLoci(seq_record)
                     self.sequence = _array('c', seq_record.seq)
                     self.id = seq_record.id
 
@@ -326,7 +342,8 @@ class Genome:
             # self.id = seq_record.id
             for seq_record in records:
                 if accession in seq_record.id:
-                    self.ORF_ranges, self.large_mobile_element_ranges = extractLoci(seq_record)
+                    self.ORF_ranges, self.rRNA_ranges, \
+                            self.large_mobile_element_ranges = extractLoci(seq_record)
                     self.sequence = _array('c', seq_record.seq)
                     self.id = seq_record.id
 
@@ -345,7 +362,8 @@ class Genome:
 
         def loadFromGBK(local_path):
             seq_record = list(_SeqIO.parse(local_path, "genbank"))[0]
-            self.ORF_ranges, self.large_mobile_element_ranges = extractLoci(seq_record)
+            self.ORF_ranges, self.rRNA_ranges, \
+                    self.large_mobile_element_ranges = extractLoci(seq_record)
             self.sequence = _array('c', seq_record.seq)
             self.id = seq_record.id
         
