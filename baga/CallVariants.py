@@ -633,11 +633,23 @@ class CallerGATK:
             max_cpus = -1,
             arguments = False):
         '''
+        Part of GATK "Best Practices" for DNA sequencing variant calling
         https://www.broadinstitute.org/gatk/guide/best-practices/?bpm=DNAseq
         max_cpus for this GATK module is "cpu threads per data thread"
+        
         this method follows the single sample variant calling described here:
         https://www.broadinstitute.org/gatk/guide/article?id=2803
         not the joint genotyping (see .CallgVCFsGATK() and .GenotypeGVCFsGATK())
+        
+        An output after this method is a list of str to the
+        paths of the VCF for each sample. Because there is a 
+        recalibration step, the list of str is added to a list (of lists) here:
+        self.path_to_unfiltered_VCF
+        
+        If this is a list of lists (not str), downstream steps can infer whether a 
+        separate genotyping (not joint) analysis is being run.
+        
+        max_cpus for this GATK module is "cpu threads per data thread"
         '''
 
         print(self.genome_id)
@@ -744,7 +756,22 @@ class CallerGATK:
             max_cpus = -1,
             arguments = False):
         '''
+        Part of GATK "Best Practices" for DNA sequencing variant calling
         https://www.broadinstitute.org/gatk/guide/best-practices/?bpm=DNAseq
+        max_cpus for this GATK module is "cpu threads per data thread"
+        
+        this method follows the joint genotyping calling described here:
+        https://www.broadinstitute.org/gatk/guide/article?id=3893
+        the method .GenotypeGVCFsGATK() should be called after this.
+        
+        An output after this method and .GenotypeGVCFsGATK() is a str to the
+        path of the combined joint genotyped VCF. Because there is a 
+        recalibration step, the str is added to a list here:
+        self.path_to_unfiltered_VCF
+        
+        If this is a list of str (not lists), downstream steps can infer whether a 
+        joint genotyping (not separate) analysis is being run.
+        
         max_cpus for this GATK module is "cpu threads per data thread"
         '''
 
@@ -882,7 +909,7 @@ class CallerGATK:
         #rm /scratch/dw_temp/*_t_rawg.vcf
 
         # this method can be called prior or post base score recalibration
-        # so give output a number corresponding to how many times variants called
+        # so give output a number corresponding to how many times variants called <===== need to never let total to go over two . . . <== fail with a warning/error?
         use_name = '{}_{}_samples_unfiltered.vcf'.format(data_group_name, len(self.paths_to_raw_gVCFs))
         VCF_out = _os.path.sep.join([local_variants_path_genome, use_name])
 
@@ -950,7 +977,8 @@ class CallerGATK:
         ## a single joint called VCF is present
         ## or a set of VCFs are present
 
-        if isinstance(self.path_to_unfiltered_VCF[-1],str):
+        if isinstance(self.path_to_unfiltered_VCF[-1],str) or \
+                isinstance(self.path_to_unfiltered_VCF[-1],unicode):
             # single item to joint called VCF
             # extract the SNPs
             raw_SNPs = self.path_to_unfiltered_VCF[-1][:-4] + '_SNPs.vcf'
@@ -972,6 +1000,8 @@ class CallerGATK:
                 '--filterExpression', 'QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0',
                 '--filterName', 'standard_hard_filter',
                 '-o', hf_SNPs]
+            print(' '.join(cmd))
+            _subprocess.call(cmd)
         else:
             # must be a list
             hf_SNPs = []
@@ -1032,7 +1062,8 @@ class CallerGATK:
 
         assert hasattr(self, 'path_to_unfiltered_VCF'), e1
 
-        if isinstance(self.path_to_unfiltered_VCF[-1],str):
+        if isinstance(self.path_to_unfiltered_VCF[-1],str) or \
+                isinstance(self.path_to_unfiltered_VCF[-1],unicode):
             # single item to joint called VCF
             # extract the INDELs
             raw_INDELs = self.path_to_unfiltered_VCF[-1][:-4] + '_INDELs.vcf'
@@ -1054,7 +1085,6 @@ class CallerGATK:
                 '--filterExpression', 'QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0',
                 '--filterName', 'standard_indel_hard_filter',
                 '-o', hf_INDELs]
-            
             print(' '.join(cmd))
             _subprocess.call(cmd)
         else:
@@ -1135,7 +1165,8 @@ class CallerGATK:
 
         for cnum,BAM in enumerate(self.ready_BAMs[-1]):
             table_out_pre = BAM[:-4] + '_baserecal_pre.table'
-            if isinstance(self.path_to_hardfiltered_SNPs[-1],str):
+            if isinstance(self.path_to_hardfiltered_SNPs[-1],str) or \
+                    isinstance(self.path_to_hardfiltered_SNPs[-1],unicode):
                 # joint calling was used
                 knownSitesVCF = self.path_to_hardfiltered_SNPs[-1]
             else:
@@ -1152,14 +1183,12 @@ class CallerGATK:
                     '-knownSites', knownSitesVCF,
                     #'--validation_strictness', 'LENIENT',
                     '-o', table_out_pre]
-                
                 print('Called: %s' % (' '.join(map(str, cmd))))
                 _subprocess.call(cmd)
             else:
                 print('Found:')
                 print(table_out_pre)
                 print('use "force = True" to overwrite')
-            
             table_out_post = BAM[:-4] + '_baserecal_post.table'
             if not _os.path.exists(table_out_post) or force:
                 cmd = [use_java, '-Xmx%sg' % mem_num_gigs, '-jar', jar,
@@ -1171,15 +1200,12 @@ class CallerGATK:
                     '-knownSites', knownSitesVCF,
                     '-BQSR', table_out_pre,
                     '-o', table_out_post]
-                
                 print('Called: %s' % (' '.join(map(str, cmd))))
                 _subprocess.call(cmd)
-                
             else:
                 print('Found:')
                 print(table_out_post)
                 print('use "force = True" to overwrite')
-            
             BAM_out = BAM[:-4] + '_baserecal.bam'
             if not _os.path.exists(BAM_out) or force:
                 cmd = [use_java, '-Xmx%sg' % mem_num_gigs, '-jar', jar,
@@ -1192,16 +1218,13 @@ class CallerGATK:
                 
                 print('Called: %s' % (' '.join(map(str, cmd))))
                 _subprocess.call(cmd)
-                
             else:
                 print('Found:')
                 print(BAM_out)
                 print('use "force = True" to overwrite')
-            
             cmd = [samtools_exe, 'index', BAM_out]        
             _subprocess.call(cmd)
             paths_to_recalibrated_BAMs += [BAM_out]
-            
             # report durations, time left etc
             _report_time(start_time, cnum, len(self.ready_BAMs[-1]))
 
