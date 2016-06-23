@@ -1216,8 +1216,8 @@ class Genome(_MetaSample):
             arraytype = 'c'
 
         for seq_record in records:
-            ORF_ranges, large_mobile_element_ranges, ordinate_offset = \
-                    self._extractLoci(seq_record)
+            ORF_ranges, rRNA_ranges, large_mobile_element_ranges, \
+                    ordinate_offset = self._extractLoci(seq_record)
             if ordinate_offset:
                 use_seq = str(seq_record.seq[-ordinate_offset:]) + \
                         str(seq_record.seq[:-ordinate_offset])
@@ -1254,26 +1254,27 @@ class Genome(_MetaSample):
 
     def _extractLoci(self, seq_record):
         '''
-        Extract some ORF information from genbank record and put into convenient 
-        dictionaries. Checks for features spanning start/end of circular 
-        sequences and applies an offset so the start < end and start == 0.
+        Extract some ORF and rRNA locus information from genbank record 
+        and put into convenient dictionaries. Checks for features spanning
+        start/end of circular sequences and applies an offset so the 
+        start < end and start == 0.
         
         Returns
         -------
         ORF_ranges : dict
+        rRNA_ranges : dict
         large_mobile_element_ranges : dict
         ordinate_offset : int
             the offset integer to deal with compound features spanning 
             start/end (0 if not applied)
         '''
         ORF_ranges = {}
+        rRNA_ranges = {}
         large_mobile_element_ranges = {}
         ordinate_offset = 0
         GI_prophage = _re.compile('[Ii]sland|[Pp]hage|GI')
         for f in seq_record.features:
             if f.type == 'CDS':
-                # until AA and detailed annotations of ORFs needed, don't save
-                # other qualifiers
                 try:
                     thisgene = f.qualifiers['gene'][0]
                 except KeyError:
@@ -1284,7 +1285,8 @@ class Genome(_MetaSample):
                             f.location.parts[1].end.position == len(seq_record.seq):
                         # this feature spans 0 on chromosome sequence in file
                         # will use an offset to simplify feature access
-                        # by removing overlap
+                        # by removing overlap <== not currently implemented for
+                        # rRNA or misc_features
                         s = f.location.parts[1].start.position
                         e = f.location.parts[1].end.position
                         ordinate_offset = e - s
@@ -1304,7 +1306,18 @@ class Genome(_MetaSample):
                     e = f.location.end.position + ordinate_offset
                 ORF_ranges[f.qualifiers['locus_tag'][0]] = (s, e, 
                         f.location.strand, thisgene)
+            
+            if f.type == 'rRNA':
+                try:
+                    # for rRNA, "product" contains "5S.." etc not "gene" as 
+                    # for CDS (ORFs)
+                    thisgene = f.qualifiers['product'][0]
+                except KeyError:
+                    thisgene = ''
                 
+                rRNA_ranges[f.qualifiers['locus_tag'][0]] = (f.location.start.position,
+                        f.location.end.position,f.location.strand, thisgene)
+            
             if f.type == 'misc_feature':
                 try:
                     # not all misc_features have a "note"
@@ -1340,7 +1353,7 @@ class Genome(_MetaSample):
         self.logger.log(PROGRESS, '{} ORFs, {} large features parsed in {}'\
                 ''.format(len(ORF_ranges), len(large_mobile_element_ranges), 
                 seq_record.id))
-        return(ORF_ranges, large_mobile_element_ranges, ordinate_offset)
+        return(ORF_ranges, rRNA_ranges, large_mobile_element_ranges, ordinate_offset)
 
     def _DL(self, url, verbose = True):
         CHUNK = 16 * 1024 * 32
