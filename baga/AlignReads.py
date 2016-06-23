@@ -543,12 +543,9 @@ class SAMs(_MetaSample):
             assert _os.path.exists(files[1]), e2 % files[1]
             assert _os.path.exists(files[2]), e2 % files[2]
 
-        have_index_files = [_os.path.exists(genome_fna + '.' + a) for a in \
-                ('ann','pac','amb','bwt','sa')]
-
-        if not all(have_index_files):
-            print('Writing BWA index files for %s' % genome_fna)
-            _subprocess.call([path_to_exe, 'index', genome_fna])
+        # always (re)index in case of upstream changes in data
+        print('Writing BWA index files for %s' % genome_fna)
+        _subprocess.call([path_to_exe, 'index', genome_fna])
 
 
         aligned_read_files = {}
@@ -736,18 +733,16 @@ class SAMs(_MetaSample):
         for BAM in self.paths_to_BAMs_dd_si:
             assert _os.path.exists(BAM), e2 % BAM
 
-        if not _os.path.exists(genome_fna[:-4] + '.dict'):
-            print('Creating sequence dictionary for %s' % genome_fna)
-            _subprocess.call([use_java, '-jar', picard_jar, 
-                    'CreateSequenceDictionary', 
-                    'R=', genome_fna, 
-                    'O=', genome_fna[:-4] + '.dict'])
+        # always (re)generate dict in case of upstream changes in data
+        print('Creating sequence dictionary for %s' % genome_fna)
+        _subprocess.call([use_java, '-jar', picard_jar, 
+                'CreateSequenceDictionary', 
+                'R=', genome_fna, 
+                'O=', genome_fna[:-4] + '.dict'])
 
-        have_index_files = [_os.path.exists(genome_fna + '.' + a) for a in ('fai',)]
-
-        if not all(have_index_files):
-            print('Writing index files for %s' % genome_fna)
-            _subprocess.call([samtools_exe, 'faidx', genome_fna])
+        # always (re)index in case of upstream changes in data
+        print('Writing index files for %s' % genome_fna)
+        _subprocess.call([samtools_exe, 'faidx', genome_fna])
 
         processes = set()
         max_processes = _decide_max_processes( max_cpus )
