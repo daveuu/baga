@@ -2971,11 +2971,17 @@ if args.subparser == 'FilterVariants':
             caller = CallVariants.CallerGATK(baga = filein)
             
             if hasattr(caller, 'path_to_hardfiltered_SNPs') and hasattr(caller, 'path_to_hardfiltered_INDELs'):
-                # only one for VCFs so no overwriting
-                VCFs = [caller.path_to_hardfiltered_SNPs[-1], caller.path_to_hardfiltered_INDELs[-1]]
-                # more than one can be handled with --report though
-                # only implemented for separate VCFs currently
-                VCFs_for_report[these_reads] = {'SNPs':caller.path_to_hardfiltered_SNPs[-1], 'InDels':caller.path_to_hardfiltered_INDELs[-1]}
+                if isinstance(caller.path_to_hardfiltered_SNPs[-1], list):
+                    # --callsingles
+                    VCFs = caller.path_to_hardfiltered_SNPs[-1] + caller.path_to_hardfiltered_INDELs[-1]
+                else:
+                    # --calleach --calljoint
+                    VCFs = [caller.path_to_hardfiltered_SNPs[-1], caller.path_to_hardfiltered_INDELs[-1]]
+                
+                # can't remember what this is for
+                VCFs_for_report[these_reads] = {
+                        'SNPs':caller.path_to_hardfiltered_SNPs[-1], 
+                        'InDels':caller.path_to_hardfiltered_INDELs[-1]}
             elif hasattr(caller, 'path_to_unfiltered_VCF'):
                 print('WARNING: path to GATK hardfiltered variants not found in {}'.format(filein))
                 print('It is recommended to complete the GATK variant calling with the CallVariants module')
@@ -3001,19 +3007,26 @@ if args.subparser == 'FilterVariants':
             else:
                 # add file
                 VCFs += [path]
-
+    
     print('Loaded VCF locations:\n{}'.format('\n'.join(VCFs)))
     
-    # check accessible and collect sample names with genome accession
+    # check accessible and collect contained chromsome/sequence accessions
+    # and sample name from columns
+    # ... could at this point merge all samples called into one VCF?
     sample_names = {}
     for VCF in VCFs:
         try:
             with open(VCF, 'r') as filein:
                 header, header_section_order, colnames, variants = CallVariants.parseVCF(VCF)
-                bits = header['contig'][0].split('<')[-1].split('>')[0].split(',')
-                contiginfo = dict([bit.split('=') for bit in bits])
+                contigs = {}
+                for contiginfo in header['contig']:
+                    bits = contiginfo.split('<')[-1].split('>')[0].split(',')
+                    contiginfodict = dict([bit.split('=') for bit in bits])
+                    #contig_id,contig_len = 
+                    contigs[contiginfodict['ID']] = contiginfodict['length']
                 for sample_name in colnames[9:]:
                     sample_names[sample_name] = contiginfo
+            sample_names[VCF] = {}
         except IOError as e:
             print(e)
             sys.exit('Failed to open: {}'.format(VCF))

@@ -2392,7 +2392,7 @@ class Filter:
         values are a list or dict of ranges
         '''
         # do some checks on provided genome and VCFs
-        genome_ids = {}
+        genome_ids = {} # map sequence IDs to VCF files, expect length one i.e. assume they are all the same
         genome_lengths = {}
         pattern = _re.compile('##contig=<ID=([A-Za-z0-9\._]+),length=([0-9]+)>')
         for VCF in self.VCF_paths: #break
@@ -2405,7 +2405,7 @@ class Filter:
                         print('Failed to parse genome information from {}'.format(line))
                     genome_lengths[int(genome_length)] = VCF
                     genome_ids[genome_id] = VCF
-                    #print(genome_id, genome_length)
+                    print(genome_id, genome_length)
                     identified = True
                     break
                 
@@ -2429,6 +2429,8 @@ class Filter:
             except KeyError:
                 print('Unknown filter type: {}. Choose from {}'.format(this_filter, ', '.join(known_filters) ))
 
+        # this loads VCF, marks variants and writes new VCF
+        # could definitely streamline to get here quicker <=========
         self.markVariants(filters_to_apply)
 
         self.reportFiltered()
