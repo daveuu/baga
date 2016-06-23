@@ -1564,6 +1564,7 @@ class Finder:
                 bam_name_sorted]))
 
         # there's something curious here . . . what and why is this happening?
+        # something to do with one-way matches being made two-way (symmetrical)
         self.followHitsAndAdd()
         max_iterations = 10
         i = 0
@@ -1583,18 +1584,15 @@ class Finder:
         self.orderORFHits()
         self.getHomologousContiguousBlocks()
 
-        print(self.homologous_groups)
-        import pdb;pdb.set_trace()
-
         #### align contiguous homologous blocks ####
         self.getORFsInTandemRepeats()
-        # min_pID is used to find an initial set of repeatitive and possibly 
+        # min_pID is used to find an initial set of repetitive and possibly 
         # divergent regions and should be lower than the eventual minimum
         # threshold: different to minimum_percent_identity which is used for final
         # selection of ambiguous regions below
-        self.align_blocks(min_pID = 0.85, max_extensions = max_extensions)
+        pre_min_pID = minimum_percent_identity * 0.85
+        self.align_blocks(min_pID = pre_min_pID, max_extensions = max_extensions)
         self.map_alignments_to_chromosome()
-
 
         #### identify 98% (default) identical regions
         self.identify_ambiguous_regions(minimum_percent_identity = minimum_percent_identity)
