@@ -766,6 +766,21 @@ dependencies['gemsim'] = {
                 'arguments':{'path': ['GemSIM_v1.6', 'GemReads.py']}}
     }
 
+dependencies['mummer'] = {
+    'name': 'mummer',
+    'description': 'quick genome sequence alignments',
+    'source': 'download',
+    'url': 'http://downloads.sourceforge.net/project/mummer/mummer/3.23/MUMmer3.23.tar.gz',
+    'commit': None,
+    'checksum': None,
+    'destination': destination_programs,
+    'preparation': [{'function': prep_simple_make,
+                'arguments': {'path': [], 'configure': False}}],
+                # later include other executables e.f. procmer
+    'checker': {'function': check_no_error,
+                'arguments':{'path': ['MUMmer3.23', 'nucmer']}}
+    }
+
 dependencies_notes = {}
 
 dependencies_notes['sickle'] = {
@@ -859,6 +874,7 @@ dependencies_by_task['Repeats'] = [
 'seq-align',
 'svgwrite',
 'pysam',
+'mummer'
 ]
 
 dependencies_by_task['Structure'] = [
