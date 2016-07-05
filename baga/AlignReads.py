@@ -26,7 +26,7 @@ from time import sleep as _sleep
 from baga import _subprocess
 from baga import _os
 from baga import _multiprocessing
-from baga import _cPickle
+from baga import _pickle
 from baga import _gzip
 from baga import _StringIO
 from baga import _tarfile

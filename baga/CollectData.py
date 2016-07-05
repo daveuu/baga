@@ -33,7 +33,7 @@ from glob import glob as _glob
 
 # not sure if there is any advantage in going via the package __init__.py for 
 # widely used imports
-from baga import _cPickle
+from baga import _pickle
 from baga import _gzip
 from baga import _os
 from baga import _sys
@@ -515,13 +515,24 @@ class Genome(_MetaSample):
             self.logger.warning('WARNING: The information about this genome '\
                     'returned by NCBI Entrez failed validation '\
                     '(ValidationError): {}'.format(e))
-            self.logger.warning('Trying without validation . . .')
+            self.logger.warning('Trying without validation . . .\n')
             do_validation = False
             handle = _Entrez.esummary(db = use_db, 
                     id = ','.join(result['IdList'][:perfetch]))
             raw = _Entrez.read(handle, validate = do_validation)
             handle.close()
+            # this can be tested to deal with empty records coming back from NBCI . . .
+            # if len(raw) == 0:
+                # print('NCBIs Entrez system returned an empty result for record '\
+                        # 'id {} in the Assembly database. Will attempt to '\
+                        # 'download direct from nucleotide database'\
+                        # ''.format(Assembly_ID))
+                # raise RuntimeError("Empty record from Entrez")
+            # else:
             summaries = raw['DocumentSummarySet']['DocumentSummary']
+
+
+
 
         # get the remainder with or without validation
         for i in range(1,int(len(result['IdList'])/perfetch)+1):
@@ -737,6 +748,7 @@ class Genome(_MetaSample):
             raise(StopIteration)
             # see https://docs.python.org/3/glossary.html#term-iterator
             # below should be .__next__() ?
+
 
         # collect next
         uid,info = sorted(self.assemblies_info.items())[0]
@@ -1219,12 +1231,14 @@ class Genome(_MetaSample):
             ORF_ranges, rRNA_ranges, large_mobile_element_ranges, \
                     ordinate_offset = self._extractLoci(seq_record)
             if ordinate_offset:
+                # shift starting character so as not to span a feature
                 use_seq = str(seq_record.seq[-ordinate_offset:]) + \
                         str(seq_record.seq[:-ordinate_offset])
                 seqs[seq_record.id] = _array(arraytype, use_seq)
             else:
                 seqs[seq_record.id] = _array(arraytype, str(seq_record.seq))
-            loci[seq_record.id] = ORF_ranges, large_mobile_element_ranges
+            loci[seq_record.id] = ORF_ranges, rRNA_ranges, \
+                    large_mobile_element_ranges
             names[seq_record.id] = seq_record.description
             self.logger.debug('parsed: {}: {}'.format(
                     seq_record.id, seq_record.description))
@@ -1708,7 +1722,7 @@ class Reads:
         '''
         fileout = 'baga.CollectData.Reads-%s.baga' % name
         print('Saving to %s' % fileout)
-        _cPickle.dump(self, _gzip.open(fileout, 'wb'))
+        _pickle.dump(self, _gzip.open(fileout, 'wb'))
 
 if __name__ == '__main__':
     main()

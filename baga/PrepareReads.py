@@ -26,7 +26,7 @@ from time import sleep as _sleep
 from baga import _subprocess
 from baga import _os
 from baga import _multiprocessing
-from baga import _cPickle
+from baga import _pickle
 from baga import _gzip
 from baga import _time
 from baga import _re
@@ -100,7 +100,7 @@ class Reads:
                         '"getFromENA()" or "getFromPath()" methods.')
         else:
             try:
-                loaded_baga = _cPickle.load(_gzip.open(path_to_baga,'rb'))
+                loaded_baga = _pickle.load(_gzip.open(path_to_baga,'rb'))
                 for attribute_name in dir(loaded_baga):
                     if attribute_name[0] != '_':
                         setattr(self, attribute_name, getattr(loaded_baga, attribute_name))
@@ -114,7 +114,7 @@ class Reads:
         '''
         fileout = 'baga.PrepareReads.Reads-%s.baga' % name
         print('Saving to %s' % fileout)
-        _cPickle.dump(self, _gzip.open(fileout, 'wb'))
+        _pickle.dump(self, _gzip.open(fileout, 'wb'))
     def subsample(self, genome_size = 6601757, 
                         read_cov_depth = 80, 
                         pc_loss = 0.2, 

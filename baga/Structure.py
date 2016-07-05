@@ -29,7 +29,7 @@ orthology or homologous replacement.
 
 # stdlib
 from baga import _os
-from baga import _cPickle
+from baga import _pickle
 from baga import _gzip
 from baga import _tarfile
 from baga import _StringIO
@@ -132,7 +132,8 @@ def checkStructure(BAMs,
                    smoothed_resolution = 10, 
                    smoothed_window = False,
                    ratio_threshold = 0.15,
-                   genome_name = False):
+                   genome_name = False,
+                   use_existing_bam_indexes = False):
     '''
     check for structural rearrangements . . .
     smoothed_window defaults to half of estimated fragment length
@@ -141,7 +142,11 @@ def checkStructure(BAMs,
     checkers = {}
     for BAM in BAMs:
         indexfile = _os.path.extsep.join([BAM,'bai'])
-        if not(_os.path.exists(indexfile) and _os.path.getsize(indexfile) > 0):
+        if not use_existing_bam_indexes or \
+                not(_os.path.exists(indexfile) and \
+                _os.path.getsize(indexfile) > 0):
+            # always re-index in case data has changed
+            # unless explicitly told not to
             print('indexing {}'.format(BAM))
             fail = False
             try:

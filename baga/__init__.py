@@ -15,7 +15,6 @@
 # Dr Michael A Brockhurst (The University of York, UK)
 #
 
-import cPickle as _cPickle
 import gzip as _gzip
 import json as _json
 import os as _os
@@ -36,14 +35,16 @@ import textwrap as _textwrap
 PY3 = _sys.version_info > (3,)
 
 if PY3:
-    from urllib import request as _request
     from urllib.error import URLError as _URLError
+    from urllib.request import urlopen as _urlopen
     from io import BytesIO as _BytesIO
+    from io import StringIO as _StringIO
+    import pickle as _pickle
 else:
-    import urllib2 as _request
+    from urllib import urlopen as _urlopen
     from urllib2 import URLError as _URLError
     from cStringIO import StringIO as _StringIO
-  
+    import cPickle as _pickle
 
 
 
@@ -235,13 +236,13 @@ def configureLogger(sample_name, main_log_filename, console_verbosity_lvl,
 
 
 def bagasave(object_tuple,file_name):
-    _cPickle.dump(object_tuple, _gzip.open('%s.baga' % file_name,'wb'))
+    _pickle.dump(object_tuple, _gzip.open('%s.baga' % file_name,'wb'))
 
 def bagaload(file_name):
     if file_name[-5:] == '.baga':
-        return _cPickle.load(_gzip.open('%s' % file_name,'rb'))
+        return _pickle.load(_gzip.open('%s' % file_name,'rb'))
     else:
-        return _cPickle.load(_gzip.open('%s.baga' % file_name,'rb'))
+        return _pickle.load(_gzip.open('%s.baga' % file_name,'rb'))
 
 
 def load(file_name):
@@ -294,18 +295,54 @@ def load(file_name):
                 try:
                     # either json serialised conventional objects
                     contents = _json.loads(contents.getvalue().decode('utf-8'))
+                    not_json = False
                 except ValueError:
-                    # or longer python array.array objects ### how did this work for integers? Didn't!
-                    array_data = loadArray(member.name, contents)
-                    if PY3:
-                        contents = _array('u', contents.getvalue())
-                    else:
-                        contents = _array('c', contents.getvalue())
+                    # not JSON
+                    not_json = True
+                except _json.UnicodeDecodeError:
+                    # not JSON
+                    not_json = True
+                if not_json:
+                    try:
+                        # or pickle serialised conventional objects
+                        contents = _pickle.loads(contents.getvalue())
+                    except _pickle.UnpicklingError:
+                        # not pickle
+                        # or longer python array.array objects
+                        ### how did this work for integers? Didn't! <== is this adequately checked?
+                        ### would be better to have direct tests of json or pickle . . .
+                        array_data = loadArray(member.name, contents)
+                        if PY3:
+                            contents = _array('u', contents.getvalue())
+                        else:
+                            contents = _array('c', contents.getvalue())
                 meta_data[member.name] = contents
         # add dicts of arrays to the rest of meta_data
         for member_name,d in arraydicts.items():
             meta_data[member_name] = d
     return(meta_data)
+
+
+            # else:
+                # # else it's an array or JSONable itself
+                # try:
+                    # # either json serialised conventional objects
+                    # contents = _json.loads(contents.getvalue().decode('utf-8'))
+                # except ValueError:
+                    # # or longer python array.array objects ### how did this work for integers? Didn't!
+                    # array_data = loadArray(member.name, contents)
+                    # if PY3:
+                        # contents = _array('u', contents.getvalue())
+                    # else:
+                        # contents = _array('c', contents.getvalue())
+                # meta_data[member.name] = contents
+        # # add dicts of arrays to the rest of meta_data
+        # for member_name,d in arraydicts.items():
+            # meta_data[member_name] = d
+    # return(meta_data)
+
+
+
 
 def save(metadata, file_name):
     '''save metadata dict from previous baga object into an baga file'''
@@ -667,6 +704,7 @@ class MetaSample(Base):
             metadata = load(path)
             for name,content in metadata.items():
                 if name == 'sample_name':
+                    # confirm loaded file is for same sample as currently analysed
                     if content != self.sample_name:
                         raise RuntimeError("mismatch between requested sample "\
                                 "name ({}) and '{}' in local saved object: {}. "\
@@ -795,16 +833,39 @@ class MetaSample(Base):
             self.log_folder = log_folder
           
 
-    def saveLocal(self, exclude = []):
+    # def saveLocal(self, exclude = []):
+        # '''
+        # Save an baga object to a file
+        
+        # Objects usually contain sample metadata information. The data is 
+        # saved as a compressed archive with attributes as JSON or raw Python 
+        # array.array objects as bytes or strings. Dictionaries of arrays are
+        # deconstructed and saved as array.array bytes and can be reconstrcuted
+        # by baga metadata inheritance in MetaSample's __init__() method.
+        # '''
+
+    def saveLocal(self, exclude = [], serialiser = 'json'):
         '''
         Save an baga object to a file
         
         Objects usually contain sample metadata information. The data is 
-        saved as a compressed archive with attributes as JSON or raw Python 
-        array.array objects as bytes or strings. Dictionaries of arrays are
-        deconstructed and saved as array.array bytes and can be reconstrcuted
-        by baga metadata inheritance in MetaSample's __init__() method.
+        saved as a compressed archive with attributes as JSON (or pickle if 
+        specified in arguments) or raw Python array.array objects as bytes or 
+        strings. Dictionaries of arrays are deconstructed and saved as 
+        array.array bytes and can be reconstrcuted by baga metadata 
+        inheritance in MetaSample's __init__() method.
         '''
+        if serialiser == 'json':
+            import json as _serialiser
+        elif serialiser == 'pickle':
+            import sys
+            if sys.version_info.major == 3:
+                import pickle as _serialiser
+            else:
+                import cPickle as _serialiser
+        else:
+            raise NotImplementedError('Serialiser "{}" not implemented, choose '\
+                    '"json" or "pickle"')
         def saveArray(array_data, member_name, tar):
             if array_data.typecode == 'u':
                 # 1 byte per character instead of 2 (4?)
@@ -848,14 +909,19 @@ class MetaSample(Base):
                                 '(dict) as {}'.format(self.file_name, 
                                 array_name, att_name, member_name))
                 else:
-                    # try saving everything else here by jsoning
+                    # try saving everything else here by jsoning or pickling
                     try:
                         if PY3:
                             ioob = _BytesIO()
                         else:
                             ioob = _StringIO()
-                        att_json = _json.dumps(att)
-                        ioob.write(att_json.encode('utf-8'))
+                        att_serialised = _serialiser.dumps(att)
+                        try:
+                            # json makes strings which need encoding to bytes
+                            ioob.write(att_serialised.encode('utf-8'))
+                        except AttributeError:
+                            # pickle makes bytes
+                            ioob.write(att_serialised)
                         ioob.seek(0, _os.SEEK_END)
                         length = ioob.tell()
                         ioob.seek(0)
@@ -866,8 +932,8 @@ class MetaSample(Base):
                                 self.file_name, att_name, type(att)))
                     except TypeError:
                         # could be warning but expect functions to fail here
-                        self.logger.debug('Not JSONable: "{}", {}'.format(
-                                att_name, type(att)))
+                        self.logger.debug('Not {}-able: "{}", {}'.format(
+                                serialiser, att_name, type(att)))
                         # ignore non-jsonable things like functions
                         # include unicodes, strings, lists etc etc
                         omissions += [att_name]

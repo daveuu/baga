@@ -28,7 +28,7 @@ orthologous regions.
 # stdlib
 from baga import _subprocess
 from baga import _os
-from baga import _cPickle
+from baga import _pickle
 from baga import _gzip
 from baga import _tarfile
 from baga import _json
@@ -56,9 +56,12 @@ class Finder(_MetaSample):
     sequence repeats up to many ORFs long in a genome sequence.
     '''
 
-    def __init__(self, genome_name = False, genome = False, inherit_from = False, **kwargs):
+    def __init__(self, genome_name = False, genome = False, 
+            inherit_from = False, **kwargs):
         '''
-        A repeat finder object must be instantiated with a genome prepared by the CollectData option
+        A repeat finder object must be instantiated with a genome prepared by 
+        the CollectData option or loaded from a previously saved object by 
+        providing genome_name and setting inherit_from to "self"
         '''
         module_name = __name__
         if genome:
@@ -67,21 +70,35 @@ class Finder(_MetaSample):
             sample_name = genome_name
         
         super(Finder, self).__init__(sample_name, module_name, 
-                inherit_from = False, **kwargs)
+                inherit_from = inherit_from, **kwargs)
         
-        self.genome_ORF_ranges = {}
-        self.ORFs_ordered = {}
         if genome and not inherit_from:
             # making a new one, not reloading
+            self.genome_loci_info = {}
+            self.loci_ordered = {}
+            self.large_features = {}
             self.genome_sequence = genome.sequence
             self.genome_names = genome.names
             self.genome_name = genome.sample_name
             for replicon_id in genome.annotations:
-                e = 'This {} in {} contains no ORF information: Repeats finding not possible'.format(replicon_id, sample_name)
+                e = 'This {} in {} contains no ORF information: Repeats finding '\
+                        'not possible'.format(replicon_id, sample_name)
                 assert len(genome.annotations[replicon_id][0]) > 0, e
-                self.genome_ORF_ranges[replicon_id] = genome.annotations[replicon_id][0]
-                self.ORFs_ordered[replicon_id] = sorted(genome.annotations[replicon_id][0], 
-                        key = genome.annotations[replicon_id][0].get)
+                # per replicon annotations currently a list:
+                # ORFs, rRNAs, large_mobile_element_ranges, ordinate_offset
+                replicon_loci_info = dict(genome.annotations[replicon_id][0].items())
+                # same for rRNA but add suffix: '__rRNA' to prevent translation later
+                replicon_loci_info.update((rRNA_id+'__rRNA',[s,e,strd,n]) \
+                        for rRNA_id,(s,e,strd,n) in \
+                        genome.annotations[replicon_id][1].items())
+                
+                self.genome_loci_info[replicon_id] = replicon_loci_info
+                self.loci_ordered[replicon_id] = sorted(replicon_loci_info, 
+                        key = replicon_loci_info.get)
+                
+                # only needed for plotting i.e., is repeat in a prophage etc
+                self.large_features[replicon_id] = \
+                        genome.annotations[replicon_id][2]
 
     def parseBamForDoubleHits(self, replicon_id, filename):
         '''
@@ -90,38 +107,34 @@ class Finder(_MetaSample):
         '''
 
         alns = _pysam.Samfile(filename)
-        ORF_hit_ranges = _defaultdict(dict)
+        locus_hit_ranges = _defaultdict(dict)
         non_self_non_secondary = _defaultdict(list)
         for aln in alns:
             # get ORF that was hit
-            for ORF,(s,e,strand,gene_name) in self.genome_ORF_ranges[replicon_id].items():
+            for locus,(s,e,strand,gene_name) in self.genome_loci_info[replicon_id].items():
                 if s < aln.reference_end and aln.reference_start < e:
                     # exclude self
-                    if ORF != aln.query_name:
-                        s_q, e_q, strand, gene_name = self.genome_ORF_ranges[replicon_id][aln.query_name]
+                    if locus != aln.query_name:
+                        s_q, e_q, strand, gene_name = \
+                                self.genome_loci_info[replicon_id][aln.query_name]
                         # check how much of ORF was aligned,
                         # only accept if >50% covered
-                        aligned_positions_in_hit_ORF = sorted(
+                        aligned_positions_in_hit_locus = sorted(
                                         set(range(s,e)) & set(aln.positions)
                                                               )
-                        if len(aligned_positions_in_hit_ORF) > (e-s) * 0.5 and \
-                           len(aligned_positions_in_hit_ORF) > (e_q-s_q) * 0.5:
-                            # print(  aln.query_name, 
-                                    # e_q-s_q, ORF, e-s, 
-                                    # len(aligned_positions_in_hit_ORF), 
-                                    # aln.is_secondary
-                                    # )
-                            ORF_hit_ranges[aln.query_name][ORF] = \
+                        if len(aligned_positions_in_hit_locus) > (e-s) * 0.5 and \
+                           len(aligned_positions_in_hit_locus) > (e_q-s_q) * 0.5:
+                            locus_hit_ranges[aln.query_name][locus] = \
                                 aln.reference_start, aln.reference_end
                             if not aln.is_secondary:
-                                non_self_non_secondary[aln.query_name] += [ORF]
+                                non_self_non_secondary[aln.query_name] += [locus]
 
         try:
-            self.ORF_hit_ranges[replicon_id] = dict(ORF_hit_ranges)
+            self.hit_ranges[replicon_id] = dict(locus_hit_ranges)
             self.non_self_non_secondary[replicon_id] = dict(non_self_non_secondary)
         except AttributeError:
-            self.ORF_hit_ranges = {}
-            self.ORF_hit_ranges[replicon_id] = dict(ORF_hit_ranges)
+            self.hit_ranges = {}
+            self.hit_ranges[replicon_id] = dict(locus_hit_ranges)
             self.non_self_non_secondary = {}
             self.non_self_non_secondary[replicon_id] = dict(non_self_non_secondary)
 
@@ -131,110 +144,114 @@ class Finder(_MetaSample):
             some hits are one way which is good enough evidence 
             for homology for now
         
-        and generate ORF_hits dict from ORF_hit_ranges or update it if it 
+        and generate hits dict from ORF_hit_ranges or update it if it 
         already exists
         '''
 
-        if hasattr(self, 'ORF_hits') and replicon_id in self.ORF_hits:
-            ORFdict_in = dict(self.ORF_hits[replicon_id].items())
+        if hasattr(self, 'hits') and replicon_id in self.hits:
+            hits_dict_in = dict(self.hits[replicon_id].items())
         else:
-            ORFdict_in = dict(self.ORF_hit_ranges[replicon_id].items())
+            hits_dict_in = dict(self.hit_ranges[replicon_id].items())
 
-        ORFdict_out = {}
+        hits_dict_out = {}
         # first fix one-way asymmetries
-        hit_no_hits = set([a for b in ORFdict_in.values() for a in b]) - set(ORFdict_in)
-        for query,hits in ORFdict_in.items():
+        hit_no_hits = set([a for b in hits_dict_in.values() for a in b]) - set(hits_dict_in)
+        for query,hits in hits_dict_in.items():
             for hit in hit_no_hits.intersection(hits):
                 try:
-                    ORFdict_out[hit].add(query)
+                    hits_dict_out[hit].add(query)
                 except KeyError:
-                    ORFdict_out[hit] = set([query])
+                    hits_dict_out[hit] = set([query])
 
         # then fix multi-way asymmetries
-        for ORF in ORFdict_in:
-            to_add = set([a for a,b in ORFdict_in.items() if len(set(b) & set(ORFdict_in[ORF])) > 0])
-            to_add.update([a for a,b in ORFdict_in.items() if ORF in b])
+        for locus in hits_dict_in:
+            to_add = set([a for a,b in hits_dict_in.items() if \
+                    len(set(b) & set(hits_dict_in[locus])) > 0])
+            to_add.update([a for a,b in hits_dict_in.items() if locus in b])
             try:
-                ORFdict_out[ORF].update(to_add)
+                hits_dict_out[locus].update(to_add)
             except KeyError:
-                ORFdict_out[ORF] = to_add
-
+                hits_dict_out[locus] = to_add
 
         try:
-            self.ORF_hits[replicon_id] = ORFdict_out
+            self.hits[replicon_id] = hits_dict_out
         except AttributeError:
-            self.ORF_hits = {}
-            self.ORF_hits[replicon_id] = ORFdict_out
-    def orderORFHits(self):
+            self.hits = {}
+            self.hits[replicon_id] = hits_dict_out
+    def orderLocusHits(self):
 
-        self.ORFs_with_hits_ordered = {}
-        for replicon_id,these_ORF_hits in self.ORF_hits.items():
-            all_ORF_hits = set([a for b in these_ORF_hits.values() for a in b])
-            self.ORFs_with_hits_ordered[replicon_id] = sorted(
-                    all_ORF_hits, key = self.genome_ORF_ranges[replicon_id].get)
-    def getAdjacentORFsWithHit(self, ORF, replicon_id, maxdist = 3, direction = 1, getall = False):
+        self.loci_with_hits_ordered = {}
+        for replicon_id,these_hits in self.hits.items():
+            all_hits = set(a for b in these_hits.values() for a in b)
+            self.loci_with_hits_ordered[replicon_id] = sorted(
+                    all_hits, key = self.genome_loci_info[replicon_id].get)
+    def getAdjacentsWithHit(self, locus, replicon_id, maxdist = 3, 
+            direction = 1, getall = False):
         '''return next ORF with a paralog and num ORFs to it within maxdist'''
 
-        thisORFn_hits = self.ORFs_with_hits_ordered[replicon_id].index(ORF)
-        thisORFn_all = self.ORFs_ordered[replicon_id].index(ORF)
+        this_n_hits = self.loci_with_hits_ordered[replicon_id].index(locus)
+        this_n_all = self.loci_ordered[replicon_id].index(locus)
         if direction == -1:
-            s = thisORFn_all + maxdist * direction
-            e = thisORFn_all
+            maxdist -= 1
+            s = this_n_all + maxdist * direction
+            e = this_n_all
         else:
-            s = thisORFn_all
-            e = thisORFn_all + maxdist * direction
+            s = this_n_all
+            e = this_n_all + maxdist * direction
 
-        ORFS_to_check = self.ORFs_ordered[replicon_id][s:e][::direction]
-        next_hit_ORFs = {}
+        to_check = self.loci_ordered[replicon_id][s:e][::direction]
+        next_hits = {}
         for n in range(1,maxdist):
-            if thisORFn_hits + n * direction == len(self.ORFs_with_hits_ordered[replicon_id]):
+            if this_n_hits + n * direction == \
+                    len(self.loci_with_hits_ordered[replicon_id]):
                 continue
-            if thisORFn_hits + n * direction > len(self.ORFs_with_hits_ordered[replicon_id]):
+            if this_n_hits + n * direction >= \
+                    len(self.loci_with_hits_ordered[replicon_id]):
                 ## this was crashing here
-                print('WARNING: thisORFn_hits > ORFs_with_hits_ordered')
+                print('WARNING: this_n_hits > loci_with_hits_ordered')
                 continue
-            next_hit_ORF = self.ORFs_with_hits_ordered[replicon_id][thisORFn_hits + n * direction]
+            next_hit = self.loci_with_hits_ordered[replicon_id][this_n_hits + n * direction]
             try:
-                next_hit_ORF_index = ORFS_to_check.index(next_hit_ORF)
-                next_hit_ORFs[next_hit_ORF] = next_hit_ORF_index
+                next_hit_index = to_check.index(next_hit)
+                next_hits[next_hit] = next_hit_index
             except ValueError:
                 pass
 
-        if len(next_hit_ORFs) == 0:
+        if len(next_hits) == 0:
             if getall:
                 return([])
             else:
                 return(False,False)
-            
+
         elif getall:
-            return(next_hit_ORFs)
+            return(next_hits)
         else:
-            return(sorted(next_hit_ORFs.items(), key = lambda x: x[1])[0])
+            return(sorted(next_hits.items(), key = lambda x: x[1])[0])
     def getHomologousContiguousBlocks(self):
 
         self.homologous_groups = {}
         self.block_to_homoblocks = {}
-        for replicon_id,these_ORFs_with_hits_ordered in self.ORFs_with_hits_ordered.items():
+        for replicon_id,these_loci_with_hits_ordered in self.loci_with_hits_ordered.items():
             blocks = []
             this_block = []
             merging = False
             block_to_homoblocks = {}  ## need to add singletons
-            for n,thisORF in enumerate(these_ORFs_with_hits_ordered):
-                # print('\n>>Checking %s (%s) for adjacent ORFs with homologs within the genome' % (thisORF,n))
-                if n + 1 == len(these_ORFs_with_hits_ordered):
-                    thisORFnearestWithHit, dist_to_next = False, False
+            for n,this_locus in enumerate(these_loci_with_hits_ordered):
+                # print('\n>>Checking %s (%s) for adjacent ORFs with homologs within the genome' % (this_locus,n))
+                if n + 1 == len(these_loci_with_hits_ordered):
+                    this_locus_nearestWithHit, dist_to_next = False, False
                 else:
-                    thisORFnearestWithHit, dist_to_next = self.getAdjacentORFsWithHit(thisORF, replicon_id)
+                    this_locus_nearestWithHit, dist_to_next = self.getAdjacentsWithHit(this_locus, replicon_id)
                 
                 if dist_to_next is False:
                     # print('None found (within maxdist)')
                     # so end block
                     if not merging:
                         # add this ORF as a single-ORF block as complete
-                        blocks += [[thisORF]]
-                        # no homologous contiguous blocks found? contents of ORF_hit_ranges[thisORF] must be singletons
-                        block_to_homoblocks[tuple([thisORF])] = sorted([[a] for a in self.ORF_hits[thisORF]])
-                        # leadORF_to_homoblocks[(thisORF,)] = sorted(set(homoblocks))
+                        blocks += [[this_locus]]
+                        # no homologous contiguous blocks found? contents of ORF_hit_ranges[this_locus] must be singletons
+                        block_to_homoblocks[tuple([this_locus])] = sorted([[a] for a in self.hits[this_locus]])
+                        # leadORF_to_homoblocks[(this_locus,)] = sorted(set(homoblocks))
                     else:
                         # add this multi-ORF block as complete
                         blocks += [this_block]
@@ -248,23 +265,23 @@ class Finder(_MetaSample):
                         merging = False
                     
                 # check for tandem repeats
-                elif not merging and thisORFnearestWithHit in self.ORF_hits[replicon_id][thisORF]:
+                elif not merging and this_locus_nearestWithHit in self.hits[replicon_id][this_locus]:
                     # single ORF tandem repeat: NOT same block (two adjacent blocks probably of length 1)
-                    # print('tandem warning', thisORF, thisORFnearestWithHit, self.ORF_hits[thisORF])
+                    # print('tandem warning', this_locus, this_locus_nearestWithHit, self.hits[this_locus])
                     # due to tandem repeat, break blocks appropriately
                     # add this ORF as a single-ORF block as complete
                     if len(this_block) == 0:
                         # this is necessary if first checked is in a single ORF (near-)tandem repeat
                         # not checked in detail
-                        this_block = [thisORF]
+                        this_block = [this_locus]
                         homoblocks = {}
-                        homoblocks[thisORFnearestWithHit] = [thisORF]
-                        homoblocks[thisORF] = [thisORFnearestWithHit]
-                    blocks += [[thisORF]]
+                        homoblocks[this_locus_nearestWithHit] = [this_locus]
+                        homoblocks[this_locus] = [this_locus_nearestWithHit]
+                    blocks += [[this_locus]]
                     # also save homologous contiguous blocks
                     block_to_homoblocks[tuple(this_block)] = sorted(map(sorted, homoblocks.values()))
                     
-                elif merging and thisORFnearestWithHit in [a for b in map(self.ORF_hits[replicon_id].get, this_block) for a in b]:
+                elif merging and this_locus_nearestWithHit in [a for b in map(self.hits[replicon_id].get, this_block) for a in b]:
                     ## multi-ORF tandem repeat
                     # print('multi-ORF tandem repeat')
                     # this next adjacent is a homolog to an ORF in current contiguous block, so block should be terminated
@@ -280,65 +297,65 @@ class Finder(_MetaSample):
                     
                 else:
                     # did find an adjacent ORF within maxdist with a homolog elsewhere (and not self i.e., not tandem repeat): are homologs part of a homologous block?
-                    # print('%s hits (para)logs %s' % (thisORF, ', '.join(self.ORF_hits[thisORF])))
+                    # print('%s hits (para)logs %s' % (this_locus, ', '.join(self.hits[this_locus])))
                     # print('did find an adjacent ORF within maxdist . . .')
                     if not merging:
                         # assuming these share homology to adjacent blocks elsewhere . . .
                         # start a new block because we weren't merging
-                        this_block = [thisORF, thisORFnearestWithHit]
+                        this_block = [this_locus, this_locus_nearestWithHit]
                         homoblocks = {}
                         merging = True
                     else:
                         # continue existing block because we were merging
-                        this_block += [thisORFnearestWithHit]
+                        this_block += [this_locus_nearestWithHit]
                     
-                    thisORFstrand = self.genome_ORF_ranges[replicon_id][thisORF][2]
+                    this_locusstrand = self.genome_ORF_ranges[replicon_id][this_locus][2]
                     
                     # do both have paralogs within maxdist of each other? (and is strand/orientation conserved?)
-                    for thisORFhit in self.ORF_hits[replicon_id][thisORF]:
+                    for this_locus_hit in self.hits[replicon_id][this_locus]:
                         # this time collect all ORFs within maxdist with homologs (not just the nearest)
-                        thisORFstrandhit = self.genome_ORF_ranges[replicon_id][thisORFhit][2]
-                        if n + 1 == len(self.ORFs_with_hits_ordered[replicon_id]):
-                            thisORFhit_nearestWithHits = {}
-                        elif thisORFstrand == thisORFstrandhit:
-                            thisORFhit_nearestWithHits = self.getAdjacentORFsWithHit(
-                                    thisORFhit, replicon_id, direction = 1, getall = True)
+                        this_locusstrandhit = self.genome_ORF_ranges[replicon_id][this_locus_hit][2]
+                        if n + 1 == len(self.loci_with_hits_ordered[replicon_id]):
+                            this_locus_hit_nearestWithHits = {}
+                        elif this_locusstrand == this_locusstrandhit:
+                            this_locus_hit_nearestWithHits = self.getAdjacentsWithHit(
+                                    this_locus_hit, replicon_id, direction = 1, getall = True)
                         else:
-                            thisORFhit_nearestWithHits = self.getAdjacentORFsWithHit(
-                                    thisORFhit, replicon_id, direction = -1, getall = True)
+                            this_locus_hit_nearestWithHits = self.getAdjacentsWithHit(
+                                    this_locus_hit, replicon_id, direction = -1, getall = True)
                         
-                        if len(thisORFhit_nearestWithHits) > 0:
-                            # print('checking this ORF homolog* (%s) for adjacents** also with homologs' % thisORFhit)
+                        if len(this_locus_hit_nearestWithHits) > 0:
+                            # print('checking this ORF homolog* (%s) for adjacents** also with homologs' % this_locus_hit)
                             got = False
                             # got adjacents of one of this ORF's paralogs, now check if this ORF's adjacent hit any of these ORF's paralog adjacents
                             # i.e., same continguous block
-                            for thisORFnearestWithHit_hit in self.ORF_hits[replicon_id][thisORFnearestWithHit]:
-                                if thisORFnearestWithHit_hit in thisORFhit_nearestWithHits:
-                                    dist_to_thisORF_nearestWithHit = thisORFhit_nearestWithHits[thisORFnearestWithHit_hit]
-                                    # A = 'Focus:    %s  has %s   at %s dist\n' % (thisORF, thisORFnearestWithHit, dist_to_next)
-                                    # B = 'Paralogs: %s* has %s** at %s dist\n' % (thisORFhit, thisORFnearestWithHit_hit, dist_to_thisORF_nearestWithHit)
+                            for this_locus_nearestWithHit_hit in self.hits[replicon_id][this_locus_nearestWithHit]:
+                                if this_locus_nearestWithHit_hit in this_locus_hit_nearestWithHits:
+                                    dist_to_this_locus_nearestWithHit = this_locus_hit_nearestWithHits[this_locus_nearestWithHit_hit]
+                                    # A = 'Focus:    %s  has %s   at %s dist\n' % (this_locus, this_locus_nearestWithHit, dist_to_next)
+                                    # B = 'Paralogs: %s* has %s** at %s dist\n' % (this_locus_hit, this_locus_nearestWithHit_hit, dist_to_this_locus_nearestWithHit)
                                     # print(A+B)
                                     got = True
-                                    if thisORFhit in homoblocks:
-                                        homoblocks[thisORFhit] += [thisORFnearestWithHit_hit]
-                                        homoblocks[thisORFnearestWithHit_hit] = homoblocks[thisORFhit]
-                                        del homoblocks[thisORFhit]
+                                    if this_locus_hit in homoblocks:
+                                        homoblocks[this_locus_hit] += [this_locus_nearestWithHit_hit]
+                                        homoblocks[this_locus_nearestWithHit_hit] = homoblocks[this_locus_hit]
+                                        del homoblocks[this_locus_hit]
                                     else:
-                                        homoblocks[thisORFnearestWithHit_hit] = [thisORFhit, thisORFnearestWithHit_hit]
+                                        homoblocks[this_locus_nearestWithHit_hit] = [this_locus_hit, this_locus_nearestWithHit_hit]
                             
                             if not got:
-                                # print('Nothing for %s' % thisORFhit)
+                                # print('Nothing for %s' % this_locus_hit)
                                 pass
                             
                         else:
-                            # print('This ORFs homolog (%s) has no adjacents with hits (within maxdist)' % thisORFhit)
+                            # print('This ORFs homolog (%s) has no adjacents with hits (within maxdist)' % this_locus_hit)
                             pass
             
             # add tandem singletons in both directions (only collected in one direction above)
             tandems = []
             for a,b in block_to_homoblocks.items():
                 if len(b) > 1:
-                    if self.ORFs_ordered[replicon_id].index(b[0][0]) + 1 == self.ORFs_ordered[replicon_id].index(b[1][0]):
+                    if self.loci_ordered[replicon_id].index(b[0][0]) + 1 == self.loci_ordered[replicon_id].index(b[1][0]):
                         print('A tandem repeated: {}'.format(b))
                         tandems += [b]
             
@@ -364,33 +381,423 @@ class Finder(_MetaSample):
             self.homologous_groups[replicon_id] = sorted(homologous_groups)
             self.block_to_homoblocks[replicon_id] = block_to_homoblocks
             
-    def getORFsInTandemRepeats(self):
+    def getHomologousContiguousBlocks(self):
+        '''
+        Delineate contiguous groups of ORFs with homology elsewhere in chromosome.
 
-        self.ORFs_in_tandem_repeats = {}
+        The homoblocks dict is built during the algorithm and indicates 
+        ORF-with-homolog membership to it's homologous block.
+
+        The homologous_groups dict is added to when the extension (merging) of the 
+        current block ends.
+
+
+        For each ORF in a chromosome-ordered list in which all have homology hits 
+        to one or more other ORFs:
+          I) if no block is currently being extended, initiate required data sturctures:
+            i) "this_block" list of ORF IDs in currently extending block
+            ii) "homoblocks" dict: values are contiguous blocks (lists) or ORFs 
+               elsewhere in the chromosome with homology to the currently extending 
+               block of ORFs; keys are the ORFs homologous to the current ORF in the
+               current block
+            iii) "extended" dict: values are True if that block was extended, False if
+                 not to keep a record of continuously extended blocks; keys are the first
+                 ORF in each of the homologous, contiguous blocks in "homoblocks"
+          
+          II) check whether the current ORF has a neighbour within max_dist that has a
+              homolog else where (and is potentially part of a homologous block to be
+              included in current block)
+              Use defaults: maxdist = 3, in direction = 1 (same as ORF's 5' to 3')
+          
+          III) as long as the neighbour does not hit anything in current block (which would 
+               be a tandem repeat) iterate through hits of the neighbour
+                i) get ORF strand
+                ii) for each hit of the focal ORF, collect their own hits with:
+                  a) adjacency (within three), strand (same)
+                iii) do any of the adjacents of the hit, hit the adjacent of the focal ORF?
+                  a) if they do, extend their entry in homoblocks dict
+          
+          IV) finally record if any homoblocks were extended in "extended" dict. With reference
+              to "extended" dict, if no extensions were done, store all continuously extended
+              homologous in "block_to_homoblocks" dict and reset "this_block" to trigger (I)
+        '''
+        # some sanity checks
+        for replicon_id in self.genome_names:
+            f1 = False
+            for n,locus1 in enumerate(self.loci_with_hits_ordered[replicon_id][:-1]):
+                for locus2 in self.loci_with_hits_ordered[replicon_id][(n+1):]:
+                    if self.hits[replicon_id][locus1] & self.hits[replicon_id][locus2]:
+                        # if there is an intersection, it should be a union
+                        if self.hits[replicon_id][locus1] != \
+                                self.hits[replicon_id][locus1] | \
+                                self.hits[replicon_id][locus2]:
+                            f1 = True
+            
+            for n,locus1 in enumerate(self.loci_with_hits_ordered[replicon_id][:-1]):
+                for locus2 in self.loci_with_hits_ordered[replicon_id][(n+1):]:
+                    if self.hits[replicon_id][locus1] & self.hits[replicon_id][locus2]:
+                        self.hits[replicon_id][locus1] = \
+                                self.hits[replicon_id][locus1] | \
+                                self.hits[replicon_id][locus2]
+                        self.hits[replicon_id][locus2] = \
+                                self.hits[replicon_id][locus1] | \
+                                self.hits[replicon_id][locus2]
+            
+            for n,locus1 in enumerate(self.loci_with_hits_ordered[replicon_id][::-1][:-1]):
+                for locus2 in self.loci_with_hits_ordered[replicon_id][::-1][(n+1):]:
+                    if self.hits[replicon_id][locus1] & \
+                            self.hits[replicon_id][locus2]:
+                        self.hits[replicon_id][locus1] = \
+                                self.hits[replicon_id][locus1] | \
+                                self.hits[replicon_id][locus2]
+                        self.hits[replicon_id][locus2] = \
+                                self.hits[replicon_id][locus1] | \
+                                self.hits[replicon_id][locus2]
+            
+            f2 = False
+            for n,locus1 in enumerate(self.loci_with_hits_ordered[replicon_id][:-1]):
+                for locus2 in self.loci_with_hits_ordered[replicon_id][(n+1):]:
+                    if self.hits[replicon_id][locus1] & self.hits[replicon_id][locus2]:
+                        if self.hits[replicon_id][locus1] != \
+                                self.hits[replicon_id][locus1] | \
+                                self.hits[replicon_id][locus2]:
+                            print(locus1,locus2)
+                            f2 = True
+            
+            assert not f2
+
+        # below, we'll be building "homoblocks": contiguous blocks
+        # of homologous loci
+        # homoblocks is ORFn1b1 => (ORFn1b1,ORFn2b1,...ORFnib1)
+        # homoblocks is ORFn1b2 => (ORFn1b2,ORFn2b1,...ORFnib2)
+        # continues as long as at least one is extended
+        # eventually those as long as "this_block" (usd below) are
+        # retained in block_to_homoblocks
+
+
+        def retain_homoblocks(this_block, homoblocks, extended):
+            '''
+            determine how much of each block to keep based on continuous extension
+            
+            BBBBBBBBBB <-block
+            TTTTTTTTTT <-full length homo-block (always at least one of these)
+            TTTTTTFFFF <-partial length homo-block
+            TTTFFFFTTT <-partial length homo-block that continues after break
+            
+            All of the continuous pieces are collected. Sometimes new focal blocks
+            are also returned to match start point with homoblocks that restart or 
+            start late
+            '''
+            collected_homoblocks = sorted(homoblocks.values())
+            keep_homoblocks = {}
+            for this_homoblock in collected_homoblocks:
+                this_cont_block = []
+                this_cont_homoblock = []
+                b = 0
+                for n,added in enumerate(extended[this_homoblock[0]]):
+                    if added:
+                        this_cont_block += [this_block[n]]
+                        this_cont_homoblock += [this_homoblock[b]]
+                        # separate iterator because only homologs added nothing corresponds to Falses
+                        b += 1
+                    elif len(this_cont_block):
+                        try:
+                            keep_homoblocks[tuple(this_cont_block)] += [tuple(this_cont_homoblock)]
+                        except KeyError:
+                            keep_homoblocks[tuple(this_cont_block)] = [tuple(this_cont_homoblock)]
+                        this_cont_block = []
+                        this_cont_homoblock = []
+                
+            return(keep_homoblocks)
+
+
+
+        self.homologous_groups = {}
+        self.block_to_homoblocks = {}
+        for replicon_id,these_hits_ordered in self.loci_with_hits_ordered.items():
+            check_any_exts = []
+            check = False
+            blocks = []
+            this_block = []
+            # need to know that at least one homologous block extended continuously
+            extended = {}  # just count how many ORFs added
+            block_to_homoblocks = {}
+            for n,this_locus in enumerate(these_hits_ordered):
+                this_locus_hits = sorted(set(self.hits[replicon_id][this_locus]) - set([this_locus]), key = self.genome_loci_info[replicon_id].get)
+                print('{} ({}/{}) has {} hits'.format(this_locus,n+1,len(these_hits_ordered),len(this_locus_hits)))
+                if this_locus in ('PP_5SA__rRNA',):
+                    check = True
+                    #import ipdb; ipdb.set_trace()
+                
+                # (I)
+                if not len(this_block):
+                    # new block
+                    # initiate a dict of extending history
+                    # at least one homologous block must be extended continuously
+                    # i.e., same length as this_block
+                    # record true/false for each block initiated at same point in time:
+                    # need to know contiguity of shorter alignments
+                    # first True is first locus in self.hits[this_locus]
+                    extended = {first_hit:[True] for first_hit in this_locus_hits}
+                    homoblocks = {first_hit:[first_hit] for first_hit in this_locus_hits}
+                    # start with current locus which must have hits
+                    # else current locus was tested and added in previous iteration
+                    this_block = [this_locus]
+                    print('Initiated for: {} versus {}'.format(this_locus, '+'.join(sorted(self.hits[replicon_id][this_locus]))))
+                
+                for this_locus_hit in this_locus_hits:
+                    if this_locus_hit not in homoblocks and this_locus_hit not in extended:
+                        homoblocks[this_locus_hit] = [this_locus_hit]
+                        # need to front pad with Falses because should be same length as block
+                        extended[this_locus_hit] = [False]*(len(this_block)-1) + [True]
+                        print('New block: {}'.format(this_locus_hit))
+                
+                # use to check for extensions
+                homoblocks_extended = []
+                # (II)
+                if n + 1 == len(these_hits_ordered):
+                    # finish on last locus
+                    # extending a block over the putative origin of replication not implemented
+                    # but separate blocks either side will be detected (and could be joined later)
+                    this_locus_nearestWithHit, dist_to_next = False, False
+                else:
+                    this_locus_nearestWithHit, dist_to_next = self.getAdjacentsWithHit(this_locus, replicon_id)
+                    
+                if this_locus_nearestWithHit:
+                    this_locus_nearestWithHit_hits = self.hits[replicon_id][this_locus_nearestWithHit]
+                    if len(set(this_block) & this_locus_nearestWithHit_hits):
+                        # next locus has a homolog in this block == tandem repeat
+                        print('Next locus is tandem repeat: do not attempt to extend')
+                    else:
+                        print('{} is within max_dist of {} and has hits'.format(this_locus_nearestWithHit,this_locus))
+                        # found one nearby with a hit (this_locus_nearestWithHit)
+                        # get strand info for matching in any homologous blocks
+                        this_locus_nearestWithHit_strand = self.genome_loci_info[replicon_id][this_locus_nearestWithHit][2]
+                        this_locus_strand = self.genome_loci_info[replicon_id][this_locus][2]
+                        if this_locus_nearestWithHit_strand == this_locus_strand:
+                            same_strand = True
+                        else:
+                            same_strand = False
+                        # do this_locus_nearestWithHit and this_locus both have paralogs within
+                        # maxdist of each other?
+                        # (and is strand/orientation conserved?)
+                        # this is tackled from the direction of this_locus's hits and their
+                        # adjacents; do those hit this_locus_nearestWithHit?
+                        # (III)
+                        this_locus_nearestWithHit_hits = sorted(this_locus_nearestWithHit_hits, 
+                                key = self.genome_loci_info[replicon_id].get)
+                        new_blocks = []
+                        for this_locus_hit in this_locus_hits:
+                            print('this_locus_hit: {}'.format(this_locus_hit))
+                            # collect all ORFs within maxdist with homologs (not just the nearest)
+                            this_locus_hit_strand = self.genome_loci_info[replicon_id][this_locus_hit][2]
+                            ## what about an inverted ORF within a contiguity here?
+                            ## <== is right to break blocks here? yes because will continue in a new block
+                            if this_locus_strand == this_locus_hit_strand:
+                                # orientations matches: check in same direction relative to sequence in file
+                                this_locus_hit_nearestWithHits = self.getAdjacentsWithHit(
+                                        this_locus_hit, replicon_id, direction = 1, getall = True)
+                            else:
+                                # any homologous block will be on other strand: check in other direction
+                                this_locus_hit_nearestWithHits = self.getAdjacentsWithHit(
+                                        this_locus_hit, replicon_id, direction = -1, getall = True)
+                            
+                            # check whether neighbours hit any of hit's neighbours
+                            for this_locus_nearestWithHit_hit in this_locus_nearestWithHit_hits:
+                                # *** this is the pivotal test of extending continguous homologous block pairs
+                                # all of the hits of the potential ORF for extension are tested in the same way
+                                if this_locus_nearestWithHit_hit in this_locus_hit_nearestWithHits:
+                                    this_locus_nearestWithHit_hit_strand = self.genome_loci_info[replicon_id][this_locus_nearestWithHit_hit][2]
+                                    print('Found potential homologues in neighbour')
+                                    if (this_locus_nearestWithHit_hit_strand == this_locus_hit_strand) == same_strand:
+                                        # strand orientation between this and the next in this homologous block matches
+                                        print('orientations match: {} , {} ; {} , {}'.format(
+                                                this_locus_nearestWithHit_hit_strand, this_locus_hit_strand, 
+                                                this_locus_nearestWithHit_strand, this_locus_strand))
+                                        
+                                        # extending at least one of the homologous blocks
+                                        dist_to_this_locus_nearestWithHit = this_locus_hit_nearestWithHits[this_locus_nearestWithHit_hit]
+                                        A = 'Focus:    %s has %s at %s dist\n' % (
+                                                this_locus, this_locus_nearestWithHit, 
+                                                dist_to_next)
+                                        B = 'Paralogs: %s has %s at %s dist\n' % (
+                                                this_locus_hit, this_locus_nearestWithHit_hit, 
+                                                dist_to_this_locus_nearestWithHit)
+                                        print(A+B)
+                                        # can only extend (existing block) if started at beginning of this block
+                                        if this_locus_hit in homoblocks and this_locus_nearestWithHit_hit not in homoblocks:
+                                            print('{} in a homologous block that started with current block'.format(this_locus_hit))
+                                            # second conditional checks for tandems in homoblocks (and doesn't add if already in)
+                                            # *** this is the extension of the other contiguous block
+                                            # as we iterate along, homoblocks ORF ==> block
+                                            # also needs to iterate all ORF keys
+                                            # so they correspond to the "current" ORF
+                                            homoblocks[this_locus_hit] += [this_locus_nearestWithHit_hit]
+                                            assert this_locus_nearestWithHit_hit not in homoblocks, \
+                                                    'this_locus_nearestWithHit_hit already in homoblocks'
+                                            homoblocks[this_locus_nearestWithHit_hit] = homoblocks[this_locus_hit]
+                                            print('Added with: {} to {}'.format(
+                                                    this_locus_nearestWithHit_hit, '+'.join(homoblocks[this_locus_nearestWithHit_hit])))
+                                            del homoblocks[this_locus_hit]
+                                            # keep a record of which homologous blocks merged in each iteration
+                                            homo_block_first_locus = homoblocks[this_locus_nearestWithHit_hit][0]
+                                            homoblocks_extended += [homo_block_first_locus]
+                                            # only add one at a time else tandem repeats get added incorrectly
+                                            break
+                
+                for first_locus in extended:
+                    if first_locus in homoblocks_extended:
+                        extended[first_locus] += [True]
+                    else:
+                        extended[first_locus] += [False]
+                
+                # add to this block now to test for continuous merge
+                # if OK iteration will just continue, else will store blocks and reset
+                this_block += [this_locus_nearestWithHit]
+                
+                # (IV)
+                # check at least one homologous block has been continuously extended
+                #continuous_merge = len([b for b,a in extended.items() if sum(a) == len(this_block)])
+                # check for any merging, retain_homoblocks() will now extract continuous blocks
+                any_extending = any([b[-1] for a,b in extended.items()])
+                check_any_exts += [any_extending]
+                #import ipdb; ipdb.set_trace()
+                if not any_extending or not this_locus_nearestWithHit:
+                    print('Break in merging <======')
+                    # not any_extending: assessed adjacent ORFs but no contiguous
+                    # (can this ever happen in new method? if there is 
+                    # this_locus_nearestWithHit at least a non-contiguous merge must happen)
+                    # /\/\/\/\/\ check this
+                    # not this_locus_nearestWithHit: no ORFs with homologs close enough to be considered contiguous
+                    # tandem_repeat: this_locus_nearestWithHit hits something already in block.
+                    # Stop and store block but re-initiate before next iteration
+                    check = False
+                    # either no extension made within max_dist
+                    # or the only extension was in a homologous block that already broke contiguity
+                    print('merge info')
+                    print('extended:',sorted(extended.items()))
+                    print('homo_blocks:',sorted(homoblocks.items()))
+                    # blocks = [] need to record in this?
+                    print('this_block',this_block)
+                    # also save homologous contiguous blocks
+                    keep_homoblocks = retain_homoblocks(this_block, homoblocks, extended)
+                    print('=====> Storing:')
+                    print(keep_homoblocks,'\n\n\n')
+                    for b,h in keep_homoblocks.items():
+                        assert b not in block_to_homoblocks
+                        block_to_homoblocks[b] = h
+                    else:
+                        # reset for new block
+                        this_block = []
+            
+            # collect existing shorter homologous blocks
+            # put into new block => homoblocks
+            new_block_to_homoblocks = {}
+            for block,homoblocks in sorted(block_to_homoblocks.items()):
+                for homoblock in homoblocks:
+                    if len(homoblock) < len(block):
+                        # homoblock shorter than current block, need to check and/or make new entry
+                        # compile same length homoblocks for this shorter one in currrent entry
+                        new_homoblocks = set([block[:len(homoblock)]])
+                        for b in homoblocks:
+                            if b != homoblock and len(b) >= len(homoblock):
+                                new_homoblocks.add(b[:len(homoblock)])
+                        
+                        if homoblock in new_block_to_homoblocks:
+                            new_block_to_homoblocks[homoblock].update(new_homoblocks)
+                        else:
+                            new_block_to_homoblocks[homoblock] = new_homoblocks
+            
+            
+            # add full length blocks with same length homoblocks
+            for block,homoblocks in sorted(block_to_homoblocks.items()):
+                keeps = set()
+                for homoblock in homoblocks:
+                    if len(homoblock) >= len(block):
+                        assert len(homoblock) == len(block), 'block {} '\
+                                'points to longer homologous block'.format(
+                                '+'.join(block),'+'.join(homoblock))
+                        keeps.add(homoblock)
+                
+                if block in new_block_to_homoblocks:
+                    new_block_to_homoblocks[block].update(keeps)
+                else:
+                    new_block_to_homoblocks[block] = keeps
+            
+            check_hits = {}
+            for block,homoblocks in new_block_to_homoblocks.items():
+                for theseHomologs in zip(*([block] + list(homoblocks))):
+                    for H1 in theseHomologs:
+                        for H2 in theseHomologs:
+                            try:
+                                check_hits[H1].add(H2)
+                            except KeyError:
+                                check_hits[H1] = set([H2])
+                            try:
+                                check_hits[H2].add(H1)
+                            except KeyError:
+                                check_hits[H2] = set([H1])
+            
+            assert sorted(check_hits) == sorted(self.hits[replicon_id]), ''\
+                    'lost or gained some homologs?!'
+            
+            gained = set()
+            lost = set()
+            for this_locus in these_hits_ordered:
+                if check_hits[this_locus] != self.hits[replicon_id][this_locus]:
+                    gained.update(check_hits[this_locus] - self.hits[replicon_id][this_locus])
+                    lost.update(self.hits[replicon_id][this_locus] - check_hits[this_locus])
+                    print(self.hits[replicon_id][this_locus] - check_hits[this_locus])
+            
+            print('gained: {}'.format(len(gained)))
+            print('lost: {}'.format(len(lost)))
+            # gain or loss isn't acceptable!
+            
+            # blocks are collected in a 5'3' +ve strand direction even if they are on the reverse strand
+            # this means these and any +ve strand homologous blocks are collected "backwards"
+            # e.g. A, B, C on -ve with Z, Y, X on +ve,
+            # but 5'3' order on -ve is really C, B, A
+            # and 5'3' order on +ve is really X, Y, Z
+            # but for alignment purposes, A-C is collected then reverse complemented
+            # while X-Z is collected, hence:
+            homologous_groups = set()
+            for this,those in sorted(new_block_to_homoblocks.items()):
+                # innermost sort ensures loci are in chromomosome order, 
+                # not loci label order
+                homologous_groups.add(tuple(sorted(map(
+                        lambda x: tuple(sorted(x, key = self.genome_loci_info[replicon_id].get)),
+                        [this]+list(those)))))
+            
+            self.homologous_groups[replicon_id] = sorted(homologous_groups)
+            self.block_to_homoblocks[replicon_id] = block_to_homoblocks
+
+    def getLociInTandemRepeats(self):
+
+        self.tandem_repeats = {}
         for replicon_id,these_homologous_groups in self.homologous_groups.items():
-            ORFs_in_tandem_repeats = set()
+            tandem_repeats = set()
             for groups in these_homologous_groups:
                 # if any of these ORFs are involved in any tandem repeats
                 tandem = False
                 for n,group1 in enumerate(groups[:-1]):
                     for group2 in groups[(n+1):]:
                         # allow up to 2 ORFs between tandem repeated contiguous groups of ORFs
-                        if self.ORFs_ordered[replicon_id].index(group1[-1]) + 1 == \
-                                self.ORFs_ordered[replicon_id].index(group2[0]) \
-                        or self.ORFs_ordered[replicon_id].index(group2[-1]) + 1 == \
-                                self.ORFs_ordered[replicon_id].index(group1[0]) \
-                        or self.ORFs_ordered[replicon_id].index(group1[-1]) + 2 == \
-                                self.ORFs_ordered[replicon_id].index(group2[0]) \
-                        or self.ORFs_ordered[replicon_id].index(group2[-1]) + 2 == \
-                                self.ORFs_ordered[replicon_id].index(group1[0]) \
-                        or self.ORFs_ordered[replicon_id].index(group1[-1]) + 3 == \
-                                self.ORFs_ordered[replicon_id].index(group2[0]) \
-                        or self.ORFs_ordered[replicon_id].index(group2[-1]) + 3 == \
-                                self.ORFs_ordered[replicon_id].index(group1[0]):
-                            ORFs_in_tandem_repeats.update(group1)
-                            ORFs_in_tandem_repeats.update(group2)
+                        if self.loci_ordered[replicon_id].index(group1[-1]) + 1 == \
+                                self.loci_ordered[replicon_id].index(group2[0]) \
+                        or self.loci_ordered[replicon_id].index(group2[-1]) + 1 == \
+                                self.loci_ordered[replicon_id].index(group1[0]) \
+                        or self.loci_ordered[replicon_id].index(group1[-1]) + 2 == \
+                                self.loci_ordered[replicon_id].index(group2[0]) \
+                        or self.loci_ordered[replicon_id].index(group2[-1]) + 2 == \
+                                self.loci_ordered[replicon_id].index(group1[0]) \
+                        or self.loci_ordered[replicon_id].index(group1[-1]) + 3 == \
+                                self.loci_ordered[replicon_id].index(group2[0]) \
+                        or self.loci_ordered[replicon_id].index(group2[-1]) + 3 == \
+                                self.loci_ordered[replicon_id].index(group1[0]):
+                            tandem_repeats.update(group1)
+                            tandem_repeats.update(group2)
             
-            self.ORFs_in_tandem_repeats[replicon_id] = ORFs_in_tandem_repeats
+            self.tandem_repeats[replicon_id] = tandem_repeats
 
 
     def align_blocks(self, extend_len = 200,
@@ -409,9 +816,8 @@ class Finder(_MetaSample):
         to continue extension
         '''
 
-        ## add rRNA loci? <== just copy a version of this removing all the AA stuff
-
         def countGaps(seq_str, from_end = False):
+            '''Count number of terminal gap symbols in a string'''
             if from_end:
                 seq_str = seq_str[::-1]
             
@@ -461,7 +867,13 @@ class Finder(_MetaSample):
         # for ORFs
         # alignNW_NUC_as_AA(nuc_A_seq, nuc_B_seq)
 
-        def collectForAligning(repeated_loci_ranges, genome_seq):
+        def collectForAligning(repeated_loci_ranges, repeated_loci, genome_seq):
+            '''
+            determine what kinds of loci are to be aligned between blocks
+            
+            ORF i.e., protein encoding for translation before aligning or 
+            rRNA or inter-ORF for aligning as nucleic acids
+            '''
             repeated_locus_types = []
             repeated_locus_strings = []
             for i in range(len(repeated_loci_ranges)-1):
@@ -470,7 +882,10 @@ class Finder(_MetaSample):
                 repeated_locus_strings += [genome_seq[start:end]]
                 # ORFs and inter-ORFs alternate
                 if i % 2 == 0:
-                    repeated_locus_types += ['ORF']
+                    if repeated_loci[int(i/2)].endswith('__rRNA'):
+                        repeated_locus_types += ['rRNA']
+                    else:
+                        repeated_locus_types += ['ORF']
                 else:
                     repeated_locus_types += ['inter']
             
@@ -555,14 +970,118 @@ class Finder(_MetaSample):
             return(str(SeqRecA_alnd.seq), extensionA_end, str(SeqRecB_alnd.seq), extensionB_end)
 
 
+        ## this code block is to account for overlapping features
+        ## (typically ORFs are non-overlapping)
+        ## bases are only aligned once but at an overlap would
+        ## be translated into two different AA sequences. To prevent
+        ## ensure bases are only translated and aligned once, one
+        ## ORF range is shortened.
+        ## See notes below in main loop for more info
+
+        def update_ORF_ends(
+            overlap_nuc_len_A,
+            preORFA_end, 
+            postORFA_start,
+            num_gaps_preA,
+            num_gaps_postA,
+            overlap_nuc_len_B,
+            preORFB_end, 
+            postORFB_start,
+            num_gaps_preB,
+            num_gaps_postB):
+            '''Deal with several scenarios of ORF overlaps by updating starts, ends
+            
+            (i) overlap_nuc_len_A and overlap_nuc_len_B are identical in size and 
+            there are no terminal gaps in num_gaps_preA, postA, preB, postB.
+            
+            (ii) overlap_nuc_len_A corresponds to number of gaps either num_gaps_preA
+            of _postA.
+            
+            (iii) same as (ii) but for B
+            '''
+            # (i)
+            if overlap_nuc_len_A > 0 and overlap_nuc_len_B > 0 and \
+                    overlap_nuc_len_A == overlap_nuc_len_B:
+                # increase post-ORFs this number of codons
+                num_codons_diff = int(round(overlap_nuc_len_A / 3.0 + 0.5))
+                new_postORFA_start = postORFA_start + (num_codons_diff*3)
+                new_postORFB_start = postORFB_start + (num_codons_diff*3)
+                print('attempted fix for same overlap in both blocks')
+                #import pdb; pdb.set_trace()
+                return([preORFA_end, new_postORFA_start], [preORFB_end, new_postORFB_start])
+                # loci_ranges_updated_A += [preORFA_end, new_postORFA_start]
+                # loci_ranges_updated_B += [preORFB_end, new_postORFB_start]
+            
+            # (ii) or (iii)
+            # deal with overlaps independently in block A and B
+            # NB overlaps in A are checked against terminal gaps in B
+            # and vice versa
+            overlap_info = []
+            overlap_info += [('A', overlap_nuc_len_A, preORFA_end, postORFA_start, 
+                    num_gaps_preB, num_gaps_postB)]
+            overlap_info += [('B', overlap_nuc_len_B, preORFB_end, postORFB_start, 
+                    num_gaps_preA, num_gaps_postA)]
+            
+            new_ranges = []
+            for (block, overlap_nuc_len, preORF_end, postORF_start, num_gaps_pre, 
+                    num_gaps_post) in overlap_info:
+                new_preORF_end = preORF_end
+                new_postORF_start = postORF_start
+                if overlap_nuc_len > 0:
+                    print('Overlap in block {} of {} bp'.format(block, overlap_nuc_len))
+                    ## create new ranges creating an inter-ORF region
+                    # first update according to any terminal gaps in codon alignment
+                    # of other block for both the pre-ORF and post-ORF; if there is
+                    # still an overlap, remove additional codon-multiple lengths until
+                    # there isn't
+                    if num_gaps_pre > 0:
+                        print('Caused {} gaps in other block pre-ORF'\
+                                ''.format(num_gaps_pre))
+                        # late end in pre-ORF A
+                        new_preORF_end -= num_gaps_pre
+                    if num_gaps_post > 0:
+                        print('Caused {} gaps in other block post-ORF'\
+                                ''.format(num_gaps_post))
+                        # early start in this block post-ORF: increment forward
+                        # num_gaps_post is always codons
+                        new_postORF_start += num_gaps_post
+                    # test again for overlap
+                    if not new_preORF_end < new_postORF_start:
+                        # still overlapping: overlap is longer than terminal gaps
+                        # in codon alignment
+                        # remove required additional length from end of pre-ORF
+                        # positive is overlap
+                        remaining_overlap = new_preORF_end - new_postORF_start
+                        # round up overlap to nearest codon in post ORF
+                        num_codons_diff = int(round(remaining_overlap / 3.0 + 0.5))
+                        new_preORF_end -= (num_codons_diff*3)
+                        print('attempted fix for an overlap greater than gaps at end of codon alignment')
+                        print('remaining overlap: {}; terminal gaps: {} pre, {} post'.format(
+                                remaining_overlap, num_gaps_pre, num_gaps_post))
+                        #import pdb; pdb.set_trace()
+                    if not new_preORF_end < new_postORF_start:
+                        # overlap is longer than terminal gaps in codon alignment
+                        # remove required additional length from start of post-ORF
+                        # positive is overlap
+                        remaining_overlap = new_preORF_end - new_postORF_start
+                        # round up overlap to nearest codon in post ORF
+                        num_codons_diff = int(round(remaining_overlap / 3.0 + 0.5))
+                        new_postORF_start += (num_codons_diff*3)
+                        print('attempted fix for an overlap greater than gaps at end of codon alignment')
+                        print('remaining overlap: {}; terminal gaps: {} pre, {} post'.format(
+                                remaining_overlap, num_gaps_pre, num_gaps_post))
+                        #import pdb; pdb.set_trace()
+                
+                new_ranges += [(new_preORF_end, new_postORF_start)]
+            return(new_ranges)
+
+        pID_window_size = 200
 
         self.homologous_groups_alnd = {}
         for replicon_id,these_homologous_groups in self.homologous_groups.items():
-            
             genome_strands = {}
             genome_strands[1] = _Seq(self.genome_sequence[replicon_id].tostring())
             genome_strands[-1] = genome_strands[1].reverse_complement()
-            
             homologous_groups_alnd = []
             for g_n,groups in enumerate(these_homologous_groups):
                 print('\n\nHomologous Group {}'.format(g_n))
@@ -570,118 +1089,125 @@ class Finder(_MetaSample):
                 alignment_combos = {}
                 for n,repeated_loci_A in enumerate(groups[:-1]):
                     print('A: {}'.format(' - '.join(repeated_loci_A)))
-                    strandA = self.genome_ORF_ranges[replicon_id][repeated_loci_A[0]][2]
+                    strandA = self.genome_loci_info[replicon_id][repeated_loci_A[0]][2]
                     # print(repeated_loci_A, strandA)
                     genome_use_A = genome_strands[strandA]
                     # collect ranges for these loci
                     # locus|inter-locus|locus etc
                     loci_ranges_use_A, ORF_overlaps_A = collectLociRanges(repeated_loci_A,
-                                                                          self.genome_ORF_ranges[replicon_id], 
+                                                                          self.genome_loci_info[replicon_id], 
                                                                           genome_use_A,
                                                                           strandA)
                     # print(loci_ranges_use_A, ORF_overlaps_A)
                     for repeated_loci_B in groups[(n+1):]:
                         print('vs. B: {}'.format(' - '.join(repeated_loci_B)))
-                        strandB = self.genome_ORF_ranges[replicon_id][repeated_loci_B[0]][2]
+                        strandB = self.genome_loci_info[replicon_id][repeated_loci_B[0]][2]
                         # print(repeated_loci_B, strandB)
                         genome_use_B = genome_strands[strandB]
                         # collect ranges for these loci
                         # locus|inter-locus|locus etc
                         loci_ranges_use_B, ORF_overlaps_B = collectLociRanges(repeated_loci_B,
-                                                                              self.genome_ORF_ranges[replicon_id], 
+                                                                              self.genome_loci_info[replicon_id], 
                                                                               genome_use_B,
                                                                               strandB)
                         # print(loci_ranges_use_B, ORF_overlaps_B)
                         if len(repeated_loci_B) > 1:
-                            # resolve any overlapping ORFs
-                            # compare num AAs per homologous ORFs
-                            # identify if length difference of prior or subsequent homologous ORFs are closest to overlap length
+                            # more than one consecutive ORF means there might be overlaps
+                            # (some nucleotides appearing in two different ORFs - but
+                            # should only be aligned once for moving window percent identity)
                             loci_ranges_updated_A = [loci_ranges_use_A[0]]
                             loci_ranges_updated_B = [loci_ranges_use_B[0]]
                             for i in range(len(repeated_loci_A)-1):
                                 # i is this ORF, i+1 is next
+                                # pre- and post- is relative to the inter-ORF region
+                                # (which doesn't really exist in the case of the ORF overlap)
                                 preORFA_start, preORFA_end = loci_ranges_use_A[(i)*2:(i)*2+2]
                                 preORFB_start, preORFB_end = loci_ranges_use_B[(i)*2:(i)*2+2]
                                 postORFA_start, postORFA_end = loci_ranges_use_A[(i+1)*2:(i+1)*2+2]
                                 postORFB_start, postORFB_end = loci_ranges_use_B[(i+1)*2:(i+1)*2+2]
-                                if i in ORF_overlaps_A or i in ORF_overlaps_B:
-                                    # align ORFs
-                                    preORFA_aln, preORFB_aln = alignNW_Nuc_as_AA(
-                                                                    genome_use_A[preORFA_start:preORFA_end], 
-                                                                    genome_use_B[preORFB_start:preORFB_end])
-                                    num_gaps_preA = countGaps(preORFA_aln.seq, from_end = True)
-                                    num_gaps_preB = countGaps(preORFB_aln.seq, from_end = True)
-                                    
-                                    postORFA_aln, postORFB_aln = alignNW_Nuc_as_AA(
-                                                                    genome_use_A[postORFA_start:postORFA_end], 
-                                                                    genome_use_B[postORFB_start:postORFB_end])
-                                    
-                                    num_gaps_postA = countGaps(postORFA_aln.seq, from_end = False)
-                                    num_gaps_postB = countGaps(postORFB_aln.seq, from_end = False)
+                                if i not in ORF_overlaps_A and i not in ORF_overlaps_B:
+                                    # neither homologous block A nor block B overlap between these
+                                    # ORFs: nothing to adjust
+                                    # add current ORF ranges and move on
+                                    loci_ranges_updated_A += [preORFA_end, postORFA_start]  # [preORFA_end, new_postORFA_start]
+                                    loci_ranges_updated_B += [preORFB_end, postORFB_start]
+                                else:
+                                    # get overlap lengths (positive means overlapping)
                                     overlap_nuc_len_A = preORFA_end - postORFA_start
                                     overlap_nuc_len_B = preORFB_end - postORFB_start
-                                    if overlap_nuc_len_A > 0:
-                                        print('Overlap in A of {} between ORFs {} and {}'.format(overlap_nuc_len_A, i, i+1))
-                                        print('Caused {} gaps in B pre-ORF; {} gaps in B post-ORF'.format(num_gaps_preB, num_gaps_postB))
-                                        ## create new ranges including inter-ORF
-                                        if num_gaps_postB > 0 and num_gaps_preB > 0:
-                                            e = 'ORF overlaps in both repeats: still to implement. '\
-                                                 'Please raise an issue at github.com/daveuu/baga'
-                                            raise NotImplementedError(e)
-                                        if num_gaps_postB > 0:
-                                            # early start in post-ORF A
-                                            new_postORFA_start = postORFA_start + num_gaps_postB
-                                            # print('a. New inter-ORF: {}-{}'.format(preORFA_end, 
-                                                                                   # new_postORFA_start))
-                                            loci_ranges_updated_A += [preORFA_end, new_postORFA_start]
-                                        elif num_gaps_preB > 0:
-                                            # late end in pre-ORF A
-                                            new_preORFA_end = preORFA_end - num_gaps_preB
-                                            # print('b. New inter-ORF: {}-{}'.format(new_preORFA_end, 
-                                                                                   # post_A_start))
-                                            loci_ranges_updated_A += [new_preORFA_end, postORFA_start]
-                                        else:
-                                            # print('UNEXPECTED ALIGNMENT AT OVERLAP: '
-                                            # 'could not detect early start or late stop '
-                                            # 'so just removing overlap to the nearest '
-                                            # 'codon in the next ORF without inserting inter-ORF zone')
-                                            loci_ranges_updated_A += [preORFA_end , postORFA_end]
-            
-                                    else:
-                                        loci_ranges_updated_A += [preORFA_end, postORFA_start]
-                                            
-                                    if overlap_nuc_len_B > 0:
-                                        print('Overlap in B of {} between ORFs {} and {}'.format(overlap_nuc_len_B, i, i+1))
-                                        print('Caused {} gaps in A pre-ORF; {} gaps in A post-ORF'.format(num_gaps_preA, num_gaps_postA))
-                                        ## create new ranges including inter-ORF
-                                        if num_gaps_postA > 0 and num_gaps_preA > 0:
-                                            e = ('ORF overlaps in both repeats: still to implement. '\
-                                                 'Please raise an issue at github.com/daveuu/baga')
-                                            raise NotImplementedError(e)
-                                        if num_gaps_postA > 0:
-                                            # early start in post-ORF B
-                                            new_postORFB_start = postORFB_start + num_gaps_postA
-                                            # print('c. New inter-ORF: {}-{}'.format(preORFB_end, new_postORFB_start))
-                                            loci_ranges_updated_B += [preORFB_end, new_postORFB_start]
-                                        elif num_gaps_preA > 0:
-                                            # late end in pre-ORF B
-                                            new_preORFB_end = preORFB_end - num_gaps_preA
-                                            # print('d. New inter-ORF: {}-{}'.format(new_preORFB_end, postORFB_start))
-                                            loci_ranges_updated_B += [new_preORFB_end, postORFB_start]
-                                        else:
-                                            # print('UNEXPECTED ALIGNMENT AT OVERLAP: '
-                                            # 'could not detect early start or late stop '
-                                            # 'so just removing overlap to the nearest '
-                                            # 'codon in the next ORF without inserting inter-ORF zone')
-                                            loci_ranges_updated_B += [preORFB_end, preORFB_end]
-                                    else:
-                                        loci_ranges_updated_B += [preORFB_end, postORFB_start]
                                     
-                                else:
-                                    # no overlaps: nothing to adjust
-                                    # add current ORF ranges
-                                    loci_ranges_updated_A += [preORFA_end, postORFA_start]
-                                    loci_ranges_updated_B += [preORFB_end, postORFB_start]
+                                    ## this code block is to account for overlapping features
+                                    ## (typically ORFs are non-overlapping)
+                                    ## bases are only aligned once but at an overlap would
+                                    ## be translated into two different AA sequences. To prevent
+                                    ## ensure bases are only translated and aligned once, one
+                                    ## ORF range is shortened.
+                                    
+                                    ## if only overlap exists in only one block, and that overlap is caused by
+                                    ## an increase of decrease in an ORF in one block and not other,
+                                    ## terminal gaps in alignment between the ORF pair indicates which ORF should
+                                    ## be shortened: the one without the gaps
+                                    
+                                    ## Occasionally overlap affected regions are encountered which
+                                    ## are already off the end of one repeat so that the above
+                                    ## assumptions do not hold and the overlap is not fixed with
+                                    ## the below code: but if these are already at the end of a repeat
+                                    ## it doesn't really matter . . .
+                                    
+                                    # compare num AAs per homologous ORFs
+                                    # identify if length difference of prior or subsequent homologous ORFs are closest to overlap length
+                                    # align pre- and post- ORFs as original dimensions
+                                    # only align as codons if ORFs: could be encoded rRNA
+                                    if repeated_loci_A[i].endswith('__rRNA') or \
+                                            repeated_loci_B[i].endswith('__rRNA'):
+                                        print('========> found rRNA {}, {}'.format())
+                                        preORFA_aln, preORFB_aln = alignNW_Nuc(
+                                                genome_use_A[preORFA_start:preORFA_end], 
+                                                genome_use_B[preORFB_start:preORFB_end])
+                                    else:
+                                        preORFA_aln, preORFB_aln = alignNW_Nuc_as_AA(
+                                                genome_use_A[preORFA_start:preORFA_end], 
+                                                genome_use_B[preORFB_start:preORFB_end])
+                                    if repeated_loci_B[i+1].endswith('__rRNA') or \
+                                            repeated_loci_B[i+1].endswith('__rRNA'):
+                                        print('========> found rRNA {}, {}'.format())
+                                        postORFA_aln, postORFB_aln = alignNW_Nuc(
+                                                genome_use_A[postORFA_start:postORFA_end], 
+                                                genome_use_B[postORFB_start:postORFB_end])
+                                    else:
+                                        postORFA_aln, postORFB_aln = alignNW_Nuc_as_AA(
+                                                genome_use_A[postORFA_start:postORFA_end], 
+                                                genome_use_B[postORFB_start:postORFB_end])
+                                    
+                                    # return any gaps at end of each alignment to diagnose which ORF to
+                                    # shorten
+                                    num_gaps_preA = countGaps(preORFA_aln.seq, from_end = True)
+                                    num_gaps_preB = countGaps(preORFB_aln.seq, from_end = True)
+                                    num_gaps_postA = countGaps(postORFA_aln.seq, from_end = False)
+                                    num_gaps_postB = countGaps(postORFB_aln.seq, from_end = False)
+                                    
+                                    print('Assessing overlaps between ORFs {} and {} '\
+                                            'in these homologous blocks'.format(i, i+1))
+                                    
+                                    # get non-overlapping pre-ORF end and post-ORF start
+                                    # maintain codon lengths
+                                    # first attempt to correct lengths by removing
+                                    # additional codons on one or other
+                                    
+                                    new_ORFA_ords, new_ORFB_ords = update_ORF_ends(
+                                            overlap_nuc_len_A,
+                                            preORFA_end, 
+                                            postORFA_start,
+                                            num_gaps_preA,
+                                            num_gaps_postA,
+                                            overlap_nuc_len_B,
+                                            preORFB_end, 
+                                            postORFB_start,
+                                            num_gaps_preB,
+                                            num_gaps_postB)
+                                    
+                                    loci_ranges_updated_A += new_ORFA_ords
+                                    loci_ranges_updated_B += new_ORFB_ords
                             
                             loci_ranges_updated_A += [postORFA_end]
                             loci_ranges_updated_B += [postORFB_end]
@@ -692,10 +1218,22 @@ class Finder(_MetaSample):
                             assert loci_ranges_updated_A == sorted(loci_ranges_updated_A), e2
                             assert len(loci_ranges_updated_B) == len(loci_ranges_use_B), e1
                             assert loci_ranges_updated_B == sorted(loci_ranges_updated_B), e2
+                            # check all corrections yielded codons
+                            assert all([(loci_ranges_updated_A[i+1]-loci_ranges_updated_A[i])%3==0 \
+                                    for i in range(0,len(loci_ranges_updated_A),2)]), 'not all A '\
+                                    'loci updated to codons lengths'
+                            assert all([(loci_ranges_updated_B[i+1]-loci_ranges_updated_B[i])%3==0 \
+                                    for i in range(0,len(loci_ranges_updated_B),2)]), 'not all B '\
+                                    'loci updated to codons lengths'
+                            
                         else:
                             loci_ranges_updated_A = list(loci_ranges_use_A)
                             loci_ranges_updated_B = list(loci_ranges_use_B)
                         
+                        # all corrected ORF ranges should be codon multiple lengths
+                        # but uncorrected (non-overlapping) might have been annotated erroneously
+                        # or genuinely include partial codons . . . (pseudogenes?)
+                        # so ensure all are codon length prior to translations
                         loci_ranges_updated_A_fixed = []
                         loci_ranges_updated_B_fixed = []
                         for i in range(len(loci_ranges_updated_A)/2):
@@ -710,8 +1248,10 @@ class Finder(_MetaSample):
                         loci_ranges_updated_B = loci_ranges_updated_B_fixed
                         
                         ## now do the actual aligning
-                        repeated_seqs2aln_A = collectForAligning(loci_ranges_updated_A, genome_use_A)
-                        repeated_seqs2aln_B = collectForAligning(loci_ranges_updated_B, genome_use_B)
+                        repeated_seqs2aln_A = collectForAligning(loci_ranges_updated_A, 
+                                repeated_loci_A, genome_use_A)
+                        repeated_seqs2aln_B = collectForAligning(loci_ranges_updated_B, 
+                                repeated_loci_B, genome_use_B)
                         Aseq_all_alnd = []
                         Bseq_all_alnd = []
                         for i,(Aseq,Bseq) in enumerate(zip(repeated_seqs2aln_A['seqs'],
@@ -719,7 +1259,7 @@ class Finder(_MetaSample):
                             if repeated_seqs2aln_A['types'][i] == 'ORF':
                                 Aseq_aln, Bseq_aln = alignNW_Nuc_as_AA(Aseq, Bseq)
                             else:
-                                # inter-ORF
+                                # inter-ORF or rRNA
                                 Aseq_aln, Bseq_aln = alignNW([_SeqRecord(Aseq, id = 'A'), 
                                                               _SeqRecord(Bseq, id = 'B')])
                             
@@ -727,7 +1267,7 @@ class Finder(_MetaSample):
                             Bseq_all_alnd += [str(Bseq_aln.seq)]
                         
                         ## now extend alignments at each end
-                        if len(self.ORFs_in_tandem_repeats[replicon_id].intersection(
+                        if len(self.tandem_repeats[replicon_id].intersection(
                                 repeated_loci_A + repeated_loci_B)) > 0:
                             print('Not extending tandem repeats')
                         else:
@@ -737,7 +1277,8 @@ class Finder(_MetaSample):
                             # alignments will be to other parts of repeat, not extending contiguities
                             # last one, extend to get to end of duplication
                             # get current (non-extended percent identity)
-                            pIDs = self.get_percent_ID(Aseq_all_alnd[-1], Bseq_all_alnd[-1], window = 100, step = 20)
+                            pIDs = self.get_percent_ID(Aseq_all_alnd[-1], Bseq_all_alnd[-1], 
+                                    window = pID_window_size, step = 20)
                             mean_pID = sum([pID for pos,pID in pIDs][::1][-num_terminal_window_steps:])/float(num_terminal_window_steps)
                             if mean_pID > min_pID:
                                 # end of existing alignment not divergent enough to end it: extend
@@ -762,7 +1303,8 @@ class Finder(_MetaSample):
                             
                             ## extend at end
                             # need to reverse sequences
-                            pIDs = self.get_percent_ID(Aseq_all_alnd[0], Bseq_all_alnd[0], window = 100, step = 20)
+                            pIDs = self.get_percent_ID(Aseq_all_alnd[0], Bseq_all_alnd[0], 
+                                    window = pID_window_size, step = 20)
                             mean_pID = sum([pID for pos,pID in pIDs][::-1][-num_terminal_window_steps:])/float(num_terminal_window_steps)
                             if mean_pID > min_pID:
                                 # end of existing alignment not divergent enough to end it: extend
@@ -911,7 +1453,7 @@ class Finder(_MetaSample):
                 else:
                     #chromchar = self.genome_genbank_record.seq[alnd_chrom_pos0:alnd_chrom_pos0+1].reverse_complement()[0]
                     chromchar = _Seq(
-                            self.genome.sequence[replicon_id][alnd_chrom_pos0:alnd_chrom_pos0+1].\
+                            self.genome_sequence[replicon_id][alnd_chrom_pos0:alnd_chrom_pos0+1].\
                             tostring()).reverse_complement()[0]
                 
                 #print(char, chromchar)
@@ -951,8 +1493,8 @@ class Finder(_MetaSample):
                     (aligned_A['start'], aligned_A['end']), aligned_A['seq_str'] = ORFs_info[0]
                     (aligned_B['start'], aligned_B['end']), aligned_B['seq_str'] = ORFs_info[1]
                     # strands of each region
-                    aligned_A['strand'] = self.genome_ORF_ranges[replicon_id][ORFsA[0]][2]
-                    aligned_B['strand'] = self.genome_ORF_ranges[replicon_id][ORFsB[0]][2]
+                    aligned_A['strand'] = self.genome_loci_info[replicon_id][ORFsA[0]][2]
+                    aligned_B['strand'] = self.genome_loci_info[replicon_id][ORFsB[0]][2]
                     # percent identity over aligned region
                     pIDs = dict(self.get_percent_ID(aligned_A['seq_str'], aligned_B['seq_str'], window = 100, step = 20))
                     # map the pIDs to from alinmnet to chromosome
@@ -1054,16 +1596,22 @@ class Finder(_MetaSample):
 
     def findRepeats(self, minimum_percent_identity = 0.95, 
                           minimum_repeat_length = 400,
+                          max_extensions = 20,
+                          max_follow_iterations = 10,
                           exe_bwa = False, 
                           exe_samtools = False,
                           exe_exonerate = False,
                           local_repeats_path = ['repeats'], 
                           local_genomes_path = ['genome_sequences'], 
+                          retain_bwa_output = True, 
                           force = False):
         '''
         Find repeats!
-        Initial assignment and alignment of homologous blocks requires >=95% nucleotide identity
-        Final selection of ambiguous repeats for filtering selectes regions >=98% identity
+        Final selection of ambiguous repeats for filtering selectes regions default >=95% identity
+        Initial assignment and alignment of homologous blocks requires >= 85% of the above 95% nucleotide identity
+
+        max_follow_iterations: number of times to follow one way hits . . .
+
         '''
 
         exe_bwa = False
@@ -1117,6 +1665,9 @@ class Finder(_MetaSample):
             pass
 
 
+        #### align ORFs to chromosome ####
+        # <== eventually align among replicons, not per replicons
+        # (single multi-sequence fastas, single BWA command, multi sequence BAMs etc)
         print('Writing genome to FASTA')
         genome_fna = {}
         for replicon_id,seq_array in self.genome_sequence.items():
@@ -1127,54 +1678,62 @@ class Finder(_MetaSample):
                             description = self.genome_names[replicon_id]),
                     genome_fna[replicon_id], 'fasta')
             
-            #### align ORFs to chromosome ####
             cmd = [self.exe_bwa, 'index', genome_fna[replicon_id]]
             print('Called: {}'.format(' '.join(cmd)))
             try:
                 _subprocess.call(cmd)
             except OSError:
-                print('Problem running BWA at {}. Please use Dependencies module to install locally or check system path'.format(cmd[0]))
+                print('Problem running BWA at {}. Please use Dependencies module '\
+                        'to install locally or check system path'.format(cmd[0]))
 
-
-        # collect ORF sequences
-        genome_fna_ORFs = {}
+        # collect ORF and rRNA sequences per replicon from genome_loci_info
+        genome_fna_loci = {}
         recs = {}
         for replicon_id,description in self.genome_names.items():
-            genome_fna_ORFs[replicon_id] = '{}/{}_ORFs.fna'.format(local_genomes_path, replicon_id)
+            genome_fna_loci[replicon_id] = '{}/{}_loci.fna'.format(local_genomes_path, replicon_id)
             recs[replicon_id] = []
             
-            for ORF_ID,(s,e,strand,gene_name) in self.genome_ORF_ranges[replicon_id].items():
+            for locus,(s,e,strand,gene_name) in self.genome_loci_info[replicon_id].items():
                 if strand == 1:
                     recs[replicon_id] += [_SeqRecord(_Seq(
                             self.genome_sequence[replicon_id][s:e].tostring()), 
-                            id = ORF_ID)]
+                            id = locus)]
                 else:
                     recs[replicon_id] += [_SeqRecord(_Seq(
                             self.genome_sequence[replicon_id][s:e].tostring()).reverse_complement(), 
-                            id = ORF_ID)]
+                            id = locus)]
 
         for replicon_id,description in self.genome_names.items():
-            _SeqIO.write(recs[replicon_id], genome_fna_ORFs[replicon_id], 'fasta')
+            _SeqIO.write(recs[replicon_id], genome_fna_loci[replicon_id], 'fasta')
 
         ## relaxed alignments using BWA i.e. find modestly divergent ORFs
         base_cmd = [self.exe_bwa, 'mem',
-            # Band width. Essentially, gaps longer than INT will not be found ... also affected by the scoring matrix and the hit length [100]
+            # Band width. Essentially, gaps longer than INT will not be found
+            # also affected by the scoring matrix and the hit length [100]
             '-w', '100',
-            # Off-diagonal X-dropoff (Z-dropoff). Stop extension when the difference between the best and the current extension score is ... avoids unnecessary extension ... [100]
+            # Off-diagonal X-dropoff (Z-dropoff). Stop extension when the
+            # difference between the best and the current extension score is
+            # avoids unnecessary extension ... [100]
             '-d', '100',
-            # Trigger re-seeding for a MEM longer than minSeedLen*FLOAT. Larger value yields fewer seeds, which leads to faster alignment speed but lower accuracy. [1.5]
+            # Trigger re-seeding for a MEM longer than minSeedLen*FLOAT. Larger
+            # value yields fewer seeds, which leads to faster alignment speed but
+            # lower accuracy. [1.5]
             '-r', '1.5',
-            # Discard a MEM if it has more than INT occurence in the genome. This is an insensitive parameter. [10000]
+            # Discard a MEM if it has more than INT occurence in the genome. This
+            # is an insensitive parameter. [10000]
             '-c', '10000',
             # Matching score. [1]
             '-A', '1',
-            # Mismatch penalty. The sequence error rate is approximately: {.75 * exp[-log(4) * B/A]}. [4]
+            # Mismatch penalty. The sequence error rate is approximately:
+            # {.75 * exp[-log(4) * B/A]}. [4]
             '-B', '2',
             # Gap open penalty. [6]
             '-O', '3',
-            # Gap extension penalty. A gap of length k costs O + k*E (i.e. -O is for opening a zero-length gap). [1]
+            # Gap extension penalty. A gap of length k costs O + k*E (i.e. -O is
+            # for opening a zero-length gap). [1]
             '-E', '1',
-            # Clipping penalty. SW extension: best score reaching the end of query is larger than best SW score minus the clipping penalty, clipping not be applied. [5]
+            # Clipping penalty. SW extension: best score reaching the end of query is
+            # larger than best SW score minus the clipping penalty, clipping not be applied. [5]
             '-L', '5',
             # Penalty for an unpaired read pair .....applied without -P? set to zero here? [9]
             #-U 9
@@ -1184,11 +1743,14 @@ class Finder(_MetaSample):
             #-R STR
             # Don't output alignment with score lower than INT. This option only affects output. [30]
             '-T', '30',
-            # Output all found alignments for single-end or unpaired paired-end reads. These alignments will be flagged as secondary alignments.
+            # Output all found alignments for single-end or unpaired paired-end reads. These
+            # alignments will be flagged as secondary alignments.
             '-a',
-            # Append append FASTA/Q comment to SAM output. This option can be used to transfer read meta information (e.g. barcode) to the SAM output.
+            # Append append FASTA/Q comment to SAM output. This option can be used to transfer
+            # read meta information (e.g. barcode) to the SAM output.
             # -C
-            # Use hard clipping 'H' in the SAM output. This option may dramatically reduce the redundancy of output when mapping long contig or BAC sequences.
+            # Use hard clipping 'H' in the SAM output. This option may dramatically reduce the
+            # redundancy of output when mapping long contig or BAC sequences.
             # -H
             # Mark shorter split hits as secondary (for Picard compatibility).
             # -M
@@ -1198,7 +1760,7 @@ class Finder(_MetaSample):
 
         bam_names_sorted = {}
         for replicon_id,description in self.genome_names.items():
-            cmd = base_cmd + [genome_fna[replicon_id], genome_fna_ORFs[replicon_id]]
+            cmd = base_cmd + [genome_fna[replicon_id], genome_fna_loci[replicon_id]]
             sam_name = 'ORFs_2_{}.sam'.format(replicon_id)
             print('Called: {}\nPiping to {}'.format(' '.join(cmd), sam_name))
             with open(_os.path.sep.join([local_repeats_path, sam_name]), "wb") as out:
@@ -1224,11 +1786,12 @@ class Finder(_MetaSample):
             print('Called: {}'.format(' '.join(cmd)))
             _subprocess.call(cmd)
             
-            print('Removing: {}'.format(sam_name_path))
-            _os.unlink(sam_name_path)
-            
-            print('Removing: {}'.format(bam_unsorted_name_path))
-            _os.unlink(bam_unsorted_name_path)
+            if not retain_bwa_output:
+                print('Removing: {}'.format(sam_name_path))
+                _os.unlink(sam_name_path)
+                
+                print('Removing: {}'.format(bam_unsorted_name_path))
+                _os.unlink(bam_unsorted_name_path)
 
 
         #### parse and analyse ORF-chromosome alignment ####
@@ -1238,31 +1801,32 @@ class Finder(_MetaSample):
                     [local_repeats_path, bam_names_sorted[replicon_id]]))
             # this would vary for genomes other than LESB58
             self.followHitsAndAdd(replicon_id)
-            max_iterations = 10
             i = 0
-            while len(self.ORF_hits[replicon_id]) != len(set([a for b in 
-                    self.ORF_hits[replicon_id].values() for a in b])):
+            while len(self.hits[replicon_id]) != len(set([a for b in 
+                    self.hits[replicon_id].values() for a in b])):
                 self.followHitsAndAdd(replicon_id)
                 i += 1
                 print(i)
-                if i == max_iterations:
+                if i == max_follow_iterations:
                     # for general use this should be a warning that could be logged but ignored?
                     # maybe use 'force' or a new 'ignore'?
                     print('Followed too many one-way ORF alignments for {} in {} . . . '\
                             ''.format(replicon_id, self.genome_name))
                     raise
-            
+
         #### get contiguous blocks and their homologs (other blocks) ####
-        self.orderORFHits()
+        self.orderLocusHits()
         self.getHomologousContiguousBlocks()
 
         #### align contiguous homologous blocks ####
-        self.getORFsInTandemRepeats()
-        # min_pID is used to find an initial set of repeatitive and possibly 
+        self.getLociInTandemRepeats()
+        # pre_min_pID is used to find an initial set of repetitive and possibly 
         # divergent regions and should be lower than the eventual minimum
         # threshold: different to minimum_percent_identity which is used for final
         # selection of ambiguous regions below
-        self.align_blocks(min_pID = 0.85, max_extensions = 15)
+        pre_post_pID_prop = 0.85
+        pre_min_pID = minimum_percent_identity * pre_post_pID_prop
+        self.align_blocks(min_pID = pre_min_pID, max_extensions = 15)
         self.map_alignments_to_chromosome()
 
         #### identify 98% (default) identical regions
@@ -1272,12 +1836,264 @@ class Finder(_MetaSample):
         # (although tandem repeats of total length > insert size
         # may still be a problem . . .)
         self.merge_ambiguous_regions(minimum_repeat_length = minimum_repeat_length)
+
+    def findRepeatsNucmer(self, minimum_percent_identity = 0.98, 
+                          minimum_repeat_length = 400,
+                          exe_nucmer = False, 
+                          local_repeats_path = ['repeats'], 
+                          local_genomes_path = ['genome_sequences'], 
+                          force = False):
+        '''
+        Find repeats!
+        Use the very fast nucmer method. This approach is not aware of protein coding regions.
+        Initial assignment and alignment of homologous blocks requires >=95% nucleotide identity
+        Final selection of ambiguous repeats for filtering selectes regions >=98% identity
+        '''
+
+
+        # collect paths to executables and data
+
+        exe_nucmer = False
+
+        def get_exe(name):
+            from baga.Dependencies import dependencies as _dependencies
+            exe = []
+            exe += [_dependencies[name]['destination']]
+            exe += _dependencies[name]['checker']['arguments']['path']
+            exe = _os.path.sep.join(exe)
+            return(exe)
+
+        self.exe_nucmer = get_exe('mummer')
+
+        local_genomes_path = _os.path.sep.join(local_genomes_path)
+
+        try:
+            _os.makedirs(local_genomes_path)
+        except OSError:
+            pass
+
+        print('Writing genome replicons to FASTA')
+        genome_fna = {}
+        for replicon_id,seq_array in self.genome_sequence.items():
+            genome_fna[replicon_id] = '{}/{}.fna'.format(local_genomes_path, replicon_id)
+            _SeqIO.write(
+                    _SeqRecord(_Seq(seq_array.tostring()), 
+                            id = replicon_id, 
+                            description = self.genome_names[replicon_id]),
+                    genome_fna[replicon_id], 'fasta')
+
+        print('Runing numcer on each replicon')
+        coords = {}
+        for replicon_id in self.genome_sequence:
+            # nucmer to self
+            cmd = [self.exe_nucmer, '--maxmatch', '--nosimplify', 
+                    '--prefix={}/{}__{}'.format(local_genomes_path, 
+                    self.genome_name, replicon_id), genome_fna[replicon_id], 
+                    genome_fna[replicon_id]]
+            print('Called: {}'.format(' '.join(cmd)))
+            try:
+                _subprocess.call(cmd)
+            except OSError:
+                print('Problem running nucmer at {}. Please use Dependencies '\
+                        'module to install locally or check system path'\
+                        ''.format(cmd[0]))
+            
+            # collect coordinates <== delta files better moved into genome_sequences/ ?
+            exe = self.exe_nucmer.replace('nucmer', 'show-coords')
+            cmd = [exe, '-r', '{}/{}__{}.delta'.format(local_genomes_path, 
+                    self.genome_name, replicon_id)]
+            coords[replicon_id] = _subprocess.check_output(cmd)
+            
+            #print('these are the coords')
+            #print(coords)
+            #(minimum_percent_identity, minimum_repeat_length)
+
+
+        # parse coords: simply retain ordinates of regions affected by repeats
+        # for comparison with more detailed baga method
+        self.ambiguous_ranges = {}
+        for replicon_id in sorted(self.genome_names):
+            all_positions = set()
+            for n,line in enumerate(coords[replicon_id].split('\n')):
+                #print(line)
+                cells = line.split()
+                if n > 3 and len(cells) > 5:
+                    s1,e1,s2,e2,l1,l2 = map(int,[cells[0], cells[1], cells[3], 
+                            cells[4], cells[6], cells[7]])
+                    if s2 > e2:
+                        # reverse strand
+                        s2,e2 = e2,s2
+                    pid = float(cells[9])
+                    if minimum_percent_identity < (pid/100):
+                        Apositions = set(range(s1-1,e1))
+                        Bpositions = set(range(s2-1,e2))
+                        A_nonself = Apositions - Bpositions
+                        B_nonself = Bpositions - Apositions
+                        x = False
+                        # minimum_repeat_length should really be checked against
+                        # contiguous lengths, not total bp which might now be non-
+                        # contiguous after set subtractions above
+                        #if len(A_nonself) >= minimum_repeat_length:
+                        if len(A_nonself):
+                            all_positions.update(A_nonself)
+                            x = True
+                        #if len(B_nonself) >= minimum_repeat_length:
+                        if len(B_nonself):
+                            all_positions.update(B_nonself)
+                            x = True
+                        if x:
+                            pass
+                            #print(line.rstrip())
+            
+            if len(all_positions) > 0:
+                all_ambiguous_ranges = self.makeRanges(sorted(all_positions))
+                initial_num_repeats = len(all_ambiguous_ranges)
+                all_ambiguous_ranges = [(s,e) for s,e in all_ambiguous_ranges if \
+                        e - s > minimum_repeat_length]
+                s = sum([(e - s) for s,e in all_ambiguous_ranges])
+                print('Dropped {} repeats less than {} basepairs; {} remain '\
+                        'spanning {:,} basepairs in {} of {}'.format(
+                        initial_num_repeats, minimum_repeat_length, 
+                        len(all_ambiguous_ranges), s, replicon_id, self.genome_name))
+                self.ambiguous_ranges[replicon_id] = all_ambiguous_ranges
+            else:
+                print('No repeats found in {} of {}.'.format(replicon_id, 
+                        self.genome_name))
+                self.ambiguous_ranges[replicon_id] = []
+
+        #self.homologous_groups_mapped = 'not implemented'
+
+
+        #print(self.ambiguous_ranges)
+
+        ### could adapt some of below . . .
+        #### get contiguous blocks and their homologs (other blocks) ####
+        #self.orderORFHits()
+        #self.getHomologousContiguousBlocks()
+
+        #### align contiguous homologous blocks ####
+        #self.getORFsInTandemRepeats()
+        # min_pID is used to find an initial set of repeatitive and possibly 
+        # divergent regions and should be lower than the eventual minimum
+        # threshold: different to minimum_percent_identity which is used for final
+        # selection of ambiguous regions below
+        #self.align_blocks(min_pID = 0.85, max_extensions = 15)
+        #self.map_alignments_to_chromosome()
+
+        #### identify 98% (default) identical regions
+        #self.identify_ambiguous_regions(minimum_percent_identity = minimum_percent_identity)
+        # repeats of unit length less than the insert size of the paired end 
+        # sequenced fragments should be resolvable so omit them
+        # (although tandem repeats of total length > insert size
+        # may still be a problem . . .)
+        #self.merge_ambiguous_regions(minimum_repeat_length = minimum_repeat_length)
+
+
+
+    def compareRepeatRegions(self, minimum_repeat_length = 400):
+        '''Compare repeat regions found by nucmer to a previous BAGA analysis'''
+
+        from baga import Repeats
+
+
+        print('Loading baga repeats analysis of genome %s' % self.genome_name)
+        # genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
+        baga_finder_info = Repeats.Finder(self.genome_name, inherit_from = 'self')
+        # filein = 'baga.Repeats.FinderInfo-{}.baga'.format(self.genome.id)
+        # baga_finder_info = Repeats.loadFinderInfo(filein)
+
+        all_nucmer_positions = {}
+        all_baga_positions = {}
+        for replicon_id in sorted(self.genome_names):
+            nucmer_positions = set()
+            for s,e in self.ambiguous_ranges[replicon_id]:
+                nucmer_positions.update(range(s,e))
+            
+            baga_positions = set()
+            for s,e in baga_finder_info.ambiguous_ranges[replicon_id]:
+                baga_positions.update(range(s,e))
+            
+            all_nucmer_positions[replicon_id] = nucmer_positions
+            all_baga_positions[replicon_id] = baga_positions
+
+
+        all_for_csv = []
+        for replicon_id in sorted(self.genome_names):
+            print('Replicon {}, nucmer positions: {}'.format(replicon_id, 
+                    len(all_nucmer_positions[replicon_id])))
+            print('Replicon {}, baga positions: {}'.format(replicon_id, 
+                    len(all_baga_positions[replicon_id])))
+            
+            for_csv = []
+            
+            print('Replicon {}, nucmer not baga positions: {}'.format(
+                    replicon_id, len(all_nucmer_positions[replicon_id] - \
+                    all_baga_positions[replicon_id])))
+            if all_nucmer_positions[replicon_id]:
+                nucmer_not_baga = self.makeRanges(
+                        sorted(all_nucmer_positions[replicon_id] - \
+                        all_baga_positions[replicon_id]))
+                nucmer_not_baga = [(s,e) for s,e in nucmer_not_baga if e-s >= 400]
+                print('Replicon {}, nucmer not baga positions: {} (filtered at '\
+                        'minimum repeat length {}bp)'.format(replicon_id, 
+                        sum((e-s) for s,e in nucmer_not_baga), 
+                        minimum_repeat_length))
+                print('Replicon {}, these in nucmer not baga:'.format(replicon_id))
+                for (s,e) in nucmer_not_baga:
+                    d = e-s
+                    print('{:,}-{:,} is {:,}bp'.format(s,e,d))
+                    for_csv += [('"nucmer_not_baga"',s,e,d)]
+            else:
+                nucmer_not_baga = []
+            
+            print('Replicon {}, baga not nucmer positions: {}'.format(
+                    replicon_id, len(all_baga_positions[replicon_id] - \
+                    all_nucmer_positions[replicon_id])))
+            
+            if all_baga_positions[replicon_id]:
+                baga_not_nucmer = self.makeRanges(
+                        sorted(all_baga_positions[replicon_id] - \
+                        all_nucmer_positions[replicon_id]))
+                baga_not_nucmer = [(s,e) for s,e in baga_not_nucmer if e-s >= 400]
+                print('Replicon {}, baga not nucmer positions: {} (filtered at '\
+                        'minimum repeat length {}bp)'.format(replicon_id, 
+                        sum((e-s) for s,e in baga_not_nucmer), 
+                        minimum_repeat_length))
+                
+                print('Replicon {}, these in baga not nucmer:'.format(replicon_id))
+                for (s,e) in baga_not_nucmer:
+                    d = e-s
+                    print('{:,}-{:,} is {:,}bp'.format(s,e,d))
+                    for_csv += [('"baga_not_nucmer"',s,e,d)]
+            else:
+                baga_not_nucmer = []
+            
+            for s,e in self.ambiguous_ranges[replicon_id]:
+                d = e-s
+                for_csv += [('"nucmer"',s,e,d)]
+            
+            for s,e in baga_finder_info.ambiguous_ranges[replicon_id]:
+                d = e-s
+                for_csv += [('"baga"',s,e,d)]
+            
+            for_csv.sort(key = lambda x: x[1])
+            all_for_csv += ['"{}",{},{},{},{}'.format(replicon_id,method,s,e,d) \
+                for method,s,e,d in for_csv]
+
+        fout_name = 'baga.Repeats.nucmer_vs_baga-{}.csv'.format(
+                self.genome_name)
+
+        with open(fout_name, 'w') as fout:
+            fout.write('"replicon","detection method","start (bp)","end (bp)",'\
+                    '"length (bp)"\n')
+            fout.write('\n'.join(all_for_csv))
+
 class Plotter:
     '''
     Plotter class of the Repeats module contains methods to plot
     the repetitive regions found by an instance of the Finder class.
     '''
-    def __init__(self, finder_info, plot_output_path, 
+    def __init__(self, finder, replicon_id, plot_output_path, 
                     width_cm = 30, height_cm = 20, 
                     viewbox_width_px = 1800, viewbox_height_px = 1200,
                     plot_width_prop = 0.8, plot_height_prop = 0.8, 
@@ -1294,16 +2110,19 @@ class Plotter:
         area covered by actual plot, to allow space for labels.
         '''
         
-        self.finder_info = finder_info
+        self.finder = finder
+        self.replicon_id = replicon_id
 
         import svgwrite as _svgwrite
-        dwg = _svgwrite.Drawing(plot_output_path, width='%scm' % width_cm, height='%scm' % height_cm,
-                                profile='full', debug=True)
+        dwg = _svgwrite.Drawing(plot_output_path, width='%scm' % width_cm, 
+                height='%scm' % height_cm, profile='full', debug=True)
 
         dwg.viewbox(width = viewbox_width_px, height = viewbox_height_px)
 
         if white_canvas:
-            dwg.add(_svgwrite.shapes.Rect(insert=(0, 0), size=(viewbox_width_px, viewbox_height_px), fill = _svgwrite.rgb(100, 100, 100, '%')))
+            dwg.add(_svgwrite.shapes.Rect(insert=(0, 0), 
+                    size=(viewbox_width_px, viewbox_height_px), 
+                    fill = _svgwrite.rgb(100, 100, 100, '%')))
 
         self.viewbox_width_px = viewbox_width_px
         self.viewbox_height_px = viewbox_height_px
@@ -1393,7 +2212,8 @@ class Plotter:
                 tick_dist -= rm
 
         plotpositions_chrom = []
-        for pos in range(0, self.finder_info['genome_length'], tick_dist):
+        replicon_len = len(self.finder.genome_sequence[self.replicon_id])
+        for pos in range(0, replicon_len, tick_dist):
             if pair[seq_label]['start'] <= pos <= pair[seq_label]['end']:
                 plotpositions_chrom += [pos]
 
@@ -1405,13 +2225,15 @@ class Plotter:
 
         # calculate plotting area within viewbox
         # currently only single x panel implemented (full width of view box)
-        plotstart_x = (self.viewbox_width_px - (self.viewbox_width_px * self.plot_width_prop)) / 2
+        plotstart_x = (self.viewbox_width_px - \
+                (self.viewbox_width_px * self.plot_width_prop)) / 2
         plotend_x = plotstart_x + (self.viewbox_width_px * self.plot_width_prop)
         if num_x_panels > 1:
             print('>1 x panel not implemented')
             return(False)
 
-        plottop_y = (self.viewbox_height_px - (self.viewbox_height_px * self.plot_height_prop)) / 2
+        plottop_y = (self.viewbox_height_px - \
+                (self.viewbox_height_px * self.plot_height_prop)) / 2
         plotbottom_y = plottop_y + (self.viewbox_height_px * self.plot_height_prop)
 
         # this area is just the data i.e., depth line plot
@@ -1448,7 +2270,8 @@ class Plotter:
             
             tiplabel = self.dwg.text(
                                 fmt % (plotpositions_chrom[n]/1000.0), 
-                                insert = (x + plotstart_x,plotbottom_y + tick_len_px * 2.1),
+                                insert = (x + plotstart_x, \
+                                        plotbottom_y + tick_len_px * 2.1),
                                 fill='black', 
                                 font_family = use_fontfamily, 
                                 text_anchor = textanc, 
@@ -1460,8 +2283,10 @@ class Plotter:
             # label x-axis
             
             xaxislabel = self.dwg.text(
-                                "Reference Chromosome Position", 
-                                insert = ((plotstart_x + plotend_x)/2, plotbottom_y + tick_len_px * 2.1 * 2),
+                                "Reference Chromosome Position ({})"\
+                                        "".format(self.replicon_id), 
+                                insert = ((plotstart_x + plotend_x)/2, \
+                                        plotbottom_y + tick_len_px * 2.1 * 2),
                                 fill='black', font_family=use_fontfamily, 
                                 text_anchor = "middle", font_size = font_size) #, baseline_shift='-50%')
             
@@ -1476,19 +2301,22 @@ class Plotter:
                         font_size = 15, 
                         use_fontfamily = 'Nimbus Sans L'):
 
+
         # upper < lower because SVG upside down <<<<<<<<<<<<<<<
         # plot into full viewbox or other specified panel
         ((this_x_panel, num_x_panels),(this_y_panel, num_y_panels)) = panel
 
         # calculate plotting area within viewbox
         # currently only single x panel implemented (full width of view box)
-        plotstart_x = (self.viewbox_width_px - (self.viewbox_width_px * self.plot_width_prop)) / 2
+        plotstart_x = (self.viewbox_width_px - \
+                (self.viewbox_width_px * self.plot_width_prop)) / 2
         plotend_x = plotstart_x + (self.viewbox_width_px * self.plot_width_prop)
         if num_x_panels > 1:
             print('>1 x panel not implemented')
             return(False)
 
-        plottop_y = (self.viewbox_height_px - (self.viewbox_height_px * self.plot_height_prop)) / 2
+        plottop_y = (self.viewbox_height_px - \
+                (self.viewbox_height_px * self.plot_height_prop)) / 2
         plotbottom_y = plottop_y + (self.viewbox_height_px * self.plot_height_prop)
 
         # this area is just the data i.e., depth line plot
@@ -1500,19 +2328,23 @@ class Plotter:
             plotbottom_y -= y_per_panel * (this_y_panel - 1)
 
         ORF_plot_info = []
-        for ID,(s,e,d,name) in self.finder_info['ORF_ranges'].items():
+        #for ID,(s,e,d,name) in self.finder_info['ORF_ranges'].items():
+
+        for ID,(s,e,d,name) in self.finder.genome_loci_info[self.replicon_id].items():
             status = False
             if pair[seq_label]['start'] <= s and e < pair[seq_label]['end']:
                 plot_x_s = self.chrom2plot_x(s, pair, seq_label) + plotstart_x
                 plot_x_e = self.chrom2plot_x(e, pair, seq_label) + plotstart_x
                 status = 'complete'
             elif s < pair[seq_label]['start'] < e:
-                plot_x_s = self.chrom2plot_x(pair[seq_label]['start'], pair, seq_label) + plotstart_x
+                plot_x_s = self.chrom2plot_x(pair[seq_label]['start'], pair, 
+                        seq_label) + plotstart_x
                 plot_x_e = self.chrom2plot_x(e, pair, seq_label) + plotstart_x
                 status = 'left cut'
             elif s < pair[seq_label]['end'] < e:
                 plot_x_s = self.chrom2plot_x(s, pair, seq_label) + plotstart_x
-                plot_x_e = self.chrom2plot_x(pair[seq_label]['end'], pair, seq_label) + plotstart_x
+                plot_x_e = self.chrom2plot_x(pair[seq_label]['end'], pair, 
+                        seq_label) + plotstart_x
                 status = 'right cut'
             
             if status:
@@ -1528,19 +2360,20 @@ class Plotter:
         ##### see also values_upper_prop and values_upper_lower
         feature_thickness = (plotbottom_y - plottop_y) * 0.07
         point_width = (plotend_x - plotstart_x) * 0.008
-        # half a feature thickness above scale, one feature thickness for reverse strand, half a feature thickness above reverse strand
+        # half a feature thickness above scale, one feature thickness for reverse strand,
+        # half a feature thickness above reverse strand
         forward_y_offset = feature_thickness * 0.5 + feature_thickness + feature_thickness * 0.5
         reverse_y_offset = feature_thickness * 0.5
 
         # plot feature lane guide lines
         commands = ["M %s %s" % (
-                                            plotstart_x, 
-                                            plotbottom_y - reverse_y_offset - feature_thickness * 0.5
-                                            )]
+                plotstart_x, 
+                plotbottom_y - reverse_y_offset - feature_thickness * 0.5
+                )]
         commands += ["L %s %s" % (
-                                            plotend_x, 
-                                            plotbottom_y - reverse_y_offset - feature_thickness * 0.5
-                                            )]
+                plotend_x, 
+                plotbottom_y - reverse_y_offset - feature_thickness * 0.5
+                )]
         self.dwg.add(
             self.dwg.path(
                 d=' '.join(commands), 
@@ -1550,13 +2383,13 @@ class Plotter:
         )
 
         commands = ["M %s %s" % (
-                                            plotstart_x, 
-                                            plotbottom_y - forward_y_offset - feature_thickness * 0.5
-                                            )]
+                plotstart_x, 
+                plotbottom_y - forward_y_offset - feature_thickness * 0.5
+                )]
         commands += ["L %s %s" % (
-                                            plotend_x, 
-                                            plotbottom_y - forward_y_offset - feature_thickness * 0.5
-                                            )]
+                plotend_x, 
+                plotbottom_y - forward_y_offset - feature_thickness * 0.5
+                )]
         self.dwg.add(
             self.dwg.path(
                 d=' '.join(commands), 
@@ -1570,40 +2403,40 @@ class Plotter:
         horizontal_offset = 20
         label = "Forward strand"
         feature_lane_label = self.dwg.text(
-                                            label, 
-                                            insert = (
-                                                    plotstart_x - horizontal_offset, 
-                                                    plotbottom_y - (forward_y_offset + feature_thickness * 0.5)
-                                                    ), 
-                                             fill = 'black', font_family = use_fontfamily, 
-                                             text_anchor = textanc, font_size = '%dpt' % font_size, 
-                                             baseline_shift='-50%'
-                                             )
+                label, 
+                insert = (
+                        plotstart_x - horizontal_offset, 
+                        plotbottom_y - (forward_y_offset + feature_thickness * 0.5)
+                ), 
+                fill = 'black', font_family = use_fontfamily, 
+                text_anchor = textanc, font_size = '%dpt' % font_size, 
+                baseline_shift='-50%'
+                )
         self.dwg.add(feature_lane_label)
 
         label = "Reverse strand"
         feature_lane_label = self.dwg.text(
-                                            label, 
-                                            insert = (
-                                                plotstart_x - horizontal_offset, 
-                                                plotbottom_y - (reverse_y_offset + feature_thickness * 0.5)
-                                                ), 
-                                             fill='black', font_family=use_fontfamily, 
-                                             text_anchor=textanc, font_size = '%dpt' % font_size,
-                                             baseline_shift='-50%'
-                                             )
+                label, 
+                insert = (
+                        plotstart_x - horizontal_offset, 
+                        plotbottom_y - (reverse_y_offset + feature_thickness * 0.5)
+                ), 
+                fill='black', font_family=use_fontfamily, 
+                text_anchor=textanc, font_size = '%dpt' % font_size,
+                baseline_shift='-50%'
+                )
         self.dwg.add(feature_lane_label)
 
         # plot ORFs by strand in 3' 5' order so points are above with white border
         #ORF_plot_info = ORF_partial_left + ORFs_to_plot + ORF_partial_right
         ORF_plot_info_forward_strand = sorted(
-                                                [o for o in ORF_plot_info if o[2] == 1],
-                                                reverse = True
-                                                )
+                [o for o in ORF_plot_info if o[2] == 1],
+                reverse = True
+                )
         ORF_plot_info_reverse_strand = sorted(
-                                                [o for o in ORF_plot_info if o[2] == -1],
-                                                reverse = False
-                                                )
+                [o for o in ORF_plot_info if o[2] == -1],
+                reverse = False
+                )
 
         for s,e,d,name,state in ORF_plot_info_forward_strand + ORF_plot_info_reverse_strand:
             if d == 1:
@@ -1747,21 +2580,23 @@ class Plotter:
 
 
     def plot_LargeFeatures(self, seq_label, pair, panel = ((1,1),(1,1)),
-                          stroke_width = 40, colour = (20, 20, 20,'%'), 
-                          font_size = 15, use_fontfamily = 'Nimbus Sans L'):
+            stroke_width = 40, colour = (20, 20, 20,'%'), font_size = 15, 
+            use_fontfamily = 'Nimbus Sans L'):
 
         # plot into full viewbox or other specified panel
         ((this_x_panel, num_x_panels),(this_y_panel, num_y_panels)) = panel
 
         # calculate plotting area within viewbox
         # currently only single x panel implemented (full width of view box)
-        plotstart_x = (self.viewbox_width_px - (self.viewbox_width_px * self.plot_width_prop)) / 2
+        plotstart_x = (self.viewbox_width_px - \
+                (self.viewbox_width_px * self.plot_width_prop)) / 2
         plotend_x = plotstart_x + (self.viewbox_width_px * self.plot_width_prop)
         if num_x_panels > 1:
             print('>1 x panel not implemented')
             return(False)
 
-        plottop_y = (self.viewbox_height_px - (self.viewbox_height_px * self.plot_height_prop)) / 2
+        plottop_y = (self.viewbox_height_px - \
+                (self.viewbox_height_px * self.plot_height_prop)) / 2
         plotbottom_y = plottop_y + (self.viewbox_height_px * self.plot_height_prop)
 
         # this area is just the data i.e., depth line plot
@@ -1784,11 +2619,16 @@ class Plotter:
         # select features to plot and their x plotting ordinates
         Features_to_plot = []
         #for feat_chrom_start,feat_chrom_end,n in Features:
-        for name, (feat_chrom_start, feat_chrom_end) in self.finder_info['large_mobile_element_ranges'].items():
+        for name, (feat_start, feat_end) in \
+                self.finder.large_features[self.replicon_id].items():
+            
             # don't plot unless part of feature is within plotting range
-            if feat_chrom_start < pair[seq_label]['end'] and feat_chrom_end > pair[seq_label]['start']:
-                s = self.chrom2plot_x(max( pair[seq_label]['start'], feat_chrom_start), pair, seq_label ) + plotstart_x
-                e = self.chrom2plot_x(min( pair[seq_label]['end'], feat_chrom_end), pair, seq_label ) + plotstart_x
+            if feat_start < pair[seq_label]['end'] and \
+                    feat_end > pair[seq_label]['start']:
+                s = self.chrom2plot_x(max( pair[seq_label]['start'], 
+                        feat_start), pair, seq_label ) + plotstart_x
+                e = self.chrom2plot_x(min( pair[seq_label]['end'], 
+                        feat_end), pair, seq_label ) + plotstart_x
                 Features_to_plot += [(s, e, name)]
 
         # some more parameters for tweaking feature layout here
@@ -1800,18 +2640,18 @@ class Plotter:
         # two feature thickness for strands plus a half inbetween, 
         # half a feature thickness above forward strand
         y_offset = feature_thickness * 0.5 + feature_thickness + \
-                         feature_thickness * 0.5 + feature_thickness + \
-                         feature_thickness * 0.5
+                 feature_thickness * 0.5 + feature_thickness + \
+                 feature_thickness * 0.5
 
         # plot feature lane guide lines
         commands = ["M %s %s" % (
-                                    plotstart_x, 
-                                    plotbottom_y - y_offset - feature_thickness * 0.5
-                                    )]
+                plotstart_x, 
+                plotbottom_y - y_offset - feature_thickness * 0.5
+        )]
         commands += ["L %s %s" % (
-                                    plotend_x, 
-                                    plotbottom_y - y_offset - feature_thickness * 0.5
-                                    )]
+                plotend_x, 
+                plotbottom_y - y_offset - feature_thickness * 0.5
+        )]
         self.dwg.add(
             self.dwg.path(
                 d=' '.join(commands), stroke=self.rgb(70, 70, 70,'%'), 
@@ -1824,16 +2664,16 @@ class Plotter:
         horizontal_offset = 20
         label = "Large Features"
         feature_lane_label = self.dwg.text(
-                            label, 
-                            insert = (
-                                plotstart_x - horizontal_offset, 
-                                plotbottom_y - (y_offset + feature_thickness * 0.5)
-                            ), 
-                            fill='black', font_family=use_fontfamily, 
-                            text_anchor=textanc, 
-                            font_size = '%dpt' % font_size, 
-                            baseline_shift='-50%'
-                        )
+            label, 
+            insert = (
+                plotstart_x - horizontal_offset, 
+                plotbottom_y - (y_offset + feature_thickness * 0.5)
+            ), 
+            fill='black', font_family=use_fontfamily, 
+            text_anchor=textanc, 
+            font_size = '%dpt' % font_size, 
+            baseline_shift='-50%'
+        )
         self.dwg.add(feature_lane_label)
 
         # plot feature
@@ -1841,35 +2681,35 @@ class Plotter:
             start,end = s,e
             if start ==  plotstart_x:    # 'left cut'
                 commands = ["M %s %s" % (
-                                            start - point_width, 
-                                            plotbottom_y - y_offset
-                                            )]
+                    start - point_width, 
+                    plotbottom_y - y_offset
+                    )]
             else:
                 commands = ["M %s %s" % (
-                                            start, 
-                                            plotbottom_y - y_offset
-                                            )]
+                    start, 
+                    plotbottom_y - y_offset
+                    )]
             
             commands += ["L %s %s" % (
-                                            end, 
-                                            plotbottom_y - y_offset
-                                            )]
+                    end, 
+                    plotbottom_y - y_offset
+                    )]
             
             if end == plotend_x:   # 'right cut':
                 commands += ["L %s %s" % (
-                                            end + point_width, 
-                                            plotbottom_y - (y_offset + feature_thickness * 1)
-                                            )]
+                    end + point_width, 
+                    plotbottom_y - (y_offset + feature_thickness * 1)
+                    )]
             else:
                 commands += ["L %s %s" % (
-                                            end, 
-                                            plotbottom_y - (y_offset + feature_thickness * 1)
-                                            )]
+                    end, 
+                    plotbottom_y - (y_offset + feature_thickness * 1)
+                    )]
             
             commands += ["L %s %s z" % (
-                                            start, 
-                                            plotbottom_y - (y_offset + feature_thickness * 1)
-                                            )]
+                    start, 
+                    plotbottom_y - (y_offset + feature_thickness * 1)
+                    )]
             
             self.dwg.add(
                 self.dwg.path(
@@ -1889,7 +2729,7 @@ class Plotter:
                     font_family=use_fontfamily, font_weight='bold',
                     text_anchor='middle', font_size = '%dpt' % font_size, 
                     baseline_shift='-50%'
-                    ))
+                ))
 
     def plot_pIDs(self, seq_label, 
                         pair, 
@@ -1909,13 +2749,15 @@ class Plotter:
         # calculate plotting area within viewbox
         # currently only single x panel implemented (full width of view box)
         # this area includes all: depth, scale, ORFs, features etc
-        plotstart_x = (self.viewbox_width_px - (self.viewbox_width_px * self.plot_width_prop)) / 2
+        plotstart_x = (self.viewbox_width_px - \
+                (self.viewbox_width_px * self.plot_width_prop)) / 2
         plotend_x = plotstart_x + (self.viewbox_width_px * self.plot_width_prop)
         if num_x_panels > 1:
             print('>1 x panel not implemented')
             return(False)
 
-        plottop_y = (self.viewbox_height_px - (self.viewbox_height_px * self.plot_height_prop)) / 2
+        plottop_y = (self.viewbox_height_px - \
+                (self.viewbox_height_px * self.plot_height_prop)) / 2
         plotbottom_y = plottop_y + (self.viewbox_height_px * self.plot_height_prop)
 
         # this area is just the data i.e., depth line plot
@@ -1937,7 +2779,8 @@ class Plotter:
         plotpositions_chrom = sorted(pair[seq_label]['aln_pos0_2_chrm_pos0_pIDs'])
 
         # get positions on x-axis to plot
-        plotpositions_x = [self.chrom2plot_x(pos_chrom, pair, seq_label) for pos_chrom in plotpositions_chrom]
+        plotpositions_x = [self.chrom2plot_x(pos_chrom, pair, seq_label) \
+                for pos_chrom in plotpositions_chrom]
 
         # get corresponding depths over this chromosome region
         plotdepths = []
@@ -2145,7 +2988,7 @@ class Plotter:
         # first indicate regions for exclusion due to high identity anywhere
         # pale green
         colour = ('2', '25', '100', '%')
-        for chrm_s,chrm_e in self.finder_info['ambiguous_ranges']:
+        for chrm_s,chrm_e in self.finder.ambiguous_ranges[self.replicon_id]:
             if chrm_s < pair[seq_label]['end'] and chrm_e > pair[seq_label]['start']:
                 
                 s = self.chrom2plot_x(chrm_s, pair, seq_label)
@@ -2242,88 +3085,93 @@ def plotRepeats(genome_name, outdir = ['plots_repeats'], force = False):
 
     from baga import Repeats
 
-    filein = 'baga.Repeats.FinderInfo-{}.baga'.format(genome_name)
-    finder_info = Repeats.loadFinderInfo(filein)
+    ## this needs to happen in cli for consistancy and to know about 
+    ## logging level, task etc
+    finder = Repeats.Finder(genome_name, inherit_from = 'self')
 
-    outdir = _os.path.sep.join(outdir + [finder_info['genome_id']])
+    outdir = _os.path.sep.join(outdir + [finder.genome_name])
     if not _os.path.exists(outdir):
-      _os.makedirs(outdir)
+        _os.makedirs(outdir)
 
-    # numbering here isn't working . . through each group contained all related pairs . . .
-    plotted_last = False
-    plot_group = 1
-    #for groups in finder.homologous_groups_mapped:
-    for groups in finder_info['homologous_groups_mapped']:
-        if plotted_last:
-            plot_group += 1
-            plotted_last = False
-        
-        for pair in groups:
+    for replicon_id,homol_grps_mapd in sorted(finder.homologous_groups_mapped.items()):
+        # numbering here isn't working . .
+        # through each group contained all related pairs . . .
+        plotted_last = False
+        plot_group = 1
+        for groups in homol_grps_mapd:
+            if plotted_last:
+                plot_group += 1
+                plotted_last = False
             
-            # first check if this pair includes any of the 
-            # final selection of ambiguous regions (without
-            # the short regions)
-            plot_A = False
-            plot_B = False
-            sA, eA = pair['A']['start'], pair['A']['end']
-            sB, eB = pair['B']['start'], pair['B']['end']
-            for s,e in finder_info['ambiguous_ranges']:
-                if (s < eA and e > sA):
-                    plot_A = True
-                if (s < eB and e > sB):
-                    plot_B = True
-            
-            if plot_A and plot_B:
-                plotted_last = True
-                plotname = '%02d_%07d_%07d_vs_%07d_%07d' % (
-                                plot_group, sA, eA, sB, eB)
+            for pair in groups:
                 
-                plot_output_path = _os.path.sep.join([outdir, _os.path.extsep.join([plotname, 'svg'])])
-                print('Plotting {}'.format(plot_output_path))
+                # first check if this pair includes any of the 
+                # final selection of ambiguous regions (without
+                # the short regions)
+                plot_A = False
+                plot_B = False
+                sA, eA = pair['A']['start'], pair['A']['end']
+                sB, eB = pair['B']['start'], pair['B']['end']
+                for s,e in finder.ambiguous_ranges[replicon_id]:
+                    if (s < eA and e > sA):
+                        plot_A = True
+                    if (s < eB and e > sB):
+                        plot_B = True
                 
-                if not force and _os.path.exists(plot_output_path):
-                    print('Found %s\nUse "force = True" to overwrite' % plot_output_path)
-                else:
-                    repeat_plotter = Repeats.Plotter(finder_info, plot_output_path)
-                    repeat_plotter.doPlot(pair)
+                if plot_A and plot_B:
+                    plotted_last = True
+                    plotname = '{}_{:02d}_{:07d}_{:07d}_vs_{:07d}_{:07d}'\
+                            ''.format(replicon_id, plot_group, sA, eA, sB, eB)
+                    
+                    plot_output_path = _os.path.sep.join([outdir, 
+                            _os.path.extsep.join([plotname, 'svg'])])
+                    print('Plotting {}'.format(plot_output_path))
+                    
+                    if not force and _os.path.exists(plot_output_path):
+                        print('Found {}\nUse "force = True" to overwrite'\
+                                ''.format(plot_output_path))
+                    else:
+                        repeat_plotter = Repeats.Plotter(finder, replicon_id, 
+                                plot_output_path)
+                        repeat_plotter.doPlot(pair)
 def summariseRepeats(genome_name, force = False):
     '''Summarise repeats in a csv file'''
-
-    # first load Repeats.Finder analysis results and related information
-
-    from baga import Repeats
-
-    filein = 'baga.Repeats.FinderInfo-{}.baga'.format(genome_name)
-    finder_info = Repeats.loadFinderInfo(filein)
 
 
     # write to simple summary of regions for parsing
     # baga.Repeats.filter_regions-<genome>.csv
-    # write to more detailed summary of regions indicating which repeats link to each other
+    # write to more detailed summary of regions indicating which
+    # repeats link to each other
     # baga.Repeats.details-<genome>.csv
+
+    from baga import Repeats
 
     loaded = False
     try:
-        import baga
-        ambiguous_ranges = baga.bagaload('baga.Repeats.filter_regions-{}'.format(genome_name))
+        finder = Repeats.Finder(genome_name, inherit_from = 'self')
         loaded = True
-
     except IOError:
-        print('Could not load baga.Repeats.filter_regions-{}'.format(genome_name))
-        print('You probably need to find the repeats first with the --find option')
+        print('Could not load baga.Repeats.filter_regions-{}'\
+                ''.format(genome_name))
+        print('You probably need to find the repeats first with the '\
+                '--find option')
 
     if loaded:
         total = 0
         foutpath = 'baga.Repeats.filter_regions-{}.csv'.format(genome_name)
         with open(foutpath, 'w') as fout:
-            fout.write('"length (bp)","start","end"\n')
-            for s,e in ambiguous_ranges:
-                print('{:,} bp from {:,} to {:,}'.format(e-s+1, s, e))
-                total += e-s+1
-                fout.write('{},{}\n'.format(s, e))
+            fout.write('"replicon","length (bp)","start","end"\n')
+            for replicon_id,ranges in finder.ambiguous_ranges.items():
+                for s,e in ranges:
+                    print('{:,} bp from {:,} to {:,} in {}'.format(e-s+1, 
+                            s, e, replicon_id))
+                    total += e-s+1
+                    fout.write('"{}",{},{}\n'.format(replicon_id, s, e))
         
-        print('\n{} repetitive, ambiguous regions spanning {:,} bp of chromosome\n'.format(len(ambiguous_ranges), total))
-        print('Simple summary for parsing written to: {}'.format(foutpath))
+        print('\n{} repetitive, ambiguous regions spanning {:,} bp of '\
+                'chromosome\n'.format(len(ambiguous_ranges), total))
+        print('Simple summary for convenient parsing written to: {}'\
+                ''.format(foutpath))
 
 
     # numbering here isn't working . . through each group contained all related pairs . . .
@@ -2332,38 +3180,45 @@ def summariseRepeats(genome_name, force = False):
     #for groups in finder.homologous_groups_mapped:
     foutpath = 'baga.Repeats.details-{}.csv'.format(genome_name)
     with open(foutpath, 'w') as fout:
-        group_num = 0
-        fout.write('"region A start","region A end","region B start","region B end"\n')
-        for groups in finder_info['homologous_groups_mapped']:
-            
-            this_group = []
-            
-            for pair in groups:
-                # first check if this pair includes any of the 
-                # final selection of ambiguous regions (without
-                # the short regions)
-                report_A = False
-                report_B = False
-                sA, eA = pair['A']['start'], pair['A']['end']
-                sB, eB = pair['B']['start'], pair['B']['end']
-                for s,e in finder_info['ambiguous_ranges']:
-                    if (s < eA and e > sA):
-                        report_A = True
-                    if (s < eB and e > sB):
-                        report_B = True
+        fout.write('"region A start","region A end","region B start",'\
+                '"region B end"\n')
+        for replicon_id,homol_grps_mapd in finder.homologous_groups_mapped.items():
+            group_num = 0
+            # numbering here isn't working . .
+            # through each group contained all related pairs . . .
+            plotted_last = False
+            plot_group = 1
+            for groups in homol_grps_mapd:
                 
-                if report_A and report_B:
-                    this_group += [((sA, eA),(sB, eB))]
-            
-            if len(this_group):
-                group_num += 1
-                lens = [a for b in this_group for a in b]
-                lens = [a[1]-a[0] for a in lens]
-                mean_len = int(sum(lens) / float(len(lens)))
-                fout.write('Group {}, approx. {}bp:\n'.format(group_num,mean_len))
-                for (sA, eA),(sB, eB) in this_group:
-                    fout.write('{},{},{},{}\n'.format(sA, eA, sB, eB))
-                fout.write('\n')
+                this_group = []
+                
+                for pair in groups:
+                    # first check if this pair includes any of the 
+                    # final selection of ambiguous regions (without
+                    # the short regions)
+                    report_A = False
+                    report_B = False
+                    sA, eA = pair['A']['start'], pair['A']['end']
+                    sB, eB = pair['B']['start'], pair['B']['end']
+                    for s,e in finder_info['ambiguous_ranges']:
+                        if (s < eA and e > sA):
+                            report_A = True
+                        if (s < eB and e > sB):
+                            report_B = True
+                    
+                    if report_A and report_B:
+                        this_group += [((sA, eA),(sB, eB))]
+                
+                if len(this_group):
+                    group_num += 1
+                    lens = [a for b in this_group for a in b]
+                    lens = [a[1]-a[0] for a in lens]
+                    mean_len = int(sum(lens) / float(len(lens)))
+                    fout.write('Group {} in replicon {}, approx. {}bp:\n'.format(
+                            group_num, replicon_id, mean_len))
+                    for (sA, eA),(sB, eB) in this_group:
+                        fout.write('{},{},{},{}\n'.format(sA, eA, sB, eB))
+                    fout.write('\n')
         
         print('More detailed summary written to: {}'.format(foutpath))
 

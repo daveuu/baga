@@ -23,7 +23,7 @@ of homologous recombination from multiple sequence analysis.
 # stdlib
 from baga import _os
 from baga import _sys
-from baga import _cPickle
+from baga import _pickle
 from baga import _gzip
 from baga import _subprocess
 from baga import _time

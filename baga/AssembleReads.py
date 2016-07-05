@@ -35,7 +35,7 @@ from glob import glob as _glob
 from baga import _subprocess
 from baga import _os
 from baga import _multiprocessing
-from baga import _cPickle
+from baga import _pickle
 from baga import _gzip
 from baga import _re
 from baga import _tarfile

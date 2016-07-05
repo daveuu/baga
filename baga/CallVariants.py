@@ -34,7 +34,7 @@ from glob import glob as _glob
 from baga import _subprocess
 from baga import _os
 from baga import _multiprocessing
-from baga import _cPickle
+from baga import _pickle
 from baga import _gzip
 from baga import _re
 from baga import _tarfile
@@ -141,6 +141,14 @@ def sortVariantsKeepFilter(header, colnames, variantrows):
         if INFO['Description'].strip('"')[:len('FILTER:')] == 'FILTER:':
             INFOfilters.add(INFO['ID'].strip('\'"'))
 
+    allfilters = FILTERfilters | INFOfilters
+
+    # return empties now if nothing to process below
+    if len(variantrows) == 0:
+        variants = {}
+        return(variants, allfilters)
+
+
     cols = dict(zip(parameter_names, variantrows[0].rstrip().split('\t')[:len(parameter_names)]))
 
     e = 'Could not find FORMAT column in this VCF file. Probably no genotype data.'
@@ -209,8 +217,6 @@ def sortVariantsKeepFilter(header, colnames, variantrows):
         for k2,v2 in variants[k1].items():
             variants[k1][k2] = dict(v2)
 
-    allfilters = FILTERfilters | INFOfilters
-
     return(variants, allfilters)
 
 def sortAmongBetweenReference(variants, sample_size):
@@ -278,9 +284,10 @@ def to_by_position_filtered(variants, filters_applied, summarise = True):
         for f1 in sorted(filters_applied):
             print('-- {} --'.format(f1))
             these = []
-            for position,reference,query,f2 in sorted(by_position_filtered[chromosome]):
-                if f1 == f2:
-                    these += ['{}: {} => {}, {}'.format(position,reference,query,f2)]
+            if len(variants):
+                for position,reference,query,f2 in sorted(by_position_filtered[chromosome]):
+                    if f1 == f2:
+                        these += ['{}: {} => {}, {}'.format(position,reference,query,f2)]
             
             print('Total: {}'.format(len(these)))
             print('\n'.join(these))
@@ -323,18 +330,28 @@ def reportCumulative(filter_order, reference_id, VCFs, VCFs_indels = False):
     VCFs_use = {}
     for dataset,varianttypes in sorted(VCFs.items()):
         VCFs_use[dataset] = {}
-        for varianttype,filename in varianttypes.items():
-            bits = filename.split(_os.path.extsep)
-            pattern = _os.path.extsep.join(bits[:-1]) + '*' + bits[-1]
-            for checkthis in _glob(pattern):
-                filter_present = []
-                for fltr in collect_baga_filters:
-                    if 'F_'+fltr in checkthis:
-                        filter_present += [fltr]
-                
-                if set(filter_present) >= set(collect_baga_filters):
-                    # OK if additional filters included in a VCF
-                    VCFs_use[dataset][varianttype] = checkthis
+        for varianttype,fname in varianttypes.items():
+            VCFs_use[dataset][varianttype] = []
+            if not isinstance(fname, list):
+                # --calleach --calljoint
+                filenames = [fname]
+            else:
+                # --callsingles
+                filenames = fname
+            for filename in filenames:
+                bits = filename.split(_os.path.extsep)
+                pattern = _os.path.extsep.join(bits[:-1]) + '*' + bits[-1]
+                for checkthis in _glob(pattern):
+                    filter_present = []
+                    for fltr in collect_baga_filters:
+                        if 'F_'+fltr in checkthis:
+                            filter_present += [fltr]
+                    
+                    if set(filter_present) >= set(collect_baga_filters):
+                        # OK if additional filters included in a VCF
+                        VCFs_use[dataset][varianttype] += [checkthis]
+
+
 
     ### need to know (i) how many samples per dataset which may span VCF files or may not . . .
 
@@ -365,23 +382,22 @@ def reportCumulative(filter_order, reference_id, VCFs, VCFs_indels = False):
         for dataset,varianttypes in sorted(VCFs_use.items()):
             print('dataset: {}'.format(dataset))
             for varianttype in variant_type_order:
-                filename = varianttypes[varianttype]
-                header, header_section_order, these_colnames, variantrows = parseVCF(filename)
-                variants, allfilters = sortVariantsKeepFilter(header, these_colnames, variantrows)
-                # divide variants into those among sample only, those between sample
-                # and reference
-                variants_divided = sortAmongBetweenReference(variants, sample_size = len(these_colnames[9:]))
-                variants_divided['all'] = variants
-                # cumulative filters applied here
-                for group_name in variant_groups:
-                    by_position, by_position_filtered = to_by_position_filtered(
-                            variants_divided[group_name], cumulative_filters)
-                    
-                    # reference_id is the chromosome ID
-                    print('{} {}'.format(len(by_position[reference_id]), varianttype))
-                    this_row[group_name] += [len(by_position[reference_id])]
-                    totals_by_type[group_name][varianttype].update([info[0] for info in by_position[reference_id]])
-        
+                for filename in varianttypes[varianttype]:
+                    header, header_section_order, these_colnames, variantrows = parseVCF(filename)
+                    variants, allfilters = sortVariantsKeepFilter(header, these_colnames, variantrows)
+                    # divide variants into those among sample only, those between sample
+                    # and reference
+                    variants_divided = sortAmongBetweenReference(variants, sample_size = len(these_colnames[9:]))
+                    variants_divided['all'] = variants
+                    # cumulative filters applied here
+                    for group_name in variant_groups:
+                        by_position, by_position_filtered = to_by_position_filtered(
+                                variants_divided[group_name], cumulative_filters)
+                        
+                        # reference_id is the chromosome ID
+                        print('{} {}'.format(len(by_position[reference_id]), varianttype))
+                        this_row[group_name] += [len(by_position[reference_id])]
+                        totals_by_type[group_name][varianttype].update([info[0] for info in by_position[reference_id]])
         # add totals for variant class in columns corresponding to variant_type_order
         for group_name in variant_groups:
             this_row[group_name] += [len(totals_by_type[group_name][varianttype]) for varianttype in variant_type_order]
@@ -500,44 +516,6 @@ def reportLists(include_filters, reference_id, VCFs, VCFs_indels = False):
         with open(outfilename, 'w') as fout:
             fout.write(','.join(['"{}"'.format(c) for c in colnames])+'\n')
             fout.write('\n'.join(rows[group_name])+'\n')
-
-# hard coded information for known filter types
-known_filters = {}
-# per sample filters have custom INFO added to allow for 
-# sample-specific per-site filtering
-
-known_filters['rearrangements'] = {}
-# if dict of ranges e.g. for rearrangements regions extended
-# by no or low read depth mapping, need a list here with each
-# INFO entry
-known_filters['rearrangements']['string'] = [
-'##INFO=<ID=rearrangements1,Number=.,Type=Integer,Description="FILTER: Within a region affected by rearrangements between reference genome and sample. Sample-specific. INFO field is list of base-0 indexes for failed samples in column order">',
-'##INFO=<ID=rearrangements2,Number=.,Type=Integer,Description="FILTER: Adjacent to region affected by rearrangements between reference genome and sample and with >50% without reads mapped, i.e., absent in query or possibly insufficient mapping quality. Sample-specific. INFO field is list of base-0 indexes for failed samples in column order">']
-known_filters['rearrangements']['per_sample'] = True
-
-# reference genome specific filters need a conventional FILTER entry so all variants at a position are excluded
-known_filters['genome_repeats'] = {}
-known_filters['genome_repeats']['string'] = [
-'##FILTER=<ID=genome_repeats,Description="Within a long repeat unit in the reference genome">'
-]
-known_filters['genome_repeats']['per_sample'] = False
-
-
-# non-BAGA filters (e.g., from GATK) that are worth knowing about
-other_filters = {'GATK':('LowQual', 'standard_hard_filter')}
-
-# determine order of filters to include
-
-# GATK's LowQual and standard_hard_filter
-short2fullnames = dict(other_filters.items())
-short2fullnames['genome_repeats'] = ('genome_repeats',)
-short2fullnames['rearrangements'] = ('rearrangements1', 'rearrangements2')
-# names for table
-filter_names = {
-            ('LowQual', 'standard_hard_filter'): "GATK standard 'hard' filter", 
-            ('genome_repeats',): 'baga reference genome repeats', 
-            ('rearrangements1', 'rearrangements2'): 'baga genome rearrangements'
-}
 
 class CallerGATK:
     '''
@@ -820,12 +798,12 @@ class CallerGATK:
                 cmd['--genotyping_mode'] = ['DISCOVERY']
                 #'--sample_ploidy', '1',
                 cmd['--sample_ploidy'] = ['1']
-                #'--heterozygosity', '0.0001',         # 650 total SNPs prior in all samples i.e., population <== make this an argument
+                #'--heterozygosity', '0.0001',         # this is less expected diversity than the default 0.001
                 cmd['--heterozygosity'] = ['0.0001']
-                #'--indel_heterozygosity', '0.00001',  # 65 total indels prior in all samples i.e., population
-                cmd['--indel_heterozygosity'] = ['0.00001']  # 65 total indels prior in all samples i.e., population
+                #'--indel_heterozygosity', '0.00001',  # this is less expected diversity than the default 0.0001
+                cmd['--indel_heterozygosity'] = ['0.00001']
                 #'--emitRefConfidence', 'GVCF',        # make vcfs appropriate for doing GenotypeGVCFs after
-                cmd['--emitRefConfidence'] = ['GVCF']  # make vcfs appropriate for doing GenotypeGVCFs after
+                cmd['--emitRefConfidence'] = ['GVCF']
                 #'--variant_index_type', 'LINEAR',
                 cmd['--variant_index_type'] = ['LINEAR']
                 #'--variant_index_parameter', '128000',
@@ -920,8 +898,8 @@ class CallerGATK:
         cmd = {}
         cmd['-T'] = ['GenotypeGVCFs']
         cmd['-R'] = [genome_fna]
-        cmd['--heterozygosity'] = ['0.0001']        # 650 total indels prior in all samples i.e., population
-        cmd['--indel_heterozygosity'] = ['0.00001'] # 65 total indels prior in all samples i.e., population
+        cmd['--heterozygosity'] = ['0.0001']        # this is less expected diversity than the default 0.001
+        cmd['--indel_heterozygosity'] = ['0.00001'] # this is less expected diversity than the default 0.0001
         cmd['-stand_emit_conf'] = ['10']
         cmd['-stand_call_conf'] = ['20']
         cmd['-V'] = ['variants.list']
@@ -1620,7 +1598,8 @@ class Summariser:
                         by_position_freqs[replicon_id,pos1][(r,use_q)][sample] = freq,total
                     
                     try:
-                        ORFs_info = [(ORF_id,s,e,st,n) for ORF_id,(s,e,st,n) in self.replicons[replicon_id]['ORFs'].items() if s < pos1 < e]
+                        ORFs_info = [(ORF_id,s,e,st,n) for ORF_id,(s,e,st,n) in \
+                                self.replicons[replicon_id]['ORFs'].items() if s < pos1 < e]
                         if len(ORFs_info) > 1:
                             print('WARNING: variant in more than one ORF (overlapping). '\
                                     'Detailed annotations not yet implemented (marked as "multi")')
@@ -2194,7 +2173,10 @@ class Filter:
         
         self.VCF_paths = VCF_paths
         
-        self.ORF_ranges = genome.ORF_ranges
+        # for checking VCFs contain appropriate sequences and
+        # annotating CSV of filtered output
+        # ORFs, rRNAs, large elements
+        self.replicon_annotations = genome.annotations
         
         # http://www.1000genomes.org/node/101
         # FILTER filter: PASS if this position has passed all filters, i.e. a call is made at this position.
@@ -2205,7 +2187,45 @@ class Filter:
 
 
 
-    def apply_filter_by_ranges(self, variant_rows, ranges, filter_id, sample_index = False):
+    # hard coded information for known filter types
+    known_filters = {}
+    # per sample filters have custom INFO added to allow for 
+    # sample-specific per-site filtering
+
+    known_filters['rearrangements'] = {}
+    # if dict of ranges e.g. for rearrangements regions extended
+    # by no or low read depth mapping, need a list here with each
+    # INFO entry
+    known_filters['rearrangements']['string'] = [
+    '##INFO=<ID=rearrangements1,Number=.,Type=Integer,Description="FILTER: Within a region affected by rearrangements between reference genome and sample. Sample-specific. INFO field is list of base-0 indexes for failed samples in column order">',
+    '##INFO=<ID=rearrangements2,Number=.,Type=Integer,Description="FILTER: Adjacent to region affected by rearrangements between reference genome and sample and with >50% without reads mapped, i.e., absent in query or possibly insufficient mapping quality. Sample-specific. INFO field is list of base-0 indexes for failed samples in column order">']
+    known_filters['rearrangements']['per_sample'] = True
+
+    # reference genome specific filters need a conventional FILTER entry so all variants at a position are excluded
+    known_filters['genome_repeats'] = {}
+    known_filters['genome_repeats']['string'] = [
+    '##FILTER=<ID=genome_repeats,Description="Within a long repeat unit in the reference genome">'
+    ]
+    known_filters['genome_repeats']['per_sample'] = False
+
+
+    # non-BAGA filters (e.g., from GATK) that are worth knowing about
+    other_filters = {'GATK':('LowQual', 'standard_hard_filter')}
+
+    # determine order of filters to include
+
+    # GATK's LowQual and standard_hard_filter
+    short2fullnames = dict(other_filters.items())
+    short2fullnames['genome_repeats'] = ('genome_repeats',)
+    short2fullnames['rearrangements'] = ('rearrangements1', 'rearrangements2')
+    # names for table
+    filter_names = {
+                ('LowQual', 'standard_hard_filter'): "GATK standard 'hard' filter", 
+                ('genome_repeats',): 'baga reference genome repeats', 
+                ('rearrangements1', 'rearrangements2'): 'baga genome rearrangements'
+    }
+
+    def apply_filter_by_ranges(self, variant_rows, ranges, filter_id, replicon_id, sample_index = False):
         '''
         return variant VCF rows changing:
             FILTER cell if sample_index = False (applies to all samples)
@@ -2217,6 +2237,10 @@ class Filter:
         filtered = {}
         for row in variant_rows:
             cells = row.split('\t')
+            if replicon_id != cells[0]:
+                # pass through without filtering because not in same replicon (contig)
+                new_rows += [row]
+                continue
             pos1 = int(cells[1])
             filter_status = cells[6]
             info_cell = cells[7]
@@ -2269,11 +2293,12 @@ class Filter:
         '''
         Given details of one or more filter to apply, write new VCFs with variants marked
         '''
+
         all_filtered = {}
         for VCF_path in self.VCF_paths:
             all_filtered[VCF_path] = {}
             use_VCF_path = VCF_path
-            for filter_id, filter_info in filters_to_apply.items(): #break
+            for filter_id, replicons in filters_to_apply.items(): #break
                 # new VCF with suffix saved for each filter applied
                 print('Applying {} filter to variants in:\n{}'.format(filter_id, use_VCF_path))
                 header, header_section_order, colnames, variants = parseVCF(use_VCF_path)
@@ -2283,45 +2308,49 @@ class Filter:
                 these_filtered = {}
                 # filter_id = 'rearrangements'
                 # filter_info = filters_to_apply[filter_id]
-                if filter_info['per_sample']:
-                    for sample,ranges in sorted(filter_info['ranges'].items()): #break
-                        # either vcf per sample or multi-sample vcfs
-                        # try all samples in all vcfs to handle either scenario
-                        if sample in sample_order:
-                            these_filtered[sample] = {}
-                            infos_to_add = set()
-                            if isinstance(ranges, dict):
-                                # sometimes 'extended' versions of filters e.g., no or few reads adjacent to disrupted regions
-                                # add as filtername1, filtername2 etc
-                                for n,(filter_variant,these_ranges) in enumerate(sorted(ranges.items())): #break
-                                    # variants list of rows gets iteratively added to per sample
+                if self.known_filters[filter_id]['per_sample']:
+                    infos_to_add = set()
+                    for replicon_id,all_ranges in replicons.items():
+                        these_filtered[replicon_id] = {}
+                        for sample,ranges in sorted(all_ranges.items()): #break
+                            # either vcf per sample or multi-sample vcfs
+                            # try all samples in all vcfs to handle either scenario
+                            if sample in sample_order:
+                                these_filtered[replicon_id][sample] = {}
+                                if isinstance(ranges, dict):
+                                    # sometimes 'extended' versions of filters e.g., no or few reads adjacent to disrupted regions
+                                    # add as filtername1, filtername2 etc
+                                    for n,(filter_variant,these_ranges) in enumerate(sorted(ranges.items())): #break
+                                        # variants list of rows gets iteratively added to per sample
+                                        variants, filtered = self.apply_filter_by_ranges(variants, 
+                                                                                    these_ranges, 
+                                                                                    filter_id+str(n+1), 
+                                                                                    replicon_id, 
+                                                                                    sample_index = sample_order.index(sample))
+                                        
+                                        # manually check that changes were applied
+                                        #[t.split('\t')[:8] for t in variants if int(t.split('\t')[1]) in filtered]
+                                        infos_to_add.add(self.known_filters[filter_id]['string'][n])
+                                        these_filtered[replicon_id][sample][filter_id+str(n+1)] = filtered
+                                        
+                                else:
+                                    # one set of filter ranges, per sample
                                     variants, filtered = self.apply_filter_by_ranges(variants, 
-                                                                                these_ranges, 
-                                                                                filter_id+str(n+1), 
+                                                                                ranges, 
+                                                                                filter_id, 
+                                                                                replicon_id, 
                                                                                 sample_index = sample_order.index(sample))
-                                    
-                                    # manually check that changes were applied
-                                    #[t.split('\t')[:8] for t in variants if int(t.split('\t')[1]) in filtered]
-                                    infos_to_add.add(filter_info['string'][n])
-                                    these_filtered[sample][filter_id+str(n+1)] = filtered
-                                    
-                            else:
-                                # one set of filter ranges, per sample
-                                variants, filtered = self.apply_filter_by_ranges(variants, 
-                                                                            ranges, 
-                                                                            filter_id, 
-                                                                            sample_index = sample_order.index(sample))
-                                infos_to_add.add(filter_info['string'])
-                                these_filtered[sample] = filtered
-                    
+                                    infos_to_add.add(self.known_filters[filter_id]['string'])
+                                    these_filtered[replicon_id][sample] = filtered
                     # add filter info as INFO
                     header['INFO'] += list(infos_to_add)
                 else:
                     # just a single reference-genome specific filter to be applied to all samples via the FILTER property
-                    variants, filtered = self.apply_filter_by_ranges(variants, filter_info['ranges'], filter_id)
-                    # record filtered positions per sample even though determined by reference genome
-                    these_filtered = dict([(sample,filtered) for sample in sample_order])
-                    header['FILTER'] += filter_info['string']
+                    for replicon_id,all_ranges in replicons.items():
+                        variants, filtered = self.apply_filter_by_ranges(variants, all_ranges, filter_id, replicon_id)
+                        # record filtered positions per sample even though determined by reference genome
+                        these_filtered[replicon_id] = dict([(sample,filtered) for sample in sample_order])
+                        header['FILTER'] += self.known_filters[filter_id]['string']
                 
                 all_filtered[VCF_path][filter_id] = these_filtered
                 
@@ -2350,34 +2379,42 @@ class Filter:
         attribute for further analysis.
         '''
         #self.known_filters['genome_repeats']['per_sample']
+        #all_filtered[VCF_path][filter_id][replicon_id][sample]
         for VCF, filters in sorted(self.all_filtered.items()):
             print('Organising filtered variants from:\n{}'.format(VCF))
             per_sample_per_position_info = {}
-            for this_filter, info in filters.items():
-                for sample, info2 in info.items():
-                    if sample not in per_sample_per_position_info:
-                        per_sample_per_position_info[sample] = {}
-                    # if info2 dict contains dicts, a subfilter was applied
-                    # else a single main filter which needs a single iteration
-                    try:
-                        a_value = info2.values()[0]
-                    except IndexError:
-                        # could be empty though: nothing to report
-                        continue
-                    
-                    if isinstance(a_value, dict):
-                        for sub_filter, positions in info2.items():
-                            for position, (ref_char_state, sample_char_state) in positions.items():
-                                if position in per_sample_per_position_info[sample]:
-                                    per_sample_per_position_info[sample][position] += [(ref_char_state, sample_char_state, sub_filter)]
+            for this_filter, replicons in filters.items():
+                for replicon_id, samples in replicons.items():
+                    for sample, info2 in samples.items():
+                        if sample not in per_sample_per_position_info:
+                            per_sample_per_position_info[sample] = {}
+                        if replicon_id not in per_sample_per_position_info[sample]:
+                            per_sample_per_position_info[sample][replicon_id] = {}
+                        # if info2 dict contains dicts, a subfilter was applied
+                        # else a single main filter which needs a single iteration
+                        try:
+                            a_value = info2.values()[0]
+                        except IndexError:
+                            # could be empty though: nothing to report
+                            continue
+                        
+                        if isinstance(a_value, dict):
+                            for sub_filter, positions in info2.items():
+                                for position, (ref_char_state, sample_char_state) in positions.items():
+                                    if position in per_sample_per_position_info[sample][replicon_id]:
+                                        per_sample_per_position_info[sample][replicon_id][position] += \
+                                                [(ref_char_state, sample_char_state, sub_filter)]
+                                    else:
+                                        per_sample_per_position_info[sample][replicon_id][position] = \
+                                                [(ref_char_state, sample_char_state, sub_filter)]
+                        else:
+                            for position, (ref_char_state, sample_char_state) in info2.items():
+                                if position in per_sample_per_position_info[sample][replicon_id]:
+                                    per_sample_per_position_info[sample][replicon_id][position] += \
+                                            [(ref_char_state, sample_char_state, this_filter)]
                                 else:
-                                    per_sample_per_position_info[sample][position] = [(ref_char_state, sample_char_state, sub_filter)]
-                    else:
-                        for position, (ref_char_state, sample_char_state) in info2.items():
-                            if position in per_sample_per_position_info[sample]:
-                                per_sample_per_position_info[sample][position] += [(ref_char_state, sample_char_state, this_filter)]
-                            else:
-                                per_sample_per_position_info[sample][position] = [(ref_char_state, sample_char_state, this_filter)]
+                                    per_sample_per_position_info[sample][replicon_id][position] = \
+                                            [(ref_char_state, sample_char_state, this_filter)]
             
             # save for general use
             self.per_sample_per_position_info = per_sample_per_position_info
@@ -2386,26 +2423,33 @@ class Filter:
                 outfilename = VCF[:-3] + 'filtered.csv'
                 print('Writing list of filtered variants to:\n{}'.format(outfilename))
                 with open(outfilename, 'w') as fout:
-                    colnames = ['sample', 'position', 'CDS', 'reference', 'variant', 'filter']
+                    colnames = ['sample', 'replicon', 'position', 'CDS', 'reference', 'variant', 'filter']
                     fout.write(','.join(['"'+c+'"' for c in colnames])+'\n')
-                    for sample, positions in sorted(per_sample_per_position_info.items()):
-                        for position, info in sorted(positions.items()):
-                            ORFs = [ORF for ORF,(s, e, d, name) in self.ORF_ranges.items() if s < position <= e]
-                            ORFnames = []
-                            for ORF in ORFs:
-                                if len(name):
-                                    ORFnames += ['{} ({})'.format(ORF,name)]
+                    for sample, replicons in sorted(per_sample_per_position_info.items()):
+                        for replicon_id,positions in replicons.items():
+                            for position, info in sorted(positions.items()):
+                                # annotations per replicon are: ORFs, rRNAs, large elements
+                                # so just ORFs for now
+                                ORFs = [ORF for ORF,(s, e, d, name) in \
+                                        self.replicon_annotations[replicon_id][0].items() if \
+                                        s < position <= e]
+                                ORFnames = []
+                                for ORF in ORFs:
+                                    if len(name):
+                                        ORFnames += ['{} ({})'.format(ORF,name)]
+                                    else:
+                                        ORFnames += ['{}'.format(ORF)]
+                                
+                                if len(ORFnames) > 0:
+                                    ORF = '"'+','.join(ORFnames)+'"'
                                 else:
-                                    ORFnames += ['{}'.format(ORF)]
-                            
-                            if len(ORFnames) > 0:
-                                ORF = '"'+','.join(ORFnames)+'"'
-                            else:
-                                ORF = '""'
-                            
-                            for (ref_char_state, sample_char_state, this_filter) in info:
-                                row_cells = ['"'+sample+'"', str(position), ORF, '"'+ref_char_state+'"', '"'+sample_char_state+'"', '"'+this_filter+'"']
-                                fout.write(','.join(row_cells)+'\n')
+                                    ORF = '""'
+                                
+                                for (ref_char_state, sample_char_state, this_filter) in info:
+                                    row_cells = ['"'+sample+'"', '"'+replicon_id+'"', str(position), ORF, 
+                                            '"'+ref_char_state+'"', '"'+sample_char_state+'"', 
+                                            '"'+this_filter+'"']
+                                    fout.write(','.join(row_cells)+'\n')
 
 
 
@@ -2414,43 +2458,42 @@ class Filter:
         filter dict keys must be in known_filters dict below
         values are a list or dict of ranges
         '''
+
         # do some checks on provided genome and VCFs
-        genome_ids = {} # map sequence IDs to VCF files, expect length one i.e. assume they are all the same
-        genome_lengths = {}
         pattern = _re.compile('##contig=<ID=([A-Za-z0-9\._]+),length=([0-9]+)>')
+        VCF_replicon_lengths = {}
         for VCF in self.VCF_paths: #break
+            match_fails = []
+            replicons = {}
             for line in open(VCF):
-                
-                if line[:9] == '##contig=':
+                if line.startswith('##contig='):
                     try:
-                        genome_id, genome_length = _re.match(pattern, line).groups()
+                        replicon_id, replicon_length = _re.match(pattern, line).groups()
+                        replicons[replicon_id] = int(replicon_length)
+                        print(replicon_id, replicon_length)
+                        identified = True
                     except AttributeError:
+                        match_fails += [line]
                         print('Failed to parse genome information from {}'.format(line))
-                    genome_lengths[int(genome_length)] = VCF
-                    genome_ids[genome_id] = VCF
-                    print(genome_id, genome_length)
-                    identified = True
-                    break
-                
-            e = "Failed to identify which chromosome the variants in {} were called on (couldn't find '##contig=')".format(VCF)
-            assert identified, e
+            VCF_replicon_lengths[VCF] = replicons
+            print('Found {} replicons (contigs) in {}'.format(len(replicons),VCF))
+            # check len(match_fails) == 0: else raise an error and handle properly
+            assert identified, "Failed to identify which chromosome the variants in {} "\
+                    "were called on (couldn't find '##contig=')".format(VCF)
+            # check set(replicons) <= set(self.replicon_annotations)
 
-        e = 'Differing reference genome among provided VCFs? {}'.format(genome_ids.items())
-        assert len(genome_ids) == 1, e
-
-        ## is this only part that uses genome (i.e. not necessary)
-        # e = 'Genome provided ({}) does not match genome ID in provided VCFs: {}'.format(self.genome_genbank_record.id, genome_ids.keys()[0])
-        # assert self.genome_genbank_record.id == genome_ids.keys()[0], e
-        # print('Variants were called against {:,} bp genome: {}\n'.format(int(genome_length), genome_id))
-
-
+        # check all filters known about (put these in a seperate file for more convenient adding?)
         filters_to_apply = {}
-        for this_filter, ranges in filters.items():
-            try:
-                filters_to_apply[this_filter] = known_filters[this_filter]
-                filters_to_apply[this_filter]['ranges'] = ranges
-            except KeyError:
+        for this_filter, replicons in filters.items():
+            if this_filter not in self.known_filters:
                 print('Unknown filter type: {}. Choose from {}'.format(this_filter, ', '.join(known_filters) ))
+            else:
+                print('Will apply filter: {}'.format(this_filter))
+                filters_to_apply[this_filter] = replicons
+
+        if len(filters_to_apply) == 0:
+            raise LookupError('None of provided filters known . . .')
+
 
         # this loads VCF, marks variants and writes new VCF
         # could definitely streamline to get here quicker <=========
