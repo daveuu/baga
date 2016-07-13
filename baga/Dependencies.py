@@ -785,7 +785,7 @@ dependencies['mummer'] = {
     'name': 'mummer',
     'description': 'quick genome sequence alignments',
     'source': 'download',
-    'url': 'http://downloads.sourceforge.net/project/mummer/mummer/3.23/MUMmer3.23.tar.gz',
+    'url': 'http://ufpr.dl.sourceforge.net/project/mummer/mummer/3.23/MUMmer3.23.tar.gz',
     'commit': None,
     'checksum': None,
     'destination': destination_programs,
