@@ -15,7 +15,7 @@ sickle:
 cutadapt:
     source: git
     url: https://github.com/marcelm/cutadapt
-    commit: 84bd634f674e09bb0cc61a5852ff3c87e0c8dea7
+    commit: 2f3cc0717aa9ff1e0326ea6bcb36b712950d4999
 
 svgwrite:
     source: download
@@ -35,17 +35,17 @@ dendropy:
 bwa:
     source: git
     url: https://github.com/lh3/bwa.git
-    commit: 981252192272bb5c5381af84ba68207ea8b24816
+    commit: 5961611c358e480110793bbf241523a3cfac049b
 
 htslib:
     source: git
     url: https://github.com/samtools/htslib
-    commit: 1f45b1944cc5a9d9132328252c3a99aa259f4df6
+    commit: 0de7fe5472dd05dec2fb2af3663d4d2d615c356c
 
 samtools:
     source: git
     url: https://github.com/samtools/samtools
-    commit: b0525f3e74836004f522c96a26bc7e660e032de4
+    commit: 26e1ea5b4a58e7bff0fac45c821e7fd2df45261d
 
 biopython:
     source: download
@@ -54,32 +54,32 @@ biopython:
 
 picard:
     source: download
-    url: https://github.com/broadinstitute/picard/releases/download/1.135/picard-tools-1.135.zip
+    url: https://github.com/broadinstitute/picard/releases/download/2.5.0/picard-tools-2.5.0.zip
     checksum: None
 
 seq-align:
     source: git
     url: https://github.com/noporpoise/seq-align
-    commit: 2472ddd774c9d01aed0bbe34b2b64724f6f2bc07
+    commit: f4f2c71108d048f52971e702b17805f747f7c4f8
 
 pysam:
     source: download
-    url: https://pypi.python.org/packages/source/p/pysam/pysam-0.8.3.tar.gz
-    checksum: md5=b1ae2a8ec3c6d20be30b2bc1aa995bbf
+    url: https://pypi.python.org/packages/e7/e9/db49c8bd39673c1f48200f69ccc34784016d664136f36e03a090411a95fc/pysam-0.9.1.3.tar.gz
+    checksum: md5=dacdca5afccb3da7838561462ec25d29
 
 clonalframeml:
     source: git
     url: https://github.com/xavierdidelot/clonalframeml
-    commit: 2d793a36f5160e311a6d15f18bf5cf89360d5e70
+    commit: 9488a801b4a6c07515d4160bf55bc7539b1b92ea
 
 phyml:
     source: git
     url: https://github.com/stephaneguindon/phyml
-    commit: e71c55362c32f9fca07b9c2f2288dc05699fed41
+    commit: 65288cdf235232d295804e0d5fcba25db5c4589b
 
 spades:
     source: download
-    url: http://spades.bioinf.spbau.ru/release3.6.1/SPAdes-3.6.1-Linux.tar.gz
+    url: http://spades.bioinf.spbau.ru/release3.8.2/SPAdes-3.8.2-Linux.tar.gz
     checksum: None
 
 discosnp:
@@ -90,4 +90,9 @@ discosnp:
 gemsim:
     source: download
     url: http://downloads.sourceforge.net/project/gemsim/GemSIM_v1.6.tar.gz
+    checksum: None
+
+mummer:
+    source: download
+    url: http://ufpr.dl.sourceforge.net/project/mummer/mummer/3.23/MUMmer3.23.tar.gz
     checksum: None
