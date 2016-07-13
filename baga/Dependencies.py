@@ -259,16 +259,27 @@ def chmod_xr(pattern):
 
 
 
-
-def prep_simple_make(path = False, configure = False, alt_command = False):
+## work out how to use **kwargs properly here:
+## using unnamed kw arg would raise undefined error?
+def prep_simple_make(path = False, pre_configure = False, configure = False, post_configure = False):
+    '''compile a C program via traditional ./configure; make
+    
+    Use pre_configure to provide a list of strings to run a script 
+    before ./configure e.g. ./autogen.sh
+    Use post_configure to provide a list of strings to run a script 
+    between ./configure and make
+    '''
     if path:
         _os.chdir(_os.path.sep.join(path))
+    
+    if pre_configure:
+        _subprocess.call(pre_configure)
     
     if configure:
         _subprocess.call(['./configure'])
     
-    if alt_command:
-        _subprocess.call([alt_command])
+    if post_configure:
+        _subprocess.call(post_configure)
     else:
         _subprocess.call(['make'])
     
@@ -637,8 +648,11 @@ dependencies['picard'] = {
     'destination': destination_programs,
     'preparation': None,
     'checker': {'function': check_no_error,
-                'arguments': {'java_commands': ['-Xmx5g', '-jar', _os.path.sep.join(['external_programs','picard-tools-1.135','picard.jar']), 'MarkDuplicates', '--version']}}
+                'arguments': {'java_commands': ['-Xmx5g', '-jar', 
+                        _os.path.sep.join(['external_programs','picard-tools-1.135','picard.jar']), 
+                        'MarkDuplicates', '--version']}}
     }
+
 
 dependencies['seq-align'] = {
     'name': 'seq-align',
@@ -699,7 +713,8 @@ dependencies['phyml'] = {
     'checksum': None,
     'destination': destination_programs,
     'preparation': [{'function': prep_simple_make,
-                'arguments': {'path': [], 'configure': True, 'alt_command': './confphy'}}],
+                'arguments': {'path': [], 'pre_configure': ['./autogen.sh'], 
+                        'configure': True}}],
     'checker': {'function': check_no_error,
                 'arguments': {'path': ['phyml', 'src', 'phyml'], 'extra': ['--version']}}
     }

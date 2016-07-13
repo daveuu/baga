@@ -1428,6 +1428,15 @@ if args.subparser == 'Dependencies':
                                 '{} => {}'.format(use_versions_file,external_name,key))
         if updated:
             print('Used {} for version information'.format(os.path.abspath(use_versions_file)))
+            # update checker exe path from download url where needed
+            # this is clunky
+            new_exe = Dependencies.dependencies['picard']['url'].split('/')[-1][:-4]
+            Dependencies.dependencies['picard']['checker']['arguments']['java_commands'][2] = \
+                    os.path.sep.join(['external_programs', new_exe, 'picard.jar'])
+            new_exe = Dependencies.dependencies['spades']['url'].split('/')[-1][:-7]
+            Dependencies.dependencies['spades']['checker']['arguments']['path'][0] = new_exe
+            new_exe = Dependencies.dependencies['mummer']['url'].split('/')[-1][:-7]
+            Dependencies.dependencies['mummer']['checker']['arguments']['path'][0] = new_exe
     
     def get(name):
         if Dependencies.dependencies[name]['source'] == 'git':
