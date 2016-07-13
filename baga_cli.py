@@ -416,7 +416,6 @@ mutually_exclusive_group.add_argument("-r", "--reads_download",
 
 
 
-
 mutually_exclusive_group.add_argument("-R", "--reads_path", 
     help="path to local short reads in fastq files for analysis. All read files will be collcted. Alternatively, a pattern containing '*' '?' and other shell expansion characters or an explicit list of read files can also be supplied.", 
     type = str,
@@ -2550,7 +2549,9 @@ if task_name == 'Structure':
             
         else:
             try:
-                baga_filenames = dict([(tuple([sample, use_name_genome]),'baga.Structure.CheckerInfo-{}__{}.baga'.format(sample, use_name_genome)) for sample in sample_names])
+                baga_filenames = dict([(tuple([sample, use_name_genome]),
+                        'baga.Structure.CheckerInfo-{}__{}.baga'.format(sample, use_name_genome)) \
+                        for sample in sample_names])
             except NameError:
                 print('need --checkinfos_path or --reads_name')
                 sys.exit(1)
@@ -2585,14 +2586,32 @@ if task_name == 'Structure':
             
             print('Writing to {}'.format(foutname))
             with open(foutname, 'w') as fout:
-                fout.write('"chromosome","sample","filter","start","end"\n')
+                fout.write('"genome","chromosome","sample","filter","start","end"\n')
                 for (sample, genome_name), info in sorted(checker_info.items()):
                     print('Writing out {} regions'.format(sample))
-                    for start, end in info['suspect_regions']['rearrangements']:
-                        fout.write('"{}","{}","rearrangements1",{},{}\n'.format(genome_name, sample, start, end))
-                    for start, end in info['suspect_regions']['rearrangements_extended']:
-                        fout.write('"{}","{}","rearrangements2",{},{}\n'.format(genome_name, sample, start, end))
+                    for replicon_id, ranges in info['suspect_regions']['rearrangements'].items():
+                        for start, end in ranges:
+                            fout.write('"{}","{}","rearrangements1",{},{}\n'\
+                                    ''.format(genome_name, replicon_id, sample, start, end))
+                        t = len(ranges)
+                        s = sum([(e - s) for s,e in ranges])
+                        print('  in replicon (or contig) {}, {} regions spanning {:,} basepairs '\
+                                'are affected by rearrangements thus having ambiguous 1:1 '\
+                                'orthology.'.format(replicon_id, t, s))
+                    for replicon_id, ranges in info['suspect_regions']['rearrangements_extended'].items():
+                        for start, end in ranges:
+                            fout.write('"{}","{}","rearrangements2",{},{}\n'\
+                                    ''.format(genome_name, replicon_id, sample, start, end))
+                        t = len(ranges)
+                        s = sum([(e - s) for s,e in ranges])
+                        print('  in replicon (or contig) {}, {} additional regions spanning {:,} '\
+                                'basepairs are adjacent to the above regions but have a >50% zero '\
+                                'read depth over a moving window (i.e., any aligned reads have a '\
+                                'patchy distribution, are usually rare). These are typically large '\
+                                'deletions including missing prophage and genomic islands\n'\
+                                ''.format(replicon_id, t, s))
         
+        # probably better in a .do_collect() method in the module
         if args.collect or args.collect_ranges:
             use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
             assert all([use_path_genome,use_name_genome]), 'Could not locate genome given: {}'.format(args.genome_name)
