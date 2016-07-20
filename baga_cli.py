@@ -2271,8 +2271,9 @@ if task_name == 'Repeats':
 if task_name == 'Structure':
     print('\n-- Chromosome sequence rearrangement detection module --')
     # configure logger for this Task
-    task_logger, task_log_folder = configureLogger(use_sample_name, main_log_filename, 
-            verbosities[args.verbosity], logger_name = task_name)
+    task_logger, task_log_folder = configureLogger(use_sample_name, 
+            main_log_filename, verbosities[args.verbosity], 
+            logger_name = task_name)
     import baga
     from baga import Structure
     from baga import CollectData
@@ -2301,7 +2302,11 @@ if task_name == 'Structure':
             alignments = AlignReads.SAMs(sample_name = alns_name, 
                     inherit_from = 'self')
             
-            e = 'the reads for "--reads_name/-n {}" seem to not have been fully processed by the AlignReads module: they are missing the "ready_BAMs" attribute. Please ensure the AlignReads commands "--align --deduplicate --indelrealign" have been performed.'.format(args.reads_name)
+            e = 'the reads for "--reads_name/-n {}" seem to not have been '\
+                    'fully processed by the AlignReads module: they are '\
+                    'missing the "ready_BAMs" attribute. Please ensure the '\
+                    'AlignReads commands "--align --deduplicate --indelrealign" '\
+                    'have been performed.'.format(args.reads_name)
             assert hasattr(alignments, 'ready_BAMs'), e
             ### shouldn't all BAMs have headers parsed and stored in dict with (sample,genome) from the start?
             BAMs = alignments.ready_BAMs[-1]
@@ -2372,22 +2377,19 @@ if task_name == 'Structure':
             checkers = Structure.checkStructure(BAMs, min_mapping_quality = 5, 
                     smoothed_resolution = 10, 
                     ratio_threshold = args.ratio_threshold, 
-                    genome_name = use_name_genome)
+                    genome_name = use_name_genome, force = args.force, 
+                    task_name = task_name, 
+                    console_verbosity_lvl = verbosities[args.verbosity], 
+                    log_folder = task_log_folder
+                    )
             
+            # regarding pipelined inheritance of saved states:
             # this would be a new style object . . BUT should be able to use inherit_from = 'AlignReads.Aligner'
             # that would make CLI much simpler . . . or should 'AlignReads.Aligner' be a 
             # default to be over-ridden by 'self'?
             
             # would also need to be more OO with a do function callable from here . .
             # each do() should have a good doc string describing the order and why
-            
-            # checkers = Structure.checkStructure(sample_name = alns_name, 
-                    # BAMs, min_mapping_quality = 5, 
-                    # smoothed_resolution = 10, 
-                    # ratio_threshold = args.ratio_threshold,
-                    # task_name = task_name, 
-                    # console_verbosity_lvl = verbosities[args.verbosity],
-                    # log_folder = task_log_folder)
         
         if args.plot or args.plot_range:
             if args.plot_range:
@@ -2503,10 +2505,13 @@ if task_name == 'Structure':
             # in case full filename provided
             use_name_group = args.reads_name.replace('baga.AlignReads.SAMs-', '' , 1).replace('.p.gz', '').replace('.baga', '')
             
+            ## this was already done above <== need to refactor this whole section
             baga_file = 'baga.AlignReads.SAMs-{}__{}.baga'.format(use_name_group, use_name_genome)
             print('Loading alignments information for: {} aligned to {} from {} output'.format(use_name_group, use_name_genome, baga_file))
             from baga import AlignReads
-            alignments = AlignReads.SAMs(baga = baga_file)
+            alns_name = '{}__{}'.format(use_name_group, use_name_genome)
+            alignments = AlignReads.SAMs(sample_name = alns_name, 
+                    inherit_from = 'self')
             sample_names = sorted(alignments.read_files)
         
         if args.include_samples and args.reads_name:

@@ -36,12 +36,12 @@ from baga import _StringIO
 from baga import _json
 from baga import _subprocess
 from baga import _sys
+from baga import _logging
 
 from glob import glob as _glob
 from array import array as _array
 import operator as _operator
 import time as _time
-from itertools import izip as _izip
 import string as _string
 
 # external Python modules
@@ -52,10 +52,18 @@ from Bio.SeqRecord import SeqRecord as _SeqRecord
 
 from baga import report_time as _report_time
 from baga import get_exe_path as _get_exe_path
+
+from baga import MetaSample as _MetaSample
+from baga import PROGRESS
 from baga import PY3 as _PY3
 
 from baga import load as _load
 from baga import save as _save
+
+if _PY3:
+    _zip = zip
+else:
+    from itertools import izip as _zip
 
 def main():
     pass
@@ -133,46 +141,99 @@ def checkStructure(BAMs,
                    smoothed_window = False,
                    ratio_threshold = 0.15,
                    genome_name = False,
-                   use_existing_bam_indexes = False):
+                   use_existing_bam_indexes = False,
+                   force = False,
+                   # if part of a pipeline with existing logger:
+                   task_name = False,
+                   console_verbosity_lvl = False,
+                   log_folder = False):
     '''
     check for structural rearrangements . . .
     smoothed_window defaults to half of estimated fragment length
     '''
+
+    # this is a module level function calling other objects from module
+
+    module_name = __name__
+    # pass log_folder on to objects.__init__()
+    # also console_verbosity_lvl but not sure when used <== missing .set_verbosity bug? <==
+    # analysis_path needed?
+
+    if task_name:
+        # if this has been called via the CLI it is part of a task
+        logger = _logging.getLogger(task_name)
+        # need to add adaptor after getting (handlers etc are retained from configureLogger)
+        # in this namespace logger is the adaptor but not beyond
+        logger = _logging.LoggerAdapter(logger, {'task': task_name})
+    else:
+        # else conform to conventional Python logging and use module name
+        logger = _logging.getLogger(module_name)
+
+
     # instantiate Structure Checkers
     checkers = {}
     for BAM in BAMs:
+        # ensure are indexed
         indexfile = _os.path.extsep.join([BAM,'bai'])
         if not use_existing_bam_indexes or \
                 not(_os.path.exists(indexfile) and \
                 _os.path.getsize(indexfile) > 0):
             # always re-index in case data has changed
             # unless explicitly told not to
-            print('indexing {}'.format(BAM))
+            logger.info('indexing {}'.format(BAM))
             fail = False
             try:
-                print('Using pySAM')
+                logger.debug('Using pySAM')
                 _pysam.index(BAM)
             except TypeError as e:
                 fail = True
-                print("pysam didn't like something about this bam: {}".format(e))
+                logger.debug("pysam didn't like something about this bam: {}"\
+                        "".format(e))
             except IOError as e:
                 fail = True
-                print("pysam didn't like something about this bam: {}".format(e))
+                logger.debug("pysam didn't like something about this bam: {}"\
+                        "".format(e))
             if fail:
                 path_to_exe = _get_exe_path('samtools')
-                print("Trying '{} index {}' instead.".format(path_to_exe,BAM))
+                logger.debug("Trying '{} index {}' instead."\
+                        "".format(path_to_exe,BAM))
                 try:
-                    print('Attempting to use SAMTools to index: {}'.format(BAM))
-                    proc = _subprocess.Popen([path_to_exe,'index',BAM], stdout=_subprocess.PIPE, stderr=_subprocess.PIPE)
+                    logger.debug('Attempting to use SAMTools to index: {}'\
+                            ''.format(BAM))
+                    proc = _subprocess.Popen([path_to_exe,'index',BAM], 
+                            stdout=_subprocess.PIPE, stderr=_subprocess.PIPE)
                     stdout,stderr = proc.communicate()
                 except OSError as e:
-                    raise OSError("pysam and samtools didn't like something about "\
-                            "this bam: {}".format(e))
+                    raise OSError("pysam and samtools didn't like something "\
+                            "about this bam: {}".format(e))
                 if 'fail to open' in stderr:
-                    raise OSError("pysam and samtools didn't like something about "\
-                            "this bam: {}".format(stderr))
+                    raise OSError("pysam and samtools didn't like something "\
+                            "about this bam: {}".format(stderr))
         
-        this_checker = Checker(BAM, genome_name)
+        # path_to_bam = False, genome_name = False, 
+        # sample_name = False, inherit_from
+        #import pdb ; pdb.set_trace()
+        
+        if not force:
+            # first attempt to resurrect a previous checker that might have read <== how will this fail?
+            # coverage depths etc. recorded
+            reads = _pysam.Samfile(BAM, 'rb')
+            # baga only compatible with one reads group per bam currently
+            reads_name = reads.header['RG'][0]['ID']
+            sample_name = '{}__{}'.format(reads_name, genome_name)
+            logger.info('Reloading from previous analysis: "{}"'.format(sample_name))
+            this_checker = Checker(sample_name = sample_name, 
+                    task_name = task_name, 
+                    console_verbosity_lvl = console_verbosity_lvl, 
+                    log_folder = log_folder, inherit_from = 'self')
+            #import pdb; pdb.set_trace()
+        else:
+            logger.info('Starting new analysis of "{}" with "{}"'\
+                    ''.format(BAM, genome_name))
+            this_checker = Checker(path_to_bam = BAM, genome_name = genome_name, 
+                    task_name = task_name, 
+                    console_verbosity_lvl = console_verbosity_lvl, 
+                    log_folder = log_folder)
         checkers[this_checker.reads_name] = this_checker
 
     # mapped read pair inclusion:
@@ -182,41 +243,34 @@ def checkStructure(BAMs,
 
     start_time = _time.time()
     for cnum,(sample,checker) in enumerate(sorted(checkers.items())):
-        print('Collecting coverage for {} reads aligned to {}'\
-                ''.format(sample, ', '.join(checker.genome_lengths)))
+        logger.info('Collecting coverage for {} reads aligned to {}'\
+                ''.format(sample, ', '.join(sorted(checker.genome_lengths))))
         # depth collection resolution impacts downstream resolutions
         # i.e., 1 in 10 here plus 1 in 10 smoothed ratio == 1 in 100 considered
         depth_resolution = 10
         checker.getCoverageDepths(min_mapping_quality = min_mapping_quality, 
-                resolution = depth_resolution)
+                resolution = depth_resolution, force = force)
         
-        # save for plotting
-        checker.depth_resolution = depth_resolution
-        
-        print('Calculating mean insert size for {} reads aligned to {}'\
-                ''.format(sample, ', '.join(checker.genome_lengths)))
-        checker.getMeanInsertSize()
+        logger.info('Calculating mean insert size for {} reads aligned to {}'\
+                ''.format(sample, ', '.join(sorted(checker.genome_lengths))))
+        checker.getMeanInsertSize(force = force)
         if checker.mean_insert_size == -1:
-            print('Skipping: no aligned pairs found')
+            logger.info('Skipping: no aligned pairs found')
             continue
-        print('mean insert size == {:.1f}'.format(checker.mean_insert_size))
-        
-        print('Collecting non-proper : proper pair ratios for {} reads aligned to {}'\
-                ''.format(sample, ', '.join(checker.genome_lengths)))
-        checker.getProperRatios()
-        
-        print('Calculating smoothed ratios for {} reads aligned to {}'\
-                ''.format(sample, ', '.join(checker.genome_lengths)))
+        logger.info('mean insert size == {:.1f}'.format(checker.mean_insert_size))
+        logger.info('Collecting non-proper : proper pair ratios for {} reads aligned to {}'\
+                ''.format(sample, ', '.join(sorted(checker.genome_lengths))))
+        checker.getProperRatios(force = force)
+        logger.info('Calculating smoothed ratios for {} reads aligned to {}'\
+                ''.format(sample, ', '.join(sorted(checker.genome_lengths))))
         
         if not smoothed_window:
             # window for smoothing here is half estimated mean fragment length
             use_smoothed_window = int(round(checker.mean_insert_size)/2.0)
         else:
             use_smoothed_window = smoothed_window
-        
         checker.getSmoothedRatios(window = use_smoothed_window, 
                 resolution = smoothed_resolution)
-        
         
         ## apparently not used?
         # omit zero depths and zero/infinite ratios for mean (~ omit NAs)
@@ -243,7 +297,7 @@ def checkStructure(BAMs,
         for chrm_name,suspect_regions in checker.suspect_regions[filter_name].items():
             t = len(suspect_regions)
             s = sum([(e - s) for s,e in suspect_regions])
-            print('For {} in sequence {} at threshold {} {}, '\
+            logger.info('For {} in sequence {} at threshold {} {}, '\
                     'excludes {} regions spanning {:,} basepairs'\
                     ''.format(sample, chrm_name, test, checker.threshold, t, s))
         
@@ -253,29 +307,15 @@ def checkStructure(BAMs,
         filter_to_extend = 'rearrangements'
         # this was set to less than 0.5 because certain regions with read mapping gaps were 
         # not collected that were between two close disrupted regions
-        checker.extend_regions(filter_name, filter_to_extend, resolution = smoothed_resolution, threshold = 0.15)
+        checker.extend_regions(filter_name, filter_to_extend, 
+                resolution = smoothed_resolution, threshold = 0.15)
         for chrm_name,suspect_regions in checker.suspect_regions[filter_name].items():
             t = len(suspect_regions)
             s = sum([(e - s) for s,e in suspect_regions])
-            print('For {} in sequence {} between high non-proper proportions, '\
+            logger.info('For {} in sequence {} between high non-proper proportions, '\
                     'excludes {} regions spanning {:,} basepairs'.format(sample, 
                     chrm_name, t, s))
         
-        #### FIXME
-        ## prepare to save checker info
-        # save dicts, floats, strings and arrays for plotting later
-        #fileout = 'baga.Structure.CheckerInfo-{}__{}.baga'.format(checker.reads_name, checker.genome_name)
-        #_save(checker.__dict__, fileout)
-        #checker.saveLocal()
-        # this bit needs fixing to handle non-baga BAMs <==== for when proper MetaSample used
-        # filename = checker.reads.filename.split(_os.path.sep)[-1]
-        # name = _os.path.extsep.join(filename.split(_os.path.extsep)[:-1])
-        # if sample == name:
-            # # per BAM sample name not known (non-baga prepared BAMs)
-            # # so just use filename
-            # checker.saveLocal(sample)
-        # else:
-            # # sample and reference genome know (in baga pipeline)
         checker.saveLocal()
         
         # report durations, time left etc
@@ -283,7 +323,7 @@ def checkStructure(BAMs,
 
     return(checkers)
 
-class Checker:
+class Checker(_MetaSample):
     '''
     The Checker class of the Structure module contains a method to check for 
     structural rearrangements between a reference genome sequence and a query 
@@ -292,28 +332,55 @@ class Checker:
     that were assigned to proper pairs by Burrows-Wheeler Aligner (BWA).
     '''
 
-    def __init__(self, path_to_bam, genome_name = False):
+    def __init__(self, path_to_bam = False, genome_name = False, 
+            sample_name = False, inherit_from = False, **kwargs):
         '''
-        A structure checker object must be instantiated with:
+        A structure checker object must be instantiated with either:
+           
+           sample_name of form <read group name>__<genome name>
+           inferit_from = 'self'
+        
+        for restoring a previous analysis, or to start a new one from an existing 
+        sorted BAM file: 
+           
+           path_to_bam
+           genome_name
+        '''
+        module_name = __name__
+        
+        # argument combination options must be exclusive or for
+        # A: start new analysis
+        # b: load previous analysis
+        option_A = ((path_to_bam and genome_name) and \
+                not(sample_name and inherit_from))
+        option_B = (not(path_to_bam and genome_name) and \
+                (sample_name and inherit_from))
+        if (option_A and option_B) or \
+                (not(option_A) and not(option_B)):
+            raise Exception('supply path_to_bam and genome_name or sample_name '\
+                    'and inherit_from')
+        
+        if path_to_bam and genome_name:
+            # this is not logged until super() so exceptions should be sent up to
+            # CLI or whatever is calling module
+            self.path_to_bam = path_to_bam
+            self.reads = _pysam.Samfile(path_to_bam, 'rb')
+            # baga only compatible with one reads group per bam currently
+            self.reads_name = self.reads.header['RG'][0]['ID']
+            sample_name = '{}__{}'.format(self.reads_name, genome_name)
+            super(Checker, self).__init__(sample_name, module_name, 
+                    inherit_from = inherit_from, **kwargs)
             
-            - path to a sorted bam file containing short paired end reads aligned 
-        to the genome (e.g. via Reads and SAMs classes in CallVariants module)
-        '''
-        
-        e = 'Could not find %s.\nPlease ensure all BAM files exist'
-        assert _os.path.exists(path_to_bam), e % path_to_bam
-        
-        self.reads = _pysam.Samfile(path_to_bam, 'rb')
-        # to retain crucial info without needing an open Samfile
-        self.genome_lengths = {}
-        for chrm_name,length in zip(self.reads.references, self.reads.lengths):
-            self.genome_lengths[chrm_name] = length
-        
-        # baga only compatible with one reads group per bam currently
-        self.reads_name = self.reads.header['RG'][0]['ID']
-        self.genome_name = genome_name
-
-
+            # to retain crucial info without needing an open Samfile
+            self.genome_lengths = {}
+            for chrm_name,length in zip(self.reads.references, self.reads.lengths):
+                self.genome_lengths[chrm_name] = length
+            
+            self.genome_name = genome_name
+            
+        elif inherit_from == 'self':
+            super(Checker, self).__init__(sample_name, module_name, 
+                    inherit_from = inherit_from, **kwargs)
 
     def regionProperProportion(self, start, end):
         '''of all fragments with at least two reads, what proportion does BWA consider "proper"?'''
@@ -328,46 +395,95 @@ class Checker:
                 else:
                     both_mapped_notproper.add(r.query_name)
 
-        proportion = float(len(both_mapped_proper))/ (len(both_mapped_proper)+len(both_mapped_notproper))
+        proportion = float(len(both_mapped_proper)) / \
+                (len(both_mapped_proper)+len(both_mapped_notproper))
         #print('%s / %s = %.03f' % (len(both_mapped_proper), (len(both_mapped_proper)+len(both_mapped_notproper)), proportion))
         return(proportion)
 
     def getCoverageDepths(self, resolution = 10, 
                                 min_mapping_quality = 30, 
-                                load = True, 
-                                save = True):
+                                force = False):
         '''
         collect per position along genome, aligned read coverage depth that pass a 
         quality standard and those that BWA considers additionally to be in a 
         "proper" pair.
         '''
 
-
-
-        found_depths = False
-        if load:
-            use_name = _os.path.extsep.join(self.reads.filename.split(_os.path.extsep)[:-1])
-            use_name = use_name + '_depths'
-            filein = '{}.baga'.format(use_name)
+        have_totals = []
+        have_propers = []
+        # check if needed data is present
+        if not force:
             try:
-                metadata = _load(filein)
-                for name,content in metadata.items():
-                    # set as attributes
-                    setattr(self, name, content)
-                print("Found and loaded previously scanned coverage depths from {} which saves time!".format(filein))
-                found_depths = True
-            except (IOError, _tarfile.ReadError):
-                print("Couldn't find previously scanned coverages at {}".format(filein))
+                for seq_name,length in sorted(self.genome_lengths.items()):
+                    if type(self.depths_totals[seq_name]) is _array and \
+                            len(self.depths_totals[seq_name]) == \
+                            int(length / self.depth_resolution) + 1:
+                        have_totals += [True]
+                        self.logger.info('Found total read depths for {} '\
+                                'against {} from previous analysis'.format(
+                                self.path_to_bam, seq_name))
+            except (AttributeError, KeyError) as e:
+                self.logger.debug('Could not find total read depths for {} '\
+                        'against {} from a previous analysis: "{}"'.format(
+                        self.path_to_bam, seq_name, e.message))
+                pass
+            
+            # correct looking data found for all sequences?
+            if len(have_totals):
+                have_totals = all(have_totals)
+            else:
+                have_totals = False
+            
+            try:
+                for seq_name,length in sorted(self.genome_lengths.items()):
+                    if type(self.depths_propers[seq_name]) is _array and \
+                            len(self.depths_propers[seq_name]) == \
+                            int(length / self.depth_resolution) + 1:
+                        have_propers += [True]
+                        self.logger.info('Found proper-paired read depths for {} '\
+                                'against {} from previous analysis'.format(
+                                self.path_to_bam, seq_name))
+            except (AttributeError, KeyError) as e:
+                self.logger.debug('Could not find proper-paired read depths for '\
+                        '{} against {} from a previous analysis: "{}"'.format(
+                        self.path_to_bam, seq_name, e.message))
+                pass
+            
+            # correct looking data found for all sequences?
+            if len(have_propers):
+                have_propers = all(have_propers)
+            else:
+                have_propers = False
 
-        if not found_depths:
+
+        # check if need access to reads
+        if (not all([have_totals, have_propers])) and not hasattr(self, 'reads'):
+            try:
+                self.reads = _pysam.Samfile(self.path_to_bam, 'rb')
+            except AttributeError:
+                raise Exception('Problems restoring data from disk, please '\
+                        're-run with the force option')
+
+        if not hasattr(self, 'depth_totals'):
             self.depths_totals = {}
+
+        if not hasattr(self, 'depths_propers'):
             self.depths_propers = {}
-            for h,header in enumerate(self.reads.header['SQ']):
-                print('Scanning {} in {}'.format(self.reads.references[h], use_name))
+
+        if force or not (have_totals and have_propers):
+            if force and (have_totals or have_propers):
+                self.logger.info('Recalculating read coverage depths '\
+                        'because force is True')
+            for h,header in enumerate(sorted(self.reads.header['SQ'])):
                 num_ref_positions = header['LN']
-                depth_total = _array('i', (0,) * (int(num_ref_positions / resolution) + 1))
-                depth_proper = _array('i', (0,) * (int(num_ref_positions / resolution) + 1))
-                pl_iter = self.reads.pileup( self.reads.references[h] )
+                seq_name = header['SN']
+                self.logger.info('Scanning {} in {} for read coverage depths'\
+                        ''.format(seq_name, self.genome_name))
+                depth_total = _array('i', (0,) * \
+                        (int(num_ref_positions / resolution) + 1))
+                depth_proper = _array('i', (0,) * \
+                        (int(num_ref_positions / resolution) + 1))
+                pl_iter = self.reads.pileup( seq_name )
                 for x in pl_iter:
                     # Coordinates in pysam are always 0-based.
                     # SAM text files use 1-based coordinates.
@@ -390,57 +506,31 @@ class Checker:
                         pos_in_arrays = x.pos / resolution
                         depth_total[pos_in_arrays] = read_count_non_dup
                         depth_proper[pos_in_arrays] = read_count_proper_pair
-            
-            self.depths_totals[self.reads.references[h]] = depth_total
-            self.depths_propers[self.reads.references[h]] = depth_proper
-
-        if save and not found_depths:
-            use_name = _os.path.extsep.join(self.reads.filename.split(_os.path.extsep)[:-1])
-            use_name = use_name + '_depths'
-            fileout = '{}.baga'.format(use_name)
-            try:
-                print("Saving scanned coverage depths at {} to save time if reanalysing".format(fileout))
-                _save(self,fileout)
-            except (IOError, AttributeError):
-                ## save not working . . .
-                print("Attempt to save scanned coverage depths at {} failed . . .".format(fileout))
+                
+                self.depths_totals[seq_name] = depth_total
+                self.depths_propers[seq_name] = depth_proper
+                # needed for plotting
+                self.depth_resolution = resolution
 
 
     def getMeanInsertSize(self, upper_limit = 10000, 
                                 min_mapping_quality = 30, 
-                                load = False, 
-                                save = False):
+                                force = False):
         '''
         omits pairs at either end of sequence break point of 
         circular chromosome (by ampplying an upper limit) that 
         would cause a few chromosome length insert sizes.
         '''
-        use_name = _os.path.extsep.join(self.reads.filename.split(_os.path.extsep)[:-1])
-        use_name = use_name + '_mean_insert_size'
-        filein = '{}.baga'.format(use_name)
 
-        ## load.save not working
-        if load:
-            try:
-                mean_insert_size = float(open(filein).read())
-                loaded_from_file = True
-                print('Loaded insert size from {}'.format(filein))
-            except ValueError:
-                mean_insert_size = False
-                loaded_from_file = False
-                pass
-            except IOError:
-                mean_insert_size = False
-                loaded_from_file = False
-                pass
-        else:
-            mean_insert_size = False
-            loaded_from_file = False
-
-        if not mean_insert_size:
-            print('Calculating mean insert size from BAM file . . .')
+        if force or not hasattr(self, 'mean_insert_size'):
+            if hasattr(self, 'mean_insert_size'):
+                self.logger.debug('Recalculating mean insert size from BAM '\
+                        'file because --force specified . . .')
+            else:
+                self.logger.debug('Calculating mean insert size from BAM '\
+                        'file . . .')
             isizes = _array('i')
-            for ref in self.reads.references:
+            for ref in sorted(self.reads.references):
                 alignment = self.reads.fetch(ref)
                 for read in alignment:
                     if read.is_proper_pair and \
@@ -456,25 +546,29 @@ class Checker:
             try:
                 mean_insert_size = sum(isizes) / float(len(isizes))
             except ZeroDivisionError:
-                print('No paired, aligned reads found in {}'.format(self.reads.filename))
-                print('Structure analysis for rearrangements is not possible')
+                self.logger.warning('No paired, aligned reads found in {}'\
+                        ''.format(self.reads.filename))
+                self.logger.warning('Structure analysis for rearrangements is '\
+                        'not possible')
                 mean_insert_size = -1
+                # raise exception?
             
-        elif mean_insert_size == -1:
-            print('Previously, no paired, aligned reads found in {}'.format(self.reads.filename))
-            print('Structure analysis for rearrangements is not possible')
+            self.mean_insert_size = mean_insert_size
+            
+        elif hasattr(self, 'mean_insert_size'):
+            if self.mean_insert_size == -1:
+                self.logger.warning('Previously, no paired, aligned reads '\
+                        'found in {}'.format(self.reads.filename))
+                self.logger.warning('Structure analysis for rearrangements is '\
+                        'not possible')
+                # raise exception?
+            else:
+                self.logger.debug('Mean read pair insertsize found '\
+                        'from previous analysis: use --force to recalculate')
 
 
-        if save and not loaded_from_file:
-            try:
-                open(filein, 'w').write(str(mean_insert_size))
-            except IOError:
-                print('Could not save mean insert size to {}'.format(mean_insert_size))
 
-        self.mean_insert_size = mean_insert_size
-
-
-    def getProperRatios(self, include_zeros = False):
+    def getProperRatios(self, include_zeros = False, force = False):
         '''
         Calculates ratios non-proper pair to proper pair per position. Optionally 
         including regions with zero depths as zero ratio, defaults to excluding.
@@ -486,41 +580,50 @@ class Checker:
 
         # currently appending
         #a, b, c = 0, 0, 0
-        ratios = {}
-        for name in self.depths_totals:
-            these_ratios = _array('f')
-            for total, proper in _izip(self.depths_totals[name], self.depths_propers[name]):
-                if total >= proper > 0:
-                    #a += 1
-                    # both total aligned and proper pairs positive (present) and at least some nonpropers
-                    # typically proper > nonproper, ratio 0.1-0.3
-                    # as total non-proper approaches proper pairs, 
-                    # within an insert length of disturbance,
-                    # ratio approaches 1 (50:50 nonproper:proper)
-                    # all proper, ratio == 0
-                    these_ratios.append((total - proper) / float(proper))
-                elif total > proper == 0:
-                    #b += 1
-                    # no proper, set upper limit of ratio == total reads
-                    # not important here because we are interested exceeding a 
-                    # threshold of relatively many non-proper pair reads which this
-                    # would.
-                    these_ratios.append(total)
-                else:
-                    #c += 1
-                    # total == proper == 0
-                    # zero aligned reads
-                    # avoid zero division and distinguish from all proper pairs i.e., 0 / 100 == 0
-                    these_ratios.append(-1)
-            ratios[name] = these_ratios
 
-        #print(a,b,c)
-        self.ratios = ratios
+        if force or not hasattr(self, 'ratios'):
+            if hasattr(self, 'ratios'):
+                self.logger.debug('Recalculating proper-paired to total read '\
+                        'depths ratios because --force specified.')
+            else:
+                self.logger.debug('Calculating proper-paired to total read '\
+                        'depths ratios.')
+            ratios = {}
+            for seq_name in self.depths_totals:
+                these_ratios = _array('f')
+                for total, proper in _zip(self.depths_totals[seq_name], 
+                        self.depths_propers[seq_name]):
+                    if total >= proper > 0:
+                        #a += 1
+                        # both total aligned and proper pairs positive (present) and at least some nonpropers
+                        # typically proper > nonproper, ratio 0.1-0.3
+                        # as total non-proper approaches proper pairs, 
+                        # within an insert length of disturbance,
+                        # ratio approaches 1 (50:50 nonproper:proper)
+                        # all proper, ratio == 0
+                        these_ratios.append((total - proper) / float(proper))
+                    elif total > proper == 0:
+                        #b += 1
+                        # no proper, set upper limit of ratio == total reads
+                        # not important here because we are interested exceeding a 
+                        # threshold of relatively many non-proper pair reads which this
+                        # would.
+                        these_ratios.append(total)
+                    else:
+                        #c += 1
+                        # total == proper == 0
+                        # zero aligned reads
+                        # avoid zero division and distinguish from all proper pairs i.e., 0 / 100 == 0
+                        these_ratios.append(-1)
+                ratios[seq_name] = these_ratios
+            self.ratios = ratios
+        elif hasattr(self, 'ratios'):
+            self.logger.debug('Proper-paired to total read depths ratios found '\
+                    'from previous analysis: use --force to recalculate')
 
 
 
-    def getSmoothedRatios(self, window = 500, 
-                                resolution = 10):
+    def getSmoothedRatios(self, window = 500, resolution = 10, force = False):
         '''
         calculate:
             mean, 
@@ -534,29 +637,38 @@ class Checker:
 
         # omit -1 no depths from ratios below (but include zeros)
 
-        smoothed_ratios = {}
-        for name in self.depths_totals:
-            use_ratios = self.ratios
-            these_means = _array('f')
-            for i in range(0, len(use_ratios) * resolution - window, resolution):  #break
-                # collect nt range allowing for resolution of ratios
-                these = use_ratios[(i / resolution) : ((i + window) / resolution)]
-                # exclude zero ratios from calculation of mean: 
-                # associated with areas of low quality read alignments
-                # also present at edges of large deletions so prevent them lowering window mean prematurely
-                # require minimum half window length 
-                these = [t for t in these if t >= 0]
-                if len(these) <= window / 2.0 / resolution:
-                    # when length of non-zero window is less than half that specified,
-                    # make up with zeros to decrease mean moderately close to edge of 
-                    # reference chromosome region with reads mapped
-                    these += [0] * int(window / 2.0 / resolution - len(these))
-                
-                these_mean = sum(these) / float(len(these))
-                these_means.append(these_mean)
-            smoothed_ratios[name] = these_means
-
-        self.smoothed_ratios = smoothed_ratios
+        if force or not hasattr(self, 'smoothed_ratios'):
+            if hasattr(self, 'smoothed_ratios'):
+                self.logger.debug('Recalculating smoothed ratios of read '\
+                        'depths because --force specified.')
+            else:
+                self.logger.debug('Calculating smoothed ratios of read depths.')
+            smoothed_ratios = {}
+            for name in self.depths_totals:
+                use_ratios = self.ratios
+                these_means = _array('f')
+                for i in range(0, len(use_ratios) * resolution - window, resolution):  #break
+                    # collect nt range allowing for resolution of ratios
+                    these = use_ratios[(i / resolution) : ((i + window) / resolution)]
+                    # exclude zero ratios from calculation of mean: 
+                    # associated with areas of low quality read alignments
+                    # also present at edges of large deletions so prevent them lowering window mean prematurely
+                    # require minimum half window length 
+                    these = [t for t in these if t >= 0]
+                    if len(these) <= window / 2.0 / resolution:
+                        # when length of non-zero window is less than half that specified,
+                        # make up with zeros to decrease mean moderately close to edge of 
+                        # reference chromosome region with reads mapped
+                        these += [0] * int(window / 2.0 / resolution - len(these))
+                    
+                    these_mean = sum(these) / float(len(these))
+                    these_means.append(these_mean)
+                smoothed_ratios[name] = these_means
+            
+            self.smoothed_ratios = smoothed_ratios
+        elif hasattr(self, 'smoothed_ratios'):
+            self.logger.debug('Smoothed ratios of read depths found '\
+                    'from previous analysis: use --force to recalculate')
 
 
 
@@ -724,112 +836,6 @@ class Checker:
             self.suspect_regions[filter_name] = extensions
         else:
             self.suspect_regions = {filter_name : extensions}
-    def saveLocal(self, name = False, exclude = []):
-        '''
-        Save additional info needed for plotting the Structure.Checker analysis
-        'filename' can exclude extension: .baga will be added.
-        A .baga file is mostly Python dictionaries in JSON strings and
-        array.array objects in a tar.gz or pickled dictionaries in .gz format.
-        '''
-        if name:
-            fileout = 'baga.Structure.CheckerInfo-{}.baga'.format(name)
-        else:
-            fileout = 'baga.Structure.CheckerInfo-{}__{}.baga'.format(self.reads_name, self.genome_name)
-
-        #_save(self, fileout)
-
-        # # for simplicity, this also includes reads depths which may
-        # # have been saved in a _depths.baga file.
-        # with _tarfile.open(fileout, "w:gz") as tar:
-            # print('Writing to {} . . . '.format(fileout))
-            # for att_name, att in self.__dict__.items():
-                # if isinstance(att, _array):
-                    # io = _StringIO(att.tostring())
-                    # io.seek(0, _os.SEEK_END)
-                    # length = io.tell()
-                    # io.seek(0)
-                    # thisone = _tarfile.TarInfo(name = att_name)
-                    # thisone.size = length
-                    # tar.addfile(tarinfo = thisone, fileobj = io)
-                # elif isinstance(att, dict) or isinstance(att, str) or isinstance(att, float) or isinstance(att, int):
-                    # # ensure only dicts, strings, floats, ints (or arrays, above) are saved
-                    # io = _StringIO()
-                    # _json.dump(att, io)
-                    # io.seek(0, _os.SEEK_END)
-                    # length = io.tell()
-                    # io.seek(0)
-                    # thisone = _tarfile.TarInfo(name = att_name)
-                    # thisone.size = length
-                    # tar.addfile(tarinfo = thisone, fileobj = io)
-
-        def saveArray(array_data, member_name, tar):
-            if array_data.typecode == 'u':
-                # 1 byte per character instead of 2 (4?)
-                # 'u' Deprecated since version 3.3, will be removed in version 4.0
-                # https://docs.python.org/3/library/array.html
-                # so how to conveniently and efficiently put a string into an array?
-                # implement own fetch methods for extracting region or writing to text file?
-                # better way of doing this?
-                array_data = _array('b', bytes(''.join(array_data.tolist()), encoding = 'utf-8'))
-                #array_data = _array('b', array_data.encode('utf-8'))
-            if _PY3:
-                ioob = _BytesIO(array_data.tobytes())
-            else:
-                ioob = _StringIO(array_data.tostring())
-            ioob.seek(0, _os.SEEK_END)
-            length = ioob.tell()
-            ioob.seek(0)
-            thisone = _tarfile.TarInfo(name = member_name)
-            thisone.size = length
-            tar.addfile(tarinfo = thisone, fileobj = ioob)
-
-        omissions = []
-        with _tarfile.open(fileout, "w:gz", compresslevel = 3) as tar:
-            for att_name, att in self.__dict__.items():
-                if att_name in exclude:
-                    omissions += [att_name]
-                    print('Excluding from {}: "{}" ({})'.format(
-                            fileout, att_name, type(att)))
-                if isinstance(att, _array):
-                    saveArray(att, att_name, tar)
-                    print('Stored in {}: "{}" (array)'.format(
-                            fileout, att_name))
-                elif isinstance(att, dict) and \
-                        all([isinstance(v, _array) for v in att.values()]):
-                    # can save dicts of arrays efficiently as array.tobytes()
-                    # .tostring() in python2 which is what .tofile() does
-                    for array_name,array_data in att.items():
-                        member_name = '__{}__{}'.format(att_name,array_name)
-                        saveArray(array_data, member_name, tar)
-                        print('Stored in {}: "{}" (array) in {} '\
-                                '(dict) as {}'.format(fileout, 
-                                array_name, att_name, member_name))
-                else:
-                    # try saving everything else here by jsoning
-                    try:
-                        if _PY3:
-                            ioob = _BytesIO()
-                        else:
-                            ioob = _StringIO()
-                        att_json = _json.dumps(att)
-                        ioob.write(att_json.encode('utf-8'))
-                        ioob.seek(0, _os.SEEK_END)
-                        length = ioob.tell()
-                        ioob.seek(0)
-                        thisone = _tarfile.TarInfo(name = att_name)
-                        thisone.size = length
-                        tar.addfile(tarinfo = thisone, fileobj = ioob)
-                        print('Stored in {}: "{}", {}'.format(
-                                fileout, att_name, type(att)))
-                    except TypeError:
-                        # could be warning but expect functions to fail here
-                        print('Not JSONable: "{}", {}'.format(
-                                att_name, type(att)))
-                        # ignore non-jsonable things like functions
-                        # include unicodes, strings, lists etc etc
-                        omissions += [att_name]
-        return(omissions)
-
 
 class Plotter:
     '''
