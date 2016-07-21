@@ -32,6 +32,8 @@ from hashlib import md5 as _md5
 from array import array as _array
 import logging as _logging
 import textwrap as _textwrap
+from collections import defaultdict as _defaultdict
+from collections import Counter as _Counter
 
 PY3 = _sys.version_info > (3,)
 
@@ -39,6 +41,7 @@ if PY3:
     from urllib.error import URLError as _URLError
     from urllib.request import urlopen as _urlopen
     from io import BytesIO as _BytesIO
+    from io import StringIO as _StringIO
     import pickle as _pickle
 else:
     from urllib import urlopen as _urlopen
@@ -296,13 +299,27 @@ def load(file_name):
                 try:
                     # either json serialised conventional objects
                     contents = _json.loads(contents.getvalue().decode('utf-8'))
+                    not_json = False
                 except ValueError:
-                    # or longer python array.array objects ### how did this work for integers? Didn't!
-                    array_data = loadArray(member.name, contents)
-                    if PY3:
-                        contents = _array('u', contents.getvalue())
-                    else:
-                        contents = _array('c', contents.getvalue())
+                    # not JSON
+                    not_json = True
+                except _json.UnicodeDecodeError:
+                    # not JSON
+                    not_json = True
+                if not_json:
+                    try:
+                        # or pickle serialised conventional objects
+                        contents = _pickle.loads(contents.getvalue())
+                    except _pickle.UnpicklingError:
+                        # not pickle
+                        # or longer python array.array objects
+                        ### how did this work for integers? Didn't! <== is this adequately checked?
+                        ### would be better to have direct tests of json or pickle . . .
+                        array_data = loadArray(member.name, contents)
+                        if PY3:
+                            contents = _array('u', contents.getvalue())
+                        else:
+                            contents = _array('c', contents.getvalue())
                 meta_data[member.name] = contents
         # add dicts of arrays to the rest of meta_data
         for member_name,d in arraydicts.items():
@@ -470,6 +487,7 @@ def report_time(start_time, this_item_index, total_items):
     print('Estimated time left: {}\n'.format(get_unit(remaining)))
 
 
+# obsolete with dependencies[name]['exe']['main']
 def get_exe_path(name):
     '''
     Use the Dependencies module to get the path to an executable.
@@ -797,16 +815,29 @@ class MetaSample(Base):
             self.log_folder = log_folder
           
 
-    def saveLocal(self, exclude = []):
+    def saveLocal(self, exclude = [], serialiser = 'json'):
         '''
         Save an baga object to a file
         
         Objects usually contain sample metadata information. The data is 
-        saved as a compressed archive with attributes as JSON or raw Python 
-        array.array objects as bytes or strings. Dictionaries of arrays are
-        deconstructed and saved as array.array bytes and can be reconstrcuted
-        by baga metadata inheritance in MetaSample's __init__() method.
+        saved as a compressed archive with attributes as JSON (or pickle if 
+        specified in arguments) or raw Python array.array objects as bytes or 
+        strings. Dictionaries of arrays are deconstructed and saved as 
+        array.array bytes and can be reconstrcuted by baga metadata 
+        inheritance in MetaSample's __init__() method.
         '''
+        if serialiser == 'json':
+            import json as _serialiser
+        elif serialiser == 'pickle':
+            import sys
+            if sys.version_info.major == 3:
+                import pickle as _serialiser
+            else:
+                import cPickle as _serialiser
+        else:
+            raise NotImplementedError('Serialiser "{}" not implemented, choose '\
+                    '"json" or "pickle"')
+        
         def saveArray(array_data, member_name, tar):
             if array_data.typecode == 'u':
                 # 1 byte per character instead of 2 (4?)
@@ -856,8 +887,13 @@ class MetaSample(Base):
                             ioob = _BytesIO()
                         else:
                             ioob = _StringIO()
-                        att_json = _json.dumps(att)
-                        ioob.write(att_json.encode('utf-8'))
+                        att_serialised = _serialiser.dumps(att)
+                        try:
+                            # json makes strings which need encoding to bytes
+                            ioob.write(att_serialised.encode('utf-8'))
+                        except AttributeError:
+                            # pickle makes bytes
+                            ioob.write(att_serialised)
                         ioob.seek(0, _os.SEEK_END)
                         length = ioob.tell()
                         ioob.seek(0)
@@ -868,18 +904,19 @@ class MetaSample(Base):
                                 self.file_name, att_name, type(att)))
                     except TypeError:
                         # could be warning but expect functions to fail here
-                        self.logger.debug('Not JSONable: "{}", {}'.format(
-                                att_name, type(att)))
+                        self.logger.debug('Not {}-able: "{}", {}'.format(
+                                serialiser, att_name, type(att)))
                         # ignore non-jsonable things like functions
                         # include unicodes, strings, lists etc etc
                         omissions += [att_name]
         return(omissions)
 
 
-    def launch_external(self, cmd, 
+    def _launch_external(self, cmd, 
                               external_program_name, 
                               log_folder, 
                               main_logger = False, 
+                              return_stdout = False,
                               stdout_filename = False,
                               shell = False):
         '''
@@ -887,6 +924,25 @@ class MetaSample(Base):
         and log useful information like pid, issuing command, duration etc.
         If main_logger provided, which is usually a Task-level logger (not CLI), 
         key info but not details are also logged there.
+        
+        Parameters
+        ----------
+        cmd : list
+            list (or string) to pass to subprocess methods e.g. Popen()
+        external_program_name : str
+            name of program for logging purposes
+        log_folder : str
+            path to log folder in use for this Task run
+        main_logger : bool
+            main task-level logger (stdlib logging module)
+        return_stdout : bool
+            if True, stdout will be returned as well as logged (or piped to a file)
+        stdout_filename : str
+            if provided, stdout will be piped to this file, not a log file
+        shell : str
+            if provided, a separate shell will be spawned by subprocess methods 
+            e.g. Popen()
+        
         '''
         if not _os.path.exists(log_folder):
             _os.makedirs(log_folder)
@@ -929,12 +985,17 @@ class MetaSample(Base):
                         external_program_name, proc.pid, stdout_filename))
                 stdout_not_used, stderr = proc.communicate()
                 #stderr = proc.stderr.read()
+            if return_stdout:
+                stdout = open(stdout_filename, 'rb').read()
+            else:
+                stdout = None
             
         else:
             proc = _subprocess.Popen(cmd, stdout = _subprocess.PIPE, 
                     stderr = _subprocess.PIPE, shell = shell)
             logger_for_external.log(PROGRESS, 'Will include stdout in this log')
-            starting = 'Started {} ({}) at {}'.format(external_program_name, proc.pid, time_for_log)
+            starting = 'Started {} ({}) at {}'.format(external_program_name, 
+                    proc.pid, time_for_log)
             logger_for_external.info(starting)
             if main_logger:
                 main_logger.info(starting)
@@ -1014,4 +1075,7 @@ class MetaSample(Base):
         # files are per process)
         logger_for_external.removeHandler(this_ext_file_handler)
         
-        return(proc.returncode)
+        if return_stdout:
+            return(proc.returncode, stdout)
+        else:
+            return(proc.returncode, stdout)
