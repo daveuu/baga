@@ -15,7 +15,7 @@
 # Dr Michael A Brockhurst (The University of York, UK)
 #
 '''
-Dependencies2 module from the Bacterial and Archaeal Genome Analyzer (BAGA).
+Dependencies module from the Bacterial and Archaeal Genome Analyzer (BAGA).
 
 This module contains functions to check whether required progams are available.
 It also contains functions to get some of the dependencies.
@@ -50,7 +50,9 @@ from baga import PROGRESS
 
 # these need to be absolute for installing dependencies
 destination_programs = _os.path.realpath('external_programs')
+# local clones of git repos done manually
 destination_dvcs_packages = _os.path.realpath('local_dvcs_package_repos')
+# via pip even from a git repo
 destination_packages = _os.path.realpath(_os.path.join(venv_dir,'lib',
         'python{}.{}'.format(_sys.version_info.major,_sys.version_info.minor),
         'site-packages'))
@@ -90,6 +92,7 @@ def _configure_logging(log_folder, external_program, filename_suffix = False):
     return(main_logger, logger_for_external)
 
 
+# this is a lot like MetaSample.launch_external()
 def _call_a_logged_process(cmd, logger, return_returncode = False):
     '''call a process via subprocess module and log outputs
     
@@ -305,11 +308,13 @@ def get_git(name, git, destination, preparation, log_folder = '.',
             ### if not new_version: do not run "make clean" else do <== to implement
             if 'package_list' in do_this['arguments']:
                 do_this['function'](*do_this['arguments']['package_list'], 
-                        logger_for_external)
+                        logger = logger_for_external)
             elif isinstance(do_this['arguments'], dict):
-                do_this['function'](logger = logger_for_external, **do_this['arguments'])
+                do_this['function'](logger = logger_for_external, 
+                        **do_this['arguments'])
             else:
-                do_this['function'](*do_this['arguments'], logger_for_external)
+                do_this['function'](*do_this['arguments'], 
+                        logger = logger_for_external)
             
             # restore position in path if a prepare changed it
             if working_dir != _os.path.realpath(_os.path.curdir):
@@ -420,10 +425,12 @@ def get_download(name, url, destination, preparation, checksum,
         else:
             # others don't need additional compilation
             check_path1 = '{}/{}'.format(release,name)
-            # py3 vs py2: .getmembers() and .isreg() gone? may be tar.gz specific not zip?
+            # py3 vs py2: .getmembers() and .isreg() gone?
+            # may be tar.gz specific not zip?
             for member in archive.getmembers():
                 if member.isreg() and check_path1 in member.name:
-                    member.name = _os.path.sep.join(member.name.split(_os.path.sep)[1:])
+                    member.name = _os.path.sep.join(member.name.split(
+                            _os.path.sep)[1:])
                     archive.extract(member)
                     c += 1
         main_logger.log(PROGRESS, 'Extracted {} files'.format(c))
@@ -580,37 +587,27 @@ def get_git_pip(name,
                 checker, 
                 log_folder = '.',
                 commit = False, 
-                pip = False, 
-                pypi_name = None, 
-                checksum = None):
+                #pip = False, 
+                #pypi_name = None, 
+                #checksum = None
+                ):
     '''
     Get a dependency from git using pip: preparation functions run before pip
+    
+    pip should handle dependencies where they are not handled or are non-Python, 
+    use preparation to install them.
     '''
     
     # set up logging
     # set up handler for this subprocess
     # send to a unique time-stamped log file
     # also add a handler to the main log
-    external_program = name
-    time_start = _datetime.now()
-    time_stamp = time_start.strftime("%d_%H-%M-%S-%f")
-    # ("get_from_git" == clone and make and any other preparation)
-    logfilename = '{}__pip_install_from_repo_{}.log'.format(time_stamp, name)
-    filename = _os.path.join(log_folder, logfilename)
-    this_ext_file_handler = _logging.FileHandler(filename, mode='w', encoding='utf-8')
-    this_ext_file_handler.setLevel(_logging.DEBUG)
-    logger_name = 'Dependencies_{}'.format(external_program)
-    logger_for_external = _logging.getLogger(logger_name)
-    logger_for_external.setLevel(_logging.DEBUG)
-    logger_for_external.addHandler(this_ext_file_handler)
-    # main logger name (which could be Task-level) will always match module 
-    # name here (Dependencies)
-    main_logger = _logging.getLogger('Dependencies')
-    main_logger = _logging.LoggerAdapter(main_logger, {'task': 'Dependencies'})
-    main_logger.info('About to do a pip install of {} from {} to {}'\
-            ''.format(name, source, destination))
-    main_logger.info('Writing output for pip install of {} to {}'\
-            ''.format(external_program, filename))
+    # set up logging
+    # set up handler for this subprocess
+    # send to a unique time-stamped log file
+    # also add a handler to the main log
+    main_logger, logger_for_external = _configure_logging(log_folder, name, 
+            filename_suffix = '{}_get_git_pip'.format(name))
     
     working_dir = _os.path.abspath(_os.curdir)
     if preparation is not None:
@@ -637,9 +634,9 @@ def get_git_pip(name,
            #'--editable', 
            # puts to: venv/src/biom-format/biom/__init__.py
            # would need to add each to path?
-           'git+{}#egg={}'.format(url,pypi_name)]
+           'git+{}#egg={}'.format(url,name)]
     
-    call_successful = _call_a_logged_process(cmd, logger_name)
+    call_successful = _call_a_logged_process(cmd, logger_for_external)
     if not call_successful:
         # raise a more general exception for the CLI?
         pass
@@ -689,12 +686,9 @@ def get(name, log_folder, source = 'default_source'):
     if source == 'repository' and 'pypi_name' in info:
         get_pypi(info['pypi_name'], name, log_folder = log_folder)
     elif source == 'DVCS' and 'pip_git' in info:
-        # need to decide when to use pypi . . perhaps should be default method
-        # when available now that we are using virtualenv for convenience?
-        # might need extra folder for package repos from where to install
-        # --editable etc
-        #### not implemented: use git+prepare
-        get_git(name, info['git'], destination_programs, info['preparation'], 
+        get_git_pip(name, description = info['description'], source = info['git'], 
+                url = info['git'], destination = destination_packages, 
+                preparation = info['preparation'], checker = info['checker'], 
                 log_folder = log_folder, commit = info['commit'])
     elif source == 'DVCS' and 'git' in info:
         get_git(name, info['git'], destination_programs, info['preparation'], 
@@ -702,21 +696,6 @@ def get(name, log_folder, source = 'default_source'):
     elif source == 'download':
         get_download(info['name'], info['url'], info['destination'], 
                 info['preparation'], info['checksum'], log_folder = log_folder)
-    
-    
-    #### ===> to implement below
-    # if dependencies[name]['source'] == 'git':
-        # if 'pip' in dependencies[name] and dependencies[name]['pip']:
-            # get_git_pip(log_folder = log_folder, **dependencies[name])
-        # else:
-            # get_git(log_folder = log_folder, **dependencies[name])
-    # elif dependencies[name]['source'] == 'repo':
-        # get_repo(log_folder = log_folder, **dependencies[name])
-    # elif dependencies[name]['source'] == 'download':
-        # get_download(log_folder = log_folder, **dependencies[name])
-    # elif dependencies[name]['source'] == 'pypi':
-        # get_pypi(log_folder = log_folder, **dependencies[name])
-
 
 def pysam_install(logger):
     _call_a_logged_process([_sys.executable, 'setup.py', 'build'], logger)
@@ -947,7 +926,7 @@ def check_python_package(package, major_version = -1, minor_version = -1,
                 main_logger.warning(failresult)
                 # imported but couldn't check version. Not usually fatal.
                 return(True)
-            if minor_version:
+            if minor_version >= 0:
                 try:
                     #this_minor_version = int(v.split('.')[1].split('_')[0])
                     this_minor_version = int(v.split('.')[1])
@@ -1057,7 +1036,7 @@ def check(name, log_folder, source = 'default_source'):
         result = checker(name, log_folder = log_folder, **checker_args)
     return(result)
 
-def checkpackage(name, log_folder):
+def checkpackage(name, log_folder, **kwargs):
     '''call a conventional --check for checking new python packages'''
     this_module = __name__.split('.')[-1]
     task_logger = _logging.getLogger(this_module)
@@ -1065,7 +1044,10 @@ def checkpackage(name, log_folder):
     import subprocess
     task_logger.log(PROGRESS, 'Will check whether a Python package "{}" is available '\
             '(by calling baga again)'.format(name))
-    cmd = [_sys.argv[0], '--nosplash', this_module, '--check', name]
+    if _PY3:
+        cmd = ['python3', _sys.argv[0], '--nosplash', this_module, '--check', name]
+    else:
+        cmd = ['python2', _sys.argv[0], '--nosplash', this_module, '--check', name]
     task_logger.log(PROGRESS, 'Will call: {}'.format(' '.join(cmd)))
     # add try..except here?
     proc = subprocess.Popen(cmd, stdout = subprocess.PIPE, stderr = subprocess.PIPE )
@@ -1075,6 +1057,7 @@ def checkpackage(name, log_folder):
     elif proc.returncode == 0:
         return(True)
 
+## still getting false negative successful installs . . .
 def checkget(checkgetthese, log_folder):
     '''check whether a list of dependencies are available and get if absent
     
@@ -1093,23 +1076,26 @@ def checkget(checkgetthese, log_folder):
     this_module = __name__.split('.')[-1]
     task_logger = _logging.getLogger(this_module)
     task_logger = _logging.LoggerAdapter(task_logger, {'task': this_module})
-    check_summary = []
-    check_results = []
+    # store summary infor organised by package in a dict
+    check_summary = {}
+    # store last install status after finding or attempting install
+    check_results = {}
     task_logger.log(PROGRESS, 'Will check, and if necessary get: {}'.format(
             ', '.join(['{} ({})'.format(name,source) for name,source in \
             checkgetthese])))
     for (name,source) in checkgetthese:
         task_logger.log(PROGRESS, 'Checking for {}'.format(name))
+        check_summary[name] = []
         alreadygot = check(name, log_folder, source = source)
         if alreadygot:
             task_logger.info('Found: {}'.format(name))
-            check_summary += ['\t{}: found!'.format(name)]
-            check_results += [alreadygot]
+            check_summary[name] += ['\t{}: found!'.format(name)]
+            check_results[name] = alreadygot
         else:
             task_logger.log(PROGRESS, 'Not found: {}'.format(name))
             task_logger.log(PROGRESS, 'Attempting to install: {}'.format(name))
-            check_summary += ['\t{0}: not found . . . '.format(name),
-                    'Attempting to install.\n']
+            check_summary[name] += ['\t{0}: not found . . . '.format(name),
+                    'Attempting to install {}.'.format(name)]
             if source == 'default_source':
                 source = dependencies[name][source]
             
@@ -1125,15 +1111,16 @@ def checkget(checkgetthese, log_folder):
             
             if gotnow:
                 task_logger.info('Installed successfully! Found: {}'.format(name))
-                check_summary += ["Installed successfully: found!"]
+                check_summary[name] += ["Installed successfully: found!"]
             else:
-                task_logger.error('Failed to install: {}. There might be '\
-                        'dependencies missing or some other problem . . .'\
+                task_logger.error('Failed to install: {}. (missing "\
+                        "dependencies? Bad download URL?)'\
                         ''.format(name))
-                check_summary += ["Failed to install . . . there may be "\
-                        "dependencies missing or some other problem . . ."]
+                check_summary[name] += ["Failed to install (missing "\
+                        "dependencies? Bad download URL?)"]
             
-            check_results += [gotnow]
+            # could still be False for a failed install
+            check_results[name] = gotnow
         
     return(check_summary,check_results)
 
