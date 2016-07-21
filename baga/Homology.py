@@ -1365,11 +1365,18 @@ class Finder(_MetaSample):
                 ##     non-codon multiples
                 ##     ambiguous characters
                 ##     stop codons
+                # bad annotations can include ORFs off the ends of contigs
+                # so filter them out before main list comprehension
+                ORF_info_use = [(ORF,(s,e,strd)) for ORF,(s,e,strd) in \
+                        ORF_info.items() if e < len(nucs)]
                 bad_ORFs[chromosome_ID] = [ORF for ORF,(s,e,strd) in \
-                        ORF_info.items() if \
+                        ORF_info_use if \
                         (e-s)%3!=0 or \
                         set(nucs[s:e]) != unambiguous_nucs or \
                         self.stop_codons[strd] & set(_np.array(nucs[s:e]).view('S3'))]
+                # then add the ORFs off the end of the contig to omit
+                bad_ORFs[chromosome_ID] += [ORF for ORF,(s,e,strd) in \
+                        ORF_info.items() if e >= len(nucs)]
                 
                 if set(bad_ORFs[chromosome_ID]) == set(ORF_info):
                     # if all ORFs bad or if there are no ORFs called, 
