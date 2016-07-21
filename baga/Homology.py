@@ -1114,11 +1114,9 @@ class Finder(_MetaSample):
             # than one key-value DB
             # use some risky but reasonable optimisations
             lmdb_env_options = {
-                    # 2GB (actually suitable for in-memory on even small machines!)
-                    # implemented using LMDB to guarantee future scalability to huge
-                    # Later work how many bacterial genomes worth of metadata fits in
-                    # 2GB - can be unnecessarily big for safety.
-                    'map_size':1024*1024*2000, 
+                    # 2GB limit is for ~ 2700 5MB bacterial genomes
+                    # 20GB set for ~ 27,000 5MB bacterial genomes
+                    'map_size':1024*1024*20000, 
                     # put content in subdir
                     'subdir':True,
                     'readonly':False, 
