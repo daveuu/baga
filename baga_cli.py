@@ -1477,12 +1477,16 @@ if task_name == 'Dependencies':
         if len(args.checkget) > 1:
             baga_cli.info('')
             baga_cli.info('Summary:')
-            for l in sorted(check_summary):
-                baga_cli.info(l)
+            for name,lines in sorted(check_summary.items()):
+                for l in lines:
+                    baga_cli.info(l)
         
-        if not all(check_results):
-            baga_cli.error('One or more i4m dependencies are '\
-                    'unavailable and could not be installed . . .')
+        if not all(check_results.values()):
+            fails = [name for name,success in check_results.items() if not success]
+            fails.sort()
+            baga_cli.error('The following baga dependencies are '\
+                    'unavailable and could not be installed: {}'\
+                    ''.format(', '.join(fails)))
             sys.exit(1)
     
     if args.checkgetfor:
@@ -1499,13 +1503,18 @@ if task_name == 'Dependencies':
             
             if len(check_summary):
                 baga_cli.info('Summary for {}:'.format(task))
-                for l in sorted(check_summary):
-                    baga_cli.info(l)
+                for name,lines in sorted(check_summary.items()):
+                    for l in lines:
+                        baga_cli.info(l)
             
-            if not all(check_results):
-                baga_cli.error('One or more baga dependencies are '\
-                        'unavailable and could not be installed . . .')
-                sys.exit(1)
+            if not all(check_results.values()):
+                fails = [name for name,success in check_results.items() \
+                        if not success]
+                fails.sort()
+                baga_cli.error('The following baga dependencies are '\
+                        'unavailable and could not be installed: {}'\
+                        ''.format(', '.join(fails)))
+                sys.exit(1) ### this prevents standard exit message: better to end by calling a function that explains problem (caught exceptions from upstream)
 
 ### Download Genomes ###
 
