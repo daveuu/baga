@@ -408,16 +408,11 @@ mutually_exclusive_group.add_argument("-t", "--taxonomy",
     const = 'ftp://ftp.ncbi.nih.gov/pub/taxonomy/taxdump.tar.gz',
     metavar = 'URL')
 
-
-
 mutually_exclusive_group.add_argument("-r", "--reads_download", 
     help="download short reads for analysis", 
     type = str,
     nargs = '+',
     metavar = 'ACCESSION_NUMBER')
-
-
-
 
 mutually_exclusive_group.add_argument("-R", "--reads_path", 
     help="path to local short reads in fastq files for analysis. All read files will be collcted. Alternatively, a pattern containing '*' '?' and other shell expansion characters or an explicit list of read files can also be supplied.", 
@@ -426,8 +421,6 @@ mutually_exclusive_group.add_argument("-R", "--reads_path",
 
 parser_CollectData.add_argument('-n', "--reads_group_name", 
     help = "optional for downloading from NCBI, required for loading from local path")
-
-
 
 parser_CollectData.add_argument('-e', "--email_address", 
     type = str,
@@ -1753,7 +1746,7 @@ def sanitize_filename(proposed_name):
 
 ### (down)load Reads ###
 
-if args.subparser == 'CollectData':
+if task_name == 'CollectData':
     if args.reads_download is not None:
         from baga import CollectData
         # only download so only accession numbers?
@@ -1783,7 +1776,7 @@ if args.subparser == 'CollectData':
 
 ### Load Reads from path ###
 
-if args.subparser == 'CollectData':
+if task_name == 'CollectData':
     if args.reads_path is not None:
         # check read group name provided
         if args.reads_group_name is None:
@@ -1808,7 +1801,7 @@ if args.subparser == 'CollectData':
 
 ### Prepare Reads ###
 
-if args.subparser == 'PrepareReads':
+if task_name == 'PrepareReads':
     print('\n-- Short Reads Preparation module --')
     import baga
     if args.reads_name is not None:
@@ -2095,7 +2088,7 @@ if using:
             else:
                 print('Nothing deleted.')
 
-if args.subparser == 'SimulateReads':
+if task_name == 'SimulateReads':
     print('\n-- Read Simulation module --')
     use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
     e = 'Could not locate a saved baga.CollectData.Genome-<genome_name>.baga for name given: {}'.format(args.genome_name)
@@ -2661,7 +2654,7 @@ if task_name == 'Structure':
 
 ### Call Variants ###
 
-if args.subparser == 'CallVariants':
+if task_name == 'CallVariants':
     print('\n-- Variant Calling module --\n')
     # check whether GATK path is needed
     if any([args.callsingles,
@@ -2908,7 +2901,7 @@ if using any of:
 
 ### Filter Variants ###
 
-if args.subparser == 'FilterVariants':
+if task_name == 'FilterVariants':
     print('\n-- Filter Variants (part of the Variant Calling module) --\n')
     
     ## to apply variants, provide one reads group name
@@ -3060,7 +3053,7 @@ if args.subparser == 'FilterVariants':
 
 ### Summarise Variants ###
 
-if args.subparser == 'SummariseVariants':
+if task_name == 'SummariseVariants':
     print('\n-- Summarise Variants (part of the Variant Calling module) --\n')
     
     from baga import CallVariants
@@ -3156,7 +3149,7 @@ if args.subparser == 'SummariseVariants':
 
 ### Check Linkage ###
 
-if args.subparser == 'CheckLinkage':
+if task_name == 'CheckLinkage':
     print('\n-- Check Linkage (part of the Variant Calling module) --\n')
     # required input: paths to corresponding VCFs and BAMs
     # which baga objects contain that information?
@@ -3274,7 +3267,7 @@ if args.subparser == 'CheckLinkage':
     else:
         print('use --check to actually fo the checking . . .')
 
-if args.subparser == 'ComparativeAnalysis':
+if task_name == 'ComparativeAnalysis':
     print('\n-- Comparative Analyses --\n')
     
     from baga import AlignReads
@@ -3517,12 +3510,13 @@ if args.subparser == 'ComparativeAnalysis':
 
 ### Assemble Reads ###
 
-if args.subparser == 'AssembleReads':
+if task_name == 'AssembleReads':
     print('\n-- Reads Assembly module --')
     import baga
     from baga import AssembleReads
     for this_reads_name in args.reads_name:
-        use_path_reads,use_name_reads = check_baga_path('baga.PrepareReads.Reads', this_reads_name)
+        use_path_reads,use_name_reads = check_baga_path(
+                'baga.PrepareReads.Reads', this_reads_name)
         e = 'Could not locate a saved baga.PrepareReads.Reads-<reads_name>.baga '\
                 'for reads group given: {}'.format(this_reads_name)
         assert all([use_path_reads,use_name_reads]), e
