@@ -1445,6 +1445,24 @@ dependencies['biom'] = {
 
 #h5py
 
+dependencies['prodigal'] = {
+    'default_source':'DVCS',
+    'DVCS': {
+        'name': 'prodigal',
+        'description': 'call open reading frames in DNA sequences',
+        'git': 'https://github.com/hyattpd/Prodigal',
+        'commit': 'v2.6.3',
+        'destination': destination_programs,
+        'preparation': [{'function': prep_simple_make,
+                    'arguments': {'path': False, 'configure': False}}],
+        'checker': {'function': check_no_error,
+                    'arguments':{'path': ['Prodigal','prodigal']}},
+        'exe': {
+                'main':_os.path.sep.join([destination_programs,
+                        'Prodigal','prodigal'])},
+        }
+    }
+
 dependencies['mash'] = {
     'default_source':'download',
     'download': {
@@ -1509,11 +1527,68 @@ dependencies['roaringbitmap'] = {
     'repository': {
         'pypi_name': 'roaringbitmap',
         'import_name': 'roaringbitmap',
-        'description': 'roaringbitmap fast Set implementation',
+        'description': 'roaring bitmap fast Set implementation',
         'checker': {'function': check_python_package,
                     'arguments': {'major_version':0,'minor_version':3}}
-        }
+        },
+    'DVCS': {
+        'import_name': 'roaringbitmap',
+        'description': 'roaring bitmap fast Set implementation',
+        'git': 'https://github.com/andreasvc/roaringbitmap',
+        'pip_git': 'https://github.com/andreasvc/roaringbitmap',
+        'preparation': [{'function': get_other_packages,
+                    'arguments': {'package_list':[['numpy']], # really an argument list of length one which is another list
+                                  # this is the only thing that differentiates this prepare() from others that need some chdir in get_download()
+                                  # this should be improved
+                                  'just_packages':True}}],
+        'checker': {'function': check_python_package,
+                    'arguments': {'major_version':2}}
+        },
     }
+
+dependencies['cython'] = {
+    'default_source':'repository',
+    'repository': {
+        'pypi_name': 'cython',
+        'import_name': 'cython',
+        'description': 'C interface for python',
+        'checker': {'function': check_python_package,
+                    'arguments': {'major_version':0,'minor_version':2}}
+        },
+    }
+
+dependencies['bcolz'] = {
+    'default_source':'repository',
+    'repository': {
+        'pypi_name': 'bcolz',
+        'import_name': 'bcolz',
+        'description': 'A columnar data container that can be compressed',
+        'checker': {'function': check_python_package,
+                    'arguments': {'major_version':1,'minor_version':0}}
+        },
+    }
+
+dependencies['lmdb'] = {
+    'default_source':'DVCS',
+    'repository': {
+        'pypi_name': 'lmdb',
+        'import_name': 'lmdb',
+        'description': 'py-lmdb: Python bindings to LMDB',
+        'checker': {'function': check_python_package,
+                    'arguments': {'major_version':0,'minor_version':89}}
+        },
+    'DVCS': {
+        'import_name': 'lmdb',
+        'description': 'py-lmdb: Python bindings to LMDB',
+        'git': 'https://github.com/dw/py-lmdb',
+        'pip_git': 'https://github.com/dw/py-lmdb',
+        'commit': 'py-lmdb_0.90',
+        'preparation': None,
+        'checker': {'function': check_python_package,
+                    'arguments': {'major_version':0,'minor_version':90}}
+        },
+    }
+
 dependencies_notes = {}
 
 dependencies_notes['sickle'] = {
@@ -1638,14 +1713,21 @@ dependencies_by_task['SimulateReads'] = [
 'gemsim',
 ]
 
+## add numpy here? is the kind of package that would
+## benefit from a system install if its quicker and 
+## version control less important
 dependencies_by_task['Homology'] = [
 'cd-hit',
 'mash',
-'pda',
-'roaringbitmap'
+'numpy',
+'cython',
+'roaringbitmap',
+'dendropy',
+'biopython',
+'lmdb',
+'bcolz',
+'prodigal'
 ]
-
-
 
 
 # these are easier installed by a GNU/Linux package manager

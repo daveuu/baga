@@ -1247,6 +1247,104 @@ parser_AssembleReads.add_argument('-m', "--max_memory",
     "specified, total available at launch time will be used.",
     type = int)
 
+parser_Homology = subparser_adder.add_parser('Homology',
+    formatter_class = argparse.RawDescriptionHelpFormatter,
+    parents = [common_module_arguments],
+    description = textwrap.fill('Infer (protein coding) gene families from a '\
+            'collection of genomes.',
+                                text_width,
+                                replace_whitespace = False),
+    epilog = textwrap.fill('Example usage: %(prog)s --analysis_name mygenomes '\
+            '--genomes baga-Genome* --find\n',
+    text_width, replace_whitespace = False))
+
+parser_Homology.add_argument('-n', "--analysis_name", 
+    help = "name of this homology analysis. Just use 'mygenomes' if "\
+            "you can't think of anything else! You can access results later "\
+            "using this name",
+    required = True,
+    type = str,
+    metavar = 'ANALYSIS_NAME')
+
+parser_Homology.add_argument("-g", "--genomes", 
+    help = "names of two or more genomes to analyse. Either paths to "\
+            "genbank or gff files or baga-Genome-<genomename>.baga files that "\
+            "were previously processed by BAGA e.g., if they were just downloaded. "\
+            "If this option is omitted, the named analysis will be repeated using "\
+            "the genomes previously provided and processed. Folders of the form "\
+            "'homology__<analysis_name>__*' must be present in the current directory. "\
+            "This can save time if exploring and adjusting parameters.",
+    required = False,
+    type = str,
+    nargs = '+',
+    metavar = 'GENOME_NAME')
+
+parser_Homology.add_argument("-f", "--find_de_novo", 
+    help = "find homologous groups (families) of protein coding genes in "\
+            "the supplied genomes.",
+    action = 'store_true')
+
+# not yet implemented
+parser_Homology.add_argument("-a", "--update", 
+    help = "update an existing homology analysis with additional genomes.",
+    action = 'store_true')
+
+parser_Homology.add_argument("-C", "--call_orfs", 
+    help = "use Prodigal to call ORFs de novo. This should decrease noise "\
+            "in the dataset because systematic error in ORF calling will be "\
+            "consistent across the dataset.",
+    action = 'store_true')
+
+parser_Homology.add_argument('-m', "--max_memory", 
+    help = "maximum memory to use in gigabytes during analysis. If not "\
+            "specified, total available at launch time will be used.",
+    type = int)
+
+parser_Homology.add_argument('-N', "--genomes_per_batch", 
+    help = "number of genomes for each genome-to-genome best match analysis. This "\
+            "breaks the task into smaller units helping to mitigate the poor scaling "\
+            "of all-versus-all analyses.",
+    type = int,
+    default = 12)
+
+parser_Homology.add_argument('-S', "--genome_pairs_shared", 
+    help = "number of pairs of genomes shared between batches.",
+    type = int,
+    default = 1)
+
+parser_Homology.add_argument('-L', "--clustering_length_prop", 
+    help = "Proportion of a query sequence length that a target sequence can "\
+            "be for a distance to be calculated. Greater or smaller than this "\
+            "length is considered too large or small to have sufficient "\
+            "homology regardless of sequence evolutionary distance.",  ## <==== 20% here needs calibrating or checking literature
+    type = float,
+    default = 0.15)
+
+parser_Homology.add_argument('-k', "--kmer", 
+    help = "length of k-mers for calculating jaccard distances. Default k = 5 "\
+            "is suitable for most analyses. Maximum is k = 9.",
+    type = int,
+    default = 5)
+
+parser_Homology.add_argument('-j', "--max_jaccard", 
+    help = "Maximum k-mer Jaccard distance to be considered a homologous "\
+            "sequence. This depends on k. This could be calibrated against "\
+            "alignments scores of a preferred scheme.",
+    type = float,
+    default = 0.65)
+
+parser_Homology.add_argument("-A", "--output_AAs", 
+    help = "generate fasta files of amino acid sequences for each family.",
+    action = 'store_true')
+
+parser_Homology.add_argument("-D", "--output_DNAs", 
+    help = "generate fasta files of nucleic acid sequences for each family.",
+    action = 'store_true')
+
+# not yet included:
+# retain_individual_sketches = True
+# performchecks = True
+
 if '--nosplash' not in sys.argv:
     print(splash)
 
@@ -3565,6 +3663,173 @@ if task_name == 'AssembleReads':
             # print('Saved {:.2f} Gb by deleting intermediate files'.format(total_size/1000000000.0))
         # else:
             # print('Nothing deleted.')
+
+
+### Infer protein coding gene homology ###
+
+def validate_file_list(file_names, others = ('gbk','gbff','gff','vcf','bam','sam')):
+    found_bagas = []
+    found_others = {}
+    missing = []
+    for file_name in file_names:
+        use_name = file_name.split(os.path.sep)[-1]
+        try:
+            with open(file_name) as fin:
+                if use_name.startswith('baga') and use_name.endswith('baga'):
+                    found_bagas += [file_name]
+                else:
+                    for other in others:
+                        if file_name.endswith(other):
+                            try:
+                                found_others[other] += [file_name]
+                            except KeyError:
+                                found_others[other] = [file_name]
+        except FileNotFoundError:
+            missing += [file_name]
+    
+    return(found_bagas,found_others,missing)
+
+if task_name == 'Homology':
+    baga_cli.info('\t-- Infer protein coding gene homology module --')
+    
+    # configure logger for this Task
+    task_logger, task_log_folder = configureLogger(use_sample_name, 
+            main_log_filename, verbosities[args.verbosity], 
+            logger_name = task_name)
+    
+    import baga
+    from baga import Homology
+    
+    ## put a bunch of checkers here for sanity of requested parameters
+    ## make standard throughout CLI?
+    assert args.kmer <= 9, "--kmer length cannot exceed 9"
+    
+    ## make a standardised function for testing for baga saved objects, input files, IDs?
+    if args.max_memory:
+        use_mem_gigs = args.max_memory
+    else:
+        # round down available GBs
+        use_mem_gigs = int(baga.get_available_memory())
+    
+    if args.genomes is None:
+        # load a previous Finder object
+        task_logger.info('No input genomes provided via "--genomes" so will '\
+                'attempt to resume a previous analysis called "{}".'.format(
+                args.analysis_name))
+        fam_finder = Homology.Finder(args.analysis_name, inherit_from = 'self', 
+                console_verbosity_lvl = verbosities[args.verbosity],  ### logging doesn't seem to work on restoration e.g. --output_AAs
+                log_folder = task_log_folder)
+        missing = fam_finder.verify_files_restored()
+        if len(missing):
+            task_logger.error('Could not access these {} files from a '\
+                    'previous analysis: {}.'.format(len(missing), 
+                    ','.join(missing)))
+            task_logger.error('Please check the missing files exist and their '\
+                    'permissions are correctly set and try again, else start '\
+                    'this analysis again from the beginning.')
+            sys.exit(1)
+        task_logger.log(PROGRESS, 'Successfully restored analysis "{}" with {} '\
+                'genomes.'.format(fam_finder.name, 
+                len(fam_finder.ORFs_per_genome)))
+    else:
+        # instantiate a new Finder object
+        # first check required input files are available
+        found_bagas,found_others,missing = validate_file_list(args.genomes, 
+                others = ('gbk','gbff','gff'))
+        if len(found_bagas):
+            task_logger.info('Found {} baga genome files for processing'\
+                    ''.format(len(found_bagas)))
+        for filetype,files in found_others.items():
+            if len(files):
+                task_logger.info('Found {} "{}" files for processing'\
+                        ''.format(len(files),filetype))
+        try:
+            found_gbks = found_others['gbk']
+        except KeyError:
+            found_gbks = []
+        try:
+            found_gbks += found_others['gbff']
+        except KeyError:
+            pass
+        try:
+            found_gffs = found_others['gff']
+        except KeyError:
+            found_gffs = []
+        
+        if len(missing):
+            task_logger.error('Could not access these {} files: {}.'\
+                    ''.format(len(missing),','.join(missing)))
+            task_logger.error('Please check the missing files exist and their '\
+                    'permissions are correctly set and try again')
+            sys.exit(1)
+        
+        if sum([len(found_bagas),len(found_gbks),len(found_gffs)]):
+            # instantiate the object with the input files and where to do the logging
+            task_logger.info('Starting new homology inference analysis called '\
+                    '"{}".'.format(args.analysis_name))
+            fam_finder = Homology.Finder(args.analysis_name, bagas = found_bagas, 
+                    gbks = found_gbks, gffs = found_gffs, task_name = task_name, 
+                    console_verbosity_lvl = verbosities[args.verbosity], 
+                    log_folder = task_log_folder)
+            
+            # parse the input genomes, extracting ORFs. QC is done here.
+            # optionally call ORFs de novo using prodigal
+            ## process ORFs (CLI)
+            if args.call_orfs:
+                task_logger.info('Will call new ORFs in provided genome sequences using Prodigal')
+            else:
+                task_logger.info('Will use pre-annotated ORFs (--call_orfs not provided)')
+            fam_finder.processORFs(call_orfs = args.call_orfs, do_checks = True, 
+                    force = args.force, assign_narrow_clusters = True, 
+                    fail_prop_limit = 0.2, min_ORFs_per_genome = 100, 
+                    unclustered_clearence_freq = 15)
+            task_logger.log(PROGRESS, 'Saving state with processed ORFs')
+            # save here to allow restoring this analysis
+            # pickle retains Python objects and integers etc where JSON cannot
+            fam_finder.saveLocal(serialiser = 'pickle')
+        else:
+            task_logger.error('No input files found! (this could be a bug . . .)')
+            sys.exit(1)
+    
+    if args.find_de_novo:
+        # do a de novo homology analysis
+        fam_finder.do_de_novo(
+                # this will be automated and/or optimised eventually?
+                max_genomes_per_group = args.genomes_per_batch, 
+                genome_pairs_shared = args.genome_pairs_shared, 
+                # easier to say "within 20% of query sequence length"
+                bm_lower_len_lim = 1 - args.clustering_length_prop, 
+                bm_upper_len_lim = 1 + args.clustering_length_prop, 
+                # could change after distance calibrations versus BLAST
+                k = args.kmer, 
+                jacc_dist_max = args.max_jaccard, 
+                max_cpus = args.max_cpus, 
+                max_memory = use_mem_gigs, 
+                # relevent to eventual re-start --force not implemented
+                # True to allow restoration post processORFs()
+                retain_individual_sketches = True, 
+                # might need to optimise for memory usage (long lists?)
+                performchecks = True)
+        # save here to allow restoring this analysis
+        fam_finder.saveLocal(serialiser = 'pickle')
+    else:
+        task_logger.info('Hint: To perform a new analysis, include the '\
+                '"--find_de_novo" command')
+    
+    if args.output_AAs or args.output_DNAs:
+        # write output to text file
+        fam_finder.generate_results(
+                generate_fastas_AA = args.output_AAs, 
+                generate_fastas_DNA = args.output_DNAs, 
+                # FASTA file width
+                chars_per_line = 50,
+                # larger stores more at once in memory, not sure if quicker
+                families_per_write_batch = 200)
+    else:
+        task_logger.info('Hint: To generate fasta sequence files for each '\
+                'family, include the "--output_AAs" or "--output_DNAs" '\
+                'commands or both')
+        
 
 
 # work out how long it took
