@@ -2680,17 +2680,22 @@ class Finder(_MetaSample):
             # extract k-mers and put into roaringbitmaps
             # read off disk via bcolz carray: single slice for whole genome
             # (includes some not needed but saves 1000s slices)
-            genome_s = min([s for s,e in ORF_ords])
-            genome_e = max([e for s,e in ORF_ords])
-            genome_contiguous_RAAs = RAAs_carray[genome_s:genome_e]
-            # adjust per ORF ranges to within this slice
-            new_ranges = [(AA_s-genome_s,AA_e-genome_s) for (AA_s,AA_e) in ORF_ords]
-            # extract k-mers by striding numpy array, straight to roaringbitmap
-            rb_kmers = [_rrbitmap((rolling_window(genome_contiguous_RAAs[s:e], 
-                    k)*k_multiplier).sum(1, dtype = dtype)) for s,e in new_ranges]
-            # collect full lengths: number k-mers will be less than sequence length
-            # i.e., repeat insensitive . . good or bad?
-            ORF_lens = [(AA_e - AA_s) for AA_s,AA_e in ORF_ords]
+            if ORF_ords:
+                # under certain there are no ORFs for comparison 
+                genome_s = min([s for s,e in ORF_ords])
+                genome_e = max([e for s,e in ORF_ords])
+                genome_contiguous_RAAs = RAAs_carray[genome_s:genome_e]
+                # adjust per ORF ranges to within this slice
+                new_ranges = [(AA_s-genome_s,AA_e-genome_s) for (AA_s,AA_e) in ORF_ords]
+                # extract k-mers by striding numpy array, straight to roaringbitmap
+                rb_kmers = [_rrbitmap((rolling_window(genome_contiguous_RAAs[s:e], 
+                        k)*k_multiplier).sum(1, dtype = dtype)) for s,e in new_ranges]
+                # collect full lengths: number k-mers will be less than sequence length
+                # i.e., repeat insensitive . . good or bad?
+                ORF_lens = [(AA_e - AA_s) for AA_s,AA_e in ORF_ords]
+            else:
+                rb_kmers = []
+                ORF_lens = []
             return(rb_kmers, ORF_lens, ORFids, ORF_broad_clusters, genome_num)
 
         these_genomes = self.bm_selected_genomes[0]
