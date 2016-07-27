@@ -2696,6 +2696,7 @@ class Finder(_MetaSample):
             else:
                 rb_kmers = []
                 ORF_lens = []
+                # all are empty
             return(rb_kmers, ORF_lens, ORFids, ORF_broad_clusters, genome_num)
 
         these_genomes = self.bm_selected_genomes[0]
@@ -2765,15 +2766,17 @@ class Finder(_MetaSample):
                     rb_kmers, ORF_lens, ORFids, ORF_broad_clusters, genome_num_done = \
                             extract_kmers(genome_num, job_num = n+1, 
                             jobs_total = len(these_genomes))
-                    bm_group_rb_kmers += rb_kmers
-                    bm_group_ORF_lens[i:i+len(ORF_lens)] = ORF_lens
-                    bm_group_ORF_broad_clusters[i:i+len(ORF_lens)] = ORF_broad_clusters
-                    bm_group_genome_ranges[genome_num] = i, i+len(ORF_lens)
-                    ## makes more sense to keep IDs in same ordered list as bitmap etc
-                    ## not in dict of ID lists paired with dict of genome ranges? (as above)
-                    bm_group_genome_ORFids[i:i+len(ORF_lens)] = ORFids
-                    i += len(ORF_lens)
-                    #bm_group_genome_ORFids[genome_num] = ORFids
+                    if len(rb_kmers):
+                        # sometimes there are no ORFs to compare
+                        bm_group_rb_kmers += rb_kmers
+                        bm_group_ORF_lens[i:i+len(ORF_lens)] = ORF_lens
+                        bm_group_ORF_broad_clusters[i:i+len(ORF_lens)] = ORF_broad_clusters
+                        bm_group_genome_ranges[genome_num] = i, i+len(ORF_lens)
+                        ## makes more sense to keep IDs in same ordered list as bitmap etc
+                        ## not in dict of ID lists paired with dict of genome ranges? (as above)
+                        bm_group_genome_ORFids[i:i+len(ORF_lens)] = ORFids
+                        i += len(ORF_lens)
+                        #bm_group_genome_ORFids[genome_num] = ORFids
             elif nprocs > 1:
                 raise NotImplementedError("this is not working: cannot make a picklable extract_kmers()")
                 # this would need updating to serial version if used
