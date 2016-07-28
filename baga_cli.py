@@ -3816,16 +3816,15 @@ if task_name == 'Homology':
         task_logger.info('Hint: To perform a new analysis, include the '\
                 '"--find_de_novo" command')
     
-    if args.output_AAs or args.output_DNAs:
-        # write output to text file
-        fam_finder.generate_results(
-                generate_fastas_AA = args.output_AAs, 
-                generate_fastas_DNA = args.output_DNAs, 
-                # FASTA file width
-                chars_per_line = 50,
-                # larger stores more at once in memory, not sure if quicker
-                families_per_write_batch = 200)
-    else:
+    # write output to text file
+    fam_finder.generate_results(
+            generate_fastas_AA = args.output_AAs, 
+            generate_fastas_DNA = args.output_DNAs, 
+            # FASTA file width
+            chars_per_line = 50,
+            # larger stores more at once in memory, not sure if quicker
+            families_per_write_batch = 200)
+    if not args.output_AAs and not args.output_DNAs:
         task_logger.info('Hint: To generate fasta sequence files for each '\
                 'family, include the "--output_AAs" or "--output_DNAs" '\
                 'commands or both')
