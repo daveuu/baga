@@ -1589,6 +1589,28 @@ dependencies['lmdb'] = {
         },
     }
 
+dependencies['rapidnj'] = {
+    'default_source':'download',
+    'download': {
+        'name': 'rapidnj',
+        'description': 'rapid neighbor joining phylogenetic reconstruction',
+        'url': 'http://users-birc.au.dk/cstorm/software/rapidnj/'\
+                'rapidnj-src-2.3.2.zip',
+        'checksum': None,
+        'destination': destination_programs,
+        'preparation': [
+                    {'function': prep_simple_make,
+                    'arguments': {'path': False, 'configure': False}}
+        ],
+        'checker': {'function': check_no_error,
+                    'arguments': {'path': ['rapidNJ', 'bin', 'rapidnj'],
+                            'success_returncode':1}},
+        'exe': {
+                'main':_os.path.sep.join([destination_programs,
+                        'rapidNJ', 'bin', 'rapidnj'])},
+        }
+    }
+
 dependencies_notes = {}
 
 dependencies_notes['sickle'] = {
