@@ -2090,13 +2090,17 @@ def collectRegions(BAMs, genome,
     else:
         # round down available GBs
         use_mem_gigs = int(_get_available_memory())
+        if use_mem_gigs == 0:
+            logger.warning('Apparently <1GB memory available . . SPAdes will '\
+                    'be allowed to use the minimum 1GB memory')
+            use_mem_gigs = 1
 
     if regions:
+        # target regions supplied, use those exactly
+        use_num_padding_positions = 0
+    else:
         # add some padding around the disrupted regions
         use_num_padding_positions = num_padding_positions
-    else:
-        # regions supplied, use those exactly
-        use_num_padding_positions = 0
 
     #checkers = {}
     for BAM in BAMs:
@@ -2486,8 +2490,8 @@ class Collector(_MetaSample):
             self.logger.warning('Alignment range ({} to {} bp) spans start or '\
                     'end. Chromosome assumed to be circular so some reads from '\
                     'other end included in reads collection'.format(
-                    chrom_start - num_padding_positions, 
-                    chrom_end + num_padding_positions))
+                    seq_start - num_padding_positions, 
+                    seq_end + num_padding_positions))
 
         ranges += [(range_start, range_end)]
 
