@@ -43,6 +43,7 @@ from array import array as _array
 import operator as _operator
 import time as _time
 import string as _string
+from collections import Counter as _Counter
 
 # external Python modules
 import pysam as _pysam
@@ -52,6 +53,7 @@ from Bio.SeqRecord import SeqRecord as _SeqRecord
 
 from baga import report_time as _report_time
 from baga import get_exe_path as _get_exe_path
+from baga import get_available_memory as _get_available_memory
 
 from baga import MetaSample as _MetaSample
 from baga import PROGRESS
@@ -226,7 +228,6 @@ def checkStructure(BAMs,
                     task_name = task_name, 
                     console_verbosity_lvl = console_verbosity_lvl, 
                     log_folder = log_folder, inherit_from = 'self')
-            #import pdb; pdb.set_trace()
         else:
             logger.info('Starting new analysis of "{}" with "{}"'\
                     ''.format(BAM, genome_name))
@@ -247,6 +248,9 @@ def checkStructure(BAMs,
                 ''.format(sample, ', '.join(sorted(checker.genome_lengths))))
         # depth collection resolution impacts downstream resolutions
         # i.e., 1 in 10 here plus 1 in 10 smoothed ratio == 1 in 100 considered
+        ## but why is this hardwired, but smoothed ratio provided with 10 as argument?
+        ## what if these resolutions differ?
+        ## check how getSmoothedRatios() uses smoothed ration carefully . . .
         depth_resolution = 10
         checker.getCoverageDepths(min_mapping_quality = min_mapping_quality, 
                 resolution = depth_resolution, force = force)
@@ -269,6 +273,7 @@ def checkStructure(BAMs,
             use_smoothed_window = int(round(checker.mean_insert_size)/2.0)
         else:
             use_smoothed_window = smoothed_window
+        
         checker.getSmoothedRatios(window = use_smoothed_window, 
                 resolution = smoothed_resolution)
         
@@ -281,9 +286,14 @@ def checkStructure(BAMs,
         
         # save for plotting
         checker.smoothed_resolution = smoothed_resolution
+        checker.smoothed_window = use_smoothed_window
         checker.threshold = ratio_threshold
         
-        offset = int(round(depth_resolution * smoothed_resolution / 2.0))
+        #offset = int(round(depth_resolution * smoothed_resolution / 2.0))
+        
+        # also used in plotting
+        offset = int(round(checker.smoothed_window / 2.0))
+        
         filter_name = 'rearrangements'
         test = '>='
         checker.scan_threshold( checker.smoothed_ratios, 
@@ -318,7 +328,8 @@ def checkStructure(BAMs,
         
         checker.saveLocal()
         
-        # report durations, time left etc
+        # report durations, time left etc <===
+        # ==== this needs updating to work with logging
         _report_time(start_time, cnum, len(checkers))
 
     return(checkers)
@@ -637,6 +648,9 @@ class Checker(_MetaSample):
 
         # omit -1 no depths from ratios below (but include zeros)
 
+        ### resolution == step size
+        ### resolution here needs to match depth and/or ratios resolution previously?
+
         if force or not hasattr(self, 'smoothed_ratios'):
             if hasattr(self, 'smoothed_ratios'):
                 self.logger.debug('Recalculating smoothed ratios of read '\
@@ -644,26 +658,31 @@ class Checker(_MetaSample):
             else:
                 self.logger.debug('Calculating smoothed ratios of read depths.')
             smoothed_ratios = {}
-            for name in self.depths_totals:
+            for seq_name in self.depths_totals:
                 use_ratios = self.ratios
                 these_means = _array('f')
-                for i in range(0, len(use_ratios) * resolution - window, resolution):  #break
+                for i in range(0, len(use_ratios[seq_name]) * resolution - \
+                        window, resolution):
                     # collect nt range allowing for resolution of ratios
-                    these = use_ratios[(i / resolution) : ((i + window) / resolution)]
+                    start = int(i / resolution)
+                    end = int((i + window) / resolution)
+                    these = use_ratios[seq_name][start:end]
                     # exclude zero ratios from calculation of mean: 
                     # associated with areas of low quality read alignments
-                    # also present at edges of large deletions so prevent them lowering window mean prematurely
+                    # also present at edges of large deletions so prevent
+                    # them lowering window mean prematurely
                     # require minimum half window length 
                     these = [t for t in these if t >= 0]
                     if len(these) <= window / 2.0 / resolution:
-                        # when length of non-zero window is less than half that specified,
-                        # make up with zeros to decrease mean moderately close to edge of 
-                        # reference chromosome region with reads mapped
+                        # when length of non-zero window is less than half
+                        # that specified, make up with zeros to decrease mean 
+                        # moderately close to edge of reference chromosome
+                        # region with reads mapped
                         these += [0] * int(window / 2.0 / resolution - len(these))
                     
                     these_mean = sum(these) / float(len(these))
                     these_means.append(these_mean)
-                smoothed_ratios[name] = these_means
+                smoothed_ratios[seq_name] = these_means
             
             self.smoothed_ratios = smoothed_ratios
         elif hasattr(self, 'smoothed_ratios'):
@@ -716,8 +735,12 @@ class Checker(_MetaSample):
 
 
         # if input is a (sparse) dict, make it list-like
+
+        #for v in these_values[::10]: threshold_crossed(v)
+
         suspect_regions = {}
-        for chrm_name,these_values in values.items():
+        for seq_name,these_values in values.items():
+            # convert to array adding zeros if/when required
             if isinstance(these_values, dict):
                 data_type = str(type(these_values.values()[0])).split("<type '")[1][0]
                 use_values = _array(data_type)
@@ -730,8 +753,14 @@ class Checker(_MetaSample):
                 use_values = these_values
             
             these_suspect_regions = []
-            collecting = False
-            positions = range(offset, len(these_values)*resolution + offset, resolution)
+            positions = range(offset, len(these_values)*resolution + offset, 
+                    resolution)
+            # initialise collecting depending on state at beginning
+            if threshold_crossed(use_values[0]):
+                collecting = True
+                these_suspect_regions += [positions[0]]
+            else:
+                collecting = False
             for pos,v in zip(positions, use_values):
                 if threshold_crossed(v):
                     if not collecting:
@@ -746,7 +775,7 @@ class Checker(_MetaSample):
             
             if len(these_suspect_regions) % 2 != 0:
                 # complete terminal range
-                these_suspect_regions += [self.genome_length[chrm_name]]
+                these_suspect_regions += [self.genome_lengths[seq_name]]
             
             these_suspect_regions = [these_suspect_regions[n:n+2] for n in \
                     range(0,len(these_suspect_regions),2)]
@@ -754,16 +783,14 @@ class Checker(_MetaSample):
             # omit either end according to buffer_distance
             these_suspect_regions = [(s,e) for s,e in these_suspect_regions if \
                     s > buffer_distance and \
-                    e < (len(values)*resolution + offset - buffer_distance)]
+                    e < (len(use_values)*resolution + offset - buffer_distance)]
             
-            suspect_regions[chrm_name] = these_suspect_regions
+            suspect_regions[seq_name] = these_suspect_regions
 
         if hasattr(self, 'suspect_regions'):
             self.suspect_regions[filter_name] = suspect_regions
         else:
             self.suspect_regions = {filter_name : suspect_regions}
-
-
 
 
     def extend_regions(self,    filter_name, 
@@ -779,7 +806,7 @@ class Checker(_MetaSample):
         '''
 
         extensions = {}
-        for chrm_name,suspect_regions in self.suspect_regions[filter_to_extend].items():
+        for seq_name,suspect_regions in self.suspect_regions[filter_to_extend].items():
             these_extensions = []
             for n in range(len(suspect_regions) - 1 ):
                 right_edge = suspect_regions[n][1]
@@ -789,12 +816,12 @@ class Checker(_MetaSample):
                 join = True
                 if right_edge < next_left_edge - window_size:
                     for p in range(right_edge, next_left_edge - window_size):
-                        these_ratios = self.ratios[p / resolution: (p + window_size) / resolution]
+                        these_ratios = self.ratios[seq_name][p / resolution: (p + window_size) / resolution]
                         if len([r for r in these_ratios if r < 0]) < window_size / resolution * threshold:
                             join = False
                             break
                 else:
-                    these_ratios = self.ratios[right_edge / resolution: next_left_edge / resolution]
+                    these_ratios = self.ratios[seq_name][right_edge / resolution: next_left_edge / resolution]
                     effective_window_size = next_left_edge - right_edge
                     if len([r for r in these_ratios if r <= 0]) > effective_window_size / resolution * threshold:
                         these_extensions += [[right_edge,next_left_edge]]
@@ -817,7 +844,7 @@ class Checker(_MetaSample):
                     # extend from right to left (if necessary)
                     join = True
                     for p in range(end, next_left_edge - window_size)[::-1]:  #break
-                        these_ratios = self.ratios[p / resolution: (p + window_size) / resolution]
+                        these_ratios = self.ratios[seq_name][p / resolution: (p + window_size) / resolution]
                         if len([r for r in these_ratios if r < 0]) < window_size / resolution * threshold:
                             join = False
                             break
@@ -830,12 +857,123 @@ class Checker(_MetaSample):
                         # got past at least first window: store non-aligned region
                         these_extensions += [[p + int(round(window_size / 2.0)), next_left_edge]]
             
-            extensions[chrm_name] = these_extensions
+            extensions[seq_name] = these_extensions
 
         if hasattr(self, 'suspect_regions'):
             self.suspect_regions[filter_name] = extensions
         else:
             self.suspect_regions = {filter_name : extensions}
+
+def plotRegions(BAMs, genome, 
+        regions = False,
+        force = False,
+        # if part of a pipeline with existing logger:
+        task_name = False,
+        console_verbosity_lvl = False,
+        log_folder = False):
+    '''
+    Plot all or some of the regions affected by rearrangements
+
+    This function should be called on a per sample basis
+
+    Parameters
+    ----------
+    regions : dict
+        sequence names as keys and tuple integer ranges as values for regions to plot
+    '''
+
+    # this is a module level function calling other objects from module
+
+    module_name = __name__
+    # pass log_folder on to objects.__init__()
+    # also console_verbosity_lvl but not sure when used <== missing .set_verbosity bug? <==
+    # analysis_path needed?
+
+    if task_name:
+        # if this has been called via the CLI it is part of a task
+        logger = _logging.getLogger(task_name)
+        # need to add adaptor after getting (handlers etc are retained from configureLogger)
+        # in this namespace logger is the adaptor but not beyond
+        logger = _logging.LoggerAdapter(logger, {'task': task_name})
+    else:
+        # else conform to conventional Python logging and use module name
+        logger = _logging.getLogger(module_name)
+
+
+    checkers = {}
+    for BAM in BAMs:
+        reads = _pysam.Samfile(BAM, 'rb')
+        # baga only compatible with one reads group per bam currently
+        reads_name = reads.header['RG'][0]['ID']
+        sample_name = '{}__{}'.format(reads_name, genome.sample_name)
+        logger.info('Loading data for: "{}"'.format(sample_name))
+        checker = Checker(sample_name = sample_name, 
+                task_name = task_name, 
+                console_verbosity_lvl = console_verbosity_lvl, 
+                log_folder = log_folder, inherit_from = 'self')
+        
+        if not hasattr(checker, 'depths_propers'):
+            raise Exception('Sample {} seems to be missing data for plotting: '\
+                    'please check stucture first')
+        else:
+            checkers[reads_name] = checker
+
+    # needed for plotting
+    # checker.smoothed_resolution = smoothed_resolution
+    # checker.threshold = ratio_threshold
+
+    plot_folder = 'plots_structure'
+    filter_name = 'high non-proper pairs'
+
+    # assert checker_info['genome_name'] == genome.id, e
+    outdir = _os.path.sep.join([plot_folder, genome.sample_name])
+    if not _os.path.exists(outdir):
+        _os.makedirs(outdir)
+
+    if not regions:
+        # all ranges for filtering for this sample
+        # currently range selection is rearrangements filter, not including the extensions
+        # do_ranges = checker_info['suspect_region']['rearrangements_extended']
+        do_regions = {}
+        for reads_name,checker in checkers.items():
+            do_regions[reads_name] = {}
+            for seq_name,these_ranges in checker.suspect_regions['rearrangements'].items():
+                do_regions[reads_name][seq_name] = []
+                for s,e in sorted(these_ranges):
+                    # select consistant plotting region for comparison between samples
+                    plot_chrom_start = int(round(s - 500 - 100, -3))
+                    if s + 2500 > e:
+                        plot_chrom_end = plot_chrom_start + 2500
+                    else:
+                        plot_chrom_end = int(round(e + 500 + 100, -3))
+                    
+                    do_regions[reads_name][seq_name] += [(plot_chrom_start,plot_chrom_end)]
+    else:
+        # specific region of specific sequence already provided
+        # will plot for all BAMs provided
+        for reads_name,checker in checkers.items():
+            do_regions[reads_name] = regions
+
+    for reads_name,checker in checkers.items():
+        logger.info('Plotting filter regions for {} reads aligned to {}'\
+                ''.format(reads_name, genome.sample_name))
+        for seq_name,regions in do_regions[reads_name].items():
+            for plot_chrom_start,plot_chrom_end in regions:
+                plot_filename = '{:07d}_{:07d}_{}__{}__{}.svg'.format(
+                        plot_chrom_start, plot_chrom_end, seq_name, 
+                        checker.genome_name, checker.reads_name)
+                plot_output_path = [outdir, plot_filename]
+                plot_output_path = _os.path.sep.join(plot_output_path)
+                logger.debug('Plotting to: {}'.format(plot_output_path))
+                # one Plotter per plot . . would be better to supply plot_output_path
+                # for each plotter.doPlot() ? would need moving code from __init__()
+                # refactor if/wehen creating unified plotter for this and repeats
+                plotter = Plotter(checker, genome, plot_output_path)
+                plotter.doPlot(seq_name, plot_chrom_start, plot_chrom_end, 
+                        panel = ((1,1),(1,1)), label = checker.reads_name)
+
+
+    #return(checkers)
 
 class Plotter:
     '''
@@ -843,7 +981,7 @@ class Plotter:
     to have undergone structural rearrangements as found by an instance of the 
     Checker class.
     '''
-    def __init__(self, checker_info, genome, plot_output_path,
+    def __init__(self, checker, genome, plot_output_path,
         width_cm = 30, height_cm = 10, 
         viewbox_width_px = 1800, viewbox_height_px = 600,
         plot_width_prop = 0.8, plot_height_prop = 0.8, 
@@ -859,12 +997,10 @@ class Plotter:
         area covered by actual plot, to allow space for labels.
         '''
         
-        e = 'The provided genome ({}) does not seem to match the reference \
-    sequence of the provided read alignment ({})'.format(
-                                        genome.id, 
-                                        checker_info['genome_name'])
-        
-        assert genome.id == checker_info['genome_name'], e
+        e = 'The provided genome ({}) does not seem to match the reference '\
+                'sequence of the provided read alignment ({})'.format(
+                genome.sample_name, checker.genome_name)
+        assert genome.sample_name == checker.genome_name, e
         
         self.genome = genome
         
@@ -881,7 +1017,7 @@ class Plotter:
         self.viewbox_height_px = viewbox_height_px
         self.plot_width_prop = plot_width_prop
         self.plot_height_prop = plot_height_prop
-        self.checker_info = checker_info
+        self.checker = checker
         self.dwg = dwg
         self.rgb = _svgwrite.rgb
 
@@ -891,7 +1027,8 @@ class Plotter:
         pos_plot = (pos_chrom - start) * ((self.viewbox_width_px * self.plot_width_prop) / plotlen_chrom)
         return(pos_plot)
 
-    def plot_scale(self,    start, 
+    def plot_scale(self,    seq_name,
+                            start, 
                             end, 
                             panel, 
                             num_ticks = 5,
@@ -922,7 +1059,7 @@ class Plotter:
                 tick_dist -= rm
 
         plotpositions_chrom = []
-        for pos in range(0, len(self.genome.sequence), tick_dist):
+        for pos in range(0, len(self.genome.sequence[seq_name]), tick_dist):
             if start <= pos <= end:
                 plotpositions_chrom += [pos]
 
@@ -1000,7 +1137,7 @@ class Plotter:
             self.dwg.add(xaxislabel)
 
 
-    def plot_ORFs(self, start, end, 
+    def plot_ORFs(self, seq_name, start, end, 
                         panel = ((1,1),(1,1)), 
                         stroke_width = 40, 
                         colour = (0,0,0,'%'), 
@@ -1033,7 +1170,8 @@ class Plotter:
 
         # collect names, strand and ranges of ORFs
         ORF_plot_info = []
-        for ID,(s,e,d,name) in self.genome.ORF_ranges.items():
+        # ORFs; RNA; large
+        for ID,(s,e,d,name) in self.genome.annotations[seq_name][0].items():
             status = False
             if start <= s and e < end:
                 plot_x_s = self.chrom2plot_x(s, start, end) + plotstart_x
@@ -1261,7 +1399,7 @@ class Plotter:
                 y = plotbottom_y - (use_y_offset + feature_thickness * 0.5)
                 added_label.rotate(-25, center = (x, y))
 
-    def plot_LargeFeatures(self, start, end, panel = ((1,1),(1,1)),
+    def plot_LargeFeatures(self, seq_name, start, end, panel = ((1,1),(1,1)),
                           stroke_width = 40, colour = (20, 20, 20,'%'), 
                           font_size = 15, use_fontfamily = 'Nimbus Sans L'):
         
@@ -1292,7 +1430,7 @@ class Plotter:
 
         Features_to_plot = []
         #for feat_chrom_start,feat_chrom_end,n in Features:
-        for name, (feat_chrom_start, feat_chrom_end) in self.genome.large_mobile_element_ranges.items():
+        for name, (feat_chrom_start, feat_chrom_end) in self.genome.annotations[seq_name][2].items():
             # don't plot unless part of feature is within plotting range
             if feat_chrom_start < end and feat_chrom_end > start:
                 s = self.chrom2plot_x(max( start, feat_chrom_start), start, end ) + plotstart_x
@@ -1513,7 +1651,8 @@ class Plotter:
                         pass
 
         # get positions on x-axis to plot
-        plotpositions_x = [self.chrom2plot_x(pos_chrom, start, end) for pos_chrom in plotpositions_chrom]
+        plotpositions_x = [self.chrom2plot_x(pos_chrom, start, end) \
+                for pos_chrom in plotpositions_chrom]
 
         #### plot values ####
 
@@ -1714,6 +1853,7 @@ class Plotter:
         return(max_y_scale)
 
     def plot_suspect_regions(self, 
+                              seq_name,
                               start, end, 
                               suspect_regions, 
                               panel = ((1,1),(1,1)),
@@ -1729,7 +1869,7 @@ class Plotter:
         lane_plot_height = lane_lower_y - lane_upper_y
 
         # draw ambiguous (translocated) regions
-        for chrm_s,chrm_e in suspect_regions:
+        for chrm_s,chrm_e in suspect_regions[seq_name]:
             if chrm_e > start and chrm_s < end:
                 
                 s = self.chrom2plot_x(max(chrm_s, start), start, end)
@@ -1796,7 +1936,8 @@ class Plotter:
 
         self.dwg.add(plot_path)
 
-    def doPlot(self,    plot_chrom_start, 
+    def doPlot(self,    seq_name,
+                        plot_chrom_start, 
                         plot_chrom_end, 
                         panel = ((1,1),(1,1)), 
                         label = False, 
@@ -1808,14 +1949,14 @@ class Plotter:
                                             panel = panel)
 
         # plot scale
-        self.plot_scale(plot_chrom_start, plot_chrom_end, panel)
+        self.plot_scale(seq_name, plot_chrom_start, plot_chrom_end, panel)
         # plot ORFs
-        self.plot_ORFs(plot_chrom_start, plot_chrom_end, panel)
+        self.plot_ORFs(seq_name, plot_chrom_start, plot_chrom_end, panel)
         # plot large features
-        self.plot_LargeFeatures(plot_chrom_start, plot_chrom_end, panel)
+        self.plot_LargeFeatures(seq_name, plot_chrom_start, plot_chrom_end, panel)
 
 
-        max_y_scale = self.plot_values(     self.checker_info['depth_total'], 
+        max_y_scale = self.plot_values(     self.checker.depths_totals[seq_name], 
                                             plot_chrom_start, 
                                             plot_chrom_end, 
                                             label, 
@@ -1825,7 +1966,7 @@ class Plotter:
                                             y_axis_label = 'Aligned Reads',
                                             add_sample_label = True)
 
-        self.plot_values(                   self.checker_info['depth_proper'], 
+        self.plot_values(                   self.checker.depths_propers[seq_name], 
                                             plot_chrom_start, 
                                             plot_chrom_end, 
                                             label, 
@@ -1835,7 +1976,8 @@ class Plotter:
                                             max_y_scale = max_y_scale,
                                             add_sample_label = False)
 
-        self.plot_values(  [r if r != -1 else 0 for r in self.checker_info['ratios']], 
+        ## plot raw ratios
+        self.plot_values(  [r if r != -1 else 0 for r in self.checker.ratios[seq_name]], 
                               plot_chrom_start, 
                               plot_chrom_end, 
                               label, 
@@ -1848,10 +1990,17 @@ class Plotter:
                               max_y_scale = axis_ratio_max,
                               add_sample_label = False)
 
-        offset = int(round( self.checker_info['depth_resolution'] * \
-                self.checker_info['smoothed_resolution'] / 2.0))
+        ## plot smoothed ratios
+        #offset = int(round( self.checker.depth_resolution * \
+        #        self.checker.smoothed_resolution / 2.0))
 
-        self.plot_values(     self.checker_info['smoothed_ratios'], 
+        offset = int(round(self.checker.smoothed_window / 2.0))
+
+        ## this offset makes smoothed line match zones to exclude, but those zones must have been generated with this offset also
+        ## so why aren't smoothered stored with this offset
+        ## and finally, offset is too little (half?)
+
+        self.plot_values(     self.checker.smoothed_ratios[seq_name], 
                               plot_chrom_start, 
                               plot_chrom_end, 
                               label, 
@@ -1865,21 +2014,23 @@ class Plotter:
                               add_sample_label = False)
 
         # plot threshold
-        self.plot_threshold(self.checker_info['threshold'], axis_ratio_max)
+        self.plot_threshold(self.checker.threshold, axis_ratio_max)
 
         # high proportion of non-proper pairs
-        self.plot_suspect_regions(       plot_chrom_start, 
+        self.plot_suspect_regions(       seq_name,
+                                         plot_chrom_start, 
                                          plot_chrom_end,
-                                         self.checker_info['suspect_regions']['rearrangements'],
+                                         self.checker.suspect_regions['rearrangements'],
                                          panel = panel,
                                          colour = ('80', '10', '0', '%'))
 
         # orange in inkscape
         #[float(int('e6aa00'[s:s+2], base=16))/255 for s in (0,2,4)]
         # extension near high proportion of non-proper pairs
-        self.plot_suspect_regions(       plot_chrom_start, 
+        self.plot_suspect_regions(       seq_name,
+                                         plot_chrom_start, 
                                          plot_chrom_end,
-                                         self.checker_info['suspect_regions']['rearrangements_extended'],
+                                         self.checker.suspect_regions['rearrangements_extended'],
                                          panel = panel,
                                          colour = ('90', '60', '00', '%'))
 
@@ -1887,7 +2038,241 @@ class Plotter:
         self.dwg.save()
 
 
-class Collector:
+def collectRegions(BAMs, genome, 
+        regions = False,
+        max_memory = False, 
+        num_padding_positions = 5000, 
+        min_align_region = 200, 
+        force = False,
+        # if part of a pipeline with existing logger:
+        task_name = False,
+        console_verbosity_lvl = False,
+        log_folder = False):
+    '''
+    Plot all or some of the regions affected by rearrangements
+
+    This function should be called on a per sample basis
+
+    Parameters
+    ----------
+    regions : dict
+        sequence names as keys and tuple integer ranges as values for regions to plot
+    '''
+
+    # this is a module level function calling other objects from module
+
+    module_name = __name__
+    # pass log_folder on to objects.__init__()
+    # also console_verbosity_lvl but not sure when used <== missing .set_verbosity bug? <==
+    # analysis_path needed?
+
+    if task_name:
+        # if this has been called via the CLI it is part of a task
+        logger = _logging.getLogger(task_name)
+        # need to add adaptor after getting (handlers etc are retained from configureLogger)
+        # in this namespace logger is the adaptor but not beyond
+        logger = _logging.LoggerAdapter(logger, {'task': task_name})
+    else:
+        # else conform to conventional Python logging and use module name
+        logger = _logging.getLogger(module_name)
+
+
+    out_folder = 'read_collections'
+    # assert checker_info['genome_name'] == genome.id, e
+    out_path = _os.path.sep.join([out_folder, genome.sample_name])
+    if not _os.path.exists(out_path):
+        _os.makedirs(out_path)
+
+    # --collect always assembles
+    from baga import AssembleReads
+    if max_memory:
+        use_mem_gigs = max_memory
+    else:
+        # round down available GBs
+        use_mem_gigs = int(_get_available_memory())
+
+    if regions:
+        # add some padding around the disrupted regions
+        use_num_padding_positions = num_padding_positions
+    else:
+        # regions supplied, use those exactly
+        use_num_padding_positions = 0
+
+    #checkers = {}
+    for BAM in BAMs:
+        logger.info('Collecting short reads from {} aligned to {}'\
+                ''.format(BAM, genome.sample_name))
+        
+        collector = Collector(BAM, genome_name = genome.sample_name, 
+                    task_name = task_name, 
+                    console_verbosity_lvl = console_verbosity_lvl, 
+                    log_folder = log_folder)
+        
+        # could check sequence names of genome against those in BAM here?
+        # collector.reads.references vs genome.sequences ?
+        if set(collector.reads.references) != set(genome.sequence):
+            raise Exception('sequence names in BAM and genome do not match')
+        #set(collector.genome_lengths) == set()
+        
+        # always need unmapped and poorly mapped reads
+        # extract from BAM and write fastq
+        ##### update for all sequences:
+        collector.getUnmapped(low_quality_mapping_threshold = 10)
+        r1_out_path_um, r2_out_path_um, rS_out_path_um = \
+                collector.writeUnmapped(out_path)
+        
+        ##### is this needed even for single assembly?
+        # assemble poorly/unmapped alone first to subtract from other assemblies
+        reads_path_unmapped = {} #?
+        output_folder_um = \
+                '_'.join(r1_out_path_um.split('_')[:-1]).split(_os.path.sep)[-1]
+        reads_path_unmapped[output_folder_um] = (r1_out_path_um, r2_out_path_um, 
+                rS_out_path_um)
+        path_to_bad_unmapped_contigs = _os.path.sep.join([out_folder, 
+                genome.sample_name, output_folder_um, 'contigs.fasta'])
+        if _os.path.exists(path_to_bad_unmapped_contigs) and \
+                _os.path.getsize(path_to_bad_unmapped_contigs) > 0 and \
+                not force:
+            logger.info('Found assembly at {}\nUse --force/-F to overwrite. '\
+                    'Skipping . . .'.format(path_to_bad_unmapped_contigs))
+        else:
+            if not force:
+                logger.info('Nothing found at {}. Doing assembly.'.format(
+                        path_to_bad_unmapped_contigs))
+            
+            reads = AssembleReads.DeNovo(paths_to_reads = reads_path_unmapped)
+            reads.SPAdes(output_folder = [out_folder, genome.sample_name], 
+                    mem_num_gigs = use_mem_gigs, only_assembler = True, 
+                    careful = False)
+        
+        # first decide regions to do for this BAM
+        do_regions = {}
+        if not regions:
+            # no ranges provided so assemble each region detected when checking structure
+            # assemble each region separately
+            # currently range selection is rearrangements with the extensions
+            # need to load checker
+            single_assembly = False
+            sample_name = '{}__{}'.format(collector.reads_name, 
+                    genome.sample_name)
+            logger.info('Loading data for: "{}"'.format(sample_name))
+            checker = Checker(sample_name = sample_name, 
+                    task_name = task_name, 
+                    console_verbosity_lvl = console_verbosity_lvl, 
+                    log_folder = log_folder, inherit_from = 'self')
+            
+            for seq_name,rearrangements in checker.suspect_regions['rearrangements'].items():
+                rearrangements_extended = checker.suspect_regions['rearrangements_extended'][seq_name]
+                # join main rearrangement zones with extended regions if found
+                # to get contiguous blocks for investigation
+                # extensions start on same pos so just remove ordinates listed twice
+                all_regions = sorted(rearrangements + rearrangements_extended)
+                use_regions = [a for b in all_regions for a in b]
+                c = _Counter(use_regions)
+                use_regions = [a for a in use_regions if c[a] == 1]
+                use_regions = zip(use_regions[::2],use_regions[1::2])
+                do_regions[seq_name] = use_regions
+        else:
+            # specific region(s) of specific sequence(s) already provided
+            # will assemble together for all BAMs provided
+            single_assembly = True
+            do_regions = regions
+            # single assembly of reads aligned to one or more ranges in
+            # reference(s) suppied by user. (not separate assemblies of
+            # multiple ranges i.e., those with putative rearrangements)
+        
+        # then do the collecting and assembling
+        
+        # assemble read from each region with poorly/unmapped or as requested
+        reads_paths = {}
+        # make a second dict of reads for assembly, all values for unmapped reads
+        # that need to be included in each assembly
+        reads_path_unmapped = {}
+        assemblies_by_region = {}
+        for seq_name,these_regions in sorted(do_regions.items()):
+            for (s,e) in these_regions:
+                collector.makeCollection(seq_name, s, e, 
+                        use_num_padding_positions)
+                r1_out_path, r2_out_path, rS_out_path = collector.writeCollection(out_path)
+                if not r1_out_path:
+                    # if no reads found, False returned
+                    # do not add to reads_paths dict for assembly
+                    logger.debug('no reads found by collector')
+                    continue
+                # put assembly in folder with same name as read files
+                output_folder = \
+                        '_'.join(r1_out_path.split('_')[:-1]).split(_os.path.sep)[-1]
+                path_to_contigs = _os.path.sep.join([out_path, output_folder, 'contigs.fasta'])
+                assemblies_by_region[s,e] = path_to_contigs
+                if _os.path.exists(path_to_contigs) and \
+                        _os.path.getsize(path_to_contigs) > 0 and \
+                        not args.force:
+                    logger.info('Found assembly at {}\nUse --force/-F to '\
+                            'overwrite. Skipping . . .'.format(path_to_contigs))
+                else:
+                    reads_paths[output_folder] = (r1_out_path, r2_out_path, rS_out_path)
+                    reads_path_unmapped[output_folder] = (r1_out_path_um, 
+                            r2_out_path_um, rS_out_path_um)
+            
+            logger.debug('len(assemblies_by_region) == {}'.format(
+                    len(assemblies_by_region)))
+            reads = AssembleReads.DeNovo(paths_to_reads = reads_paths, 
+                    paths_to_reads2 = reads_path_unmapped)
+            reads.SPAdes(output_folder = out_path, mem_num_gigs = use_mem_gigs, 
+                    single_assembly = single_assembly, only_assembler = True, 
+                    careful = False)
+            if False:
+                ### not yet implemented for multi-chromsomes
+                # a dict of paths to contigs per region
+                aligner = Aligner(genome)
+                unmappedfasta = _os.path.sep.join([out_path, 
+                        output_folder_um, 'contigs.fasta'])
+                if _os.path.exists(unmappedfasta) and \
+                        _os.path.getsize(unmappedfasta) > 0:
+                    if len(assemblies_by_region) > 0:
+                        # provide dict of range tuples
+                        aligner.alignRegions(assemblies_by_region, 
+                                use_num_padding_positions, 
+                                path_to_omit_sequences = unmappedfasta, 
+                                single_assembly = single_assembly,
+                                min_region_length = min_align_region)
+                        aligner.reportAlignments()
+                    else:
+                        logger.warning('no assembled regions found. Either there are '\
+                                'none which is fine, or SPAdes assemblies failed '\
+                                'to finish. You could check SPAdes log files in '\
+                                'folders in {}'.format(os.path.sep.join([
+                                'read_collections', genome_name])))
+                else:
+                    logger.warning('no assembled unmapped and poorly mapped reads '\
+                            'found at: {}'.format(unmappedfasta))
+                    try:
+                        r1_size = os.path.getsize(r1_out_path_um)
+                        r2_size = os.path.getsize(r2_out_path_um)
+                        logger.warning('but reads, {} ({:,} bytes) and {} ({:,} bytes), '\
+                                'exist . . check SPAdes assembly log in {}'.format(
+                                r1_out_path_um, r1_size, r2_out_path_um, r2_size, 
+                                unmappedfasta.replace('contigs.fasta','')))
+                    except IOError:
+                        logger.warning('could not find unmapped and poorly aligned '\
+                                'reads at:\n{}\n{}\nthis is unexpected but '\
+                                'conceivable (if ALL reads really did map to '\
+                                'reference!).'.format(r1_out_path_um, r2_out_path_um))
+                    logger.info('proceeding with alignment of assembled putatively '\
+                            'rearranged regions to reference nonetheless')
+                    if len(assemblies_by_region) > 0:
+                        aligner.alignRegions(assemblies_by_region, 
+                                use_num_padding_positions, 
+                                single_assembly = single_assembly)
+                        aligner.reportAlignments()
+                    else:
+                        logger.warning('no assembled regions found. Either there '\
+                                'are none which is fine, or SPAdes assemblies '\
+                                'failed to finish. You could check SPAdes log files '\
+                                'in folders in {}'.format(out_path))
+
+
+class Collector(_MetaSample):
     '''
     Collector class of the Structure module contains methods to extract aligned 
     short reads around regions of probably rearrangements (as found by an instance 
@@ -1895,72 +2280,227 @@ class Collector:
     de novo reconstruction along with the unmapped reads to investigate sequences 
     in regions of interest.
     '''
-    def __init__(self, path_to_bam):
+
+    def __init__(self, path_to_bam, genome_name = False, inherit_from = False, 
+            **kwargs):
         '''
-        Extract paired reads from a BAM file within a single range and write to 
-        a fastq file.
+        Extract paired reads mapped to a sequence described in a BAM file within 
+        a single range and write to a fastq file.
         '''
-        e = 'Could not find %s.\nPlease ensure all BAM files exist'
-        assert _os.path.exists(path_to_bam), e % path_to_bam
+        module_name = __name__
         
+        if not _os.path.exists(path_to_bam):
+            raise Exception('Could not find {}. Please ensure all BAM files '\
+                    'exist'.format(path_to_bam))
+        
+        # this is not logged until super() so exceptions should be sent up to
+        # CLI or whatever is calling module
+        self.path_to_bam = path_to_bam
         self.reads = _pysam.Samfile(path_to_bam, 'rb')
-        # to retain crucial info without needing an open Samfile
+        # baga only compatible with one reads group per bam currently
         self.reads_name = self.reads.header['RG'][0]['ID']
-        self.genome_length = self.reads.lengths[0]
-        self.genome_name = self.reads.references[0]
+        if genome_name:
+            self.genome_name = genome_name
+            sample_name = '{}__{}'.format(self.reads_name, genome_name)
+        else:
+            sample_name = self.reads_name
+        
+        super(Collector, self).__init__(sample_name, module_name, 
+                inherit_from = inherit_from, **kwargs)
+        
+        self.genome_lengths = {}
+        for chrm_name,length in zip(self.reads.references, self.reads.lengths):
+            self.genome_lengths[chrm_name] = length
+        
+        # needed for complementing read sequences in BAMs
         self.transtable = _string.maketrans('ACGT','TGCA')
 
+    def getUnmapped(self, low_quality_mapping_threshold = 10):
+        '''
+        Using pySAM, fetch all unmapped and poorly mapped (aligned) paired end reads
+        default for poorly mapped is 10% (0.1) chance of being wrong or worse:
+        -10*math.log(0.1)/math.log(10) == 10
+
+        If one read is unmapped or poorly mapped, both reads are collected.
+        '''
+
+        c = 0
+        read_pairs = {}
+        for seq_name in self.reads.references:
+            these_pairs = {}
+            self.logger.info('Searching for unmapped and poorly mapped '\
+                    '(aligned) reads for {} against {}'.format(
+                    self.reads.header['RG'][0]['ID'], seq_name))
+            # a pos0 slice from a pos1 index should be s-1,e
+            # so this is approximate as pos1 or pos0 not specified
+            reads_iter = self.reads.fetch(seq_name)
+            for r in reads_iter:
+                c += 1
+                if r.is_unmapped or r.mapping_quality <= \
+                        low_quality_mapping_threshold:
+                    if r.is_reverse:
+                        # SEQ being reverse complemented
+                        # not sure why unmapped reads would be reverse
+                        # complemented from fastq sequence
+                        read_info = (r.query_sequence[::-1].translate(self.transtable), 
+                                r.qual[::-1])
+                    else:
+                        read_info = (r.query_sequence, r.qual)
+                    try:
+                        these_pairs[r.query_name][int(r.is_read2)+1] = \
+                                (r.query_sequence, r.qual)
+                    except KeyError:
+                        these_pairs[r.query_name] = {}
+                        these_pairs[r.query_name][int(r.is_read2)+1] = \
+                                (r.query_sequence, r.qual)
+            
+            self.logger.info('Found {} pairs (of {:,} total) with at least one '\
+                    'read unmapped against {}'.format(len(these_pairs), 
+                    c, seq_name))
+            read_pairs[seq_name] = these_pairs
+
+        self.unmapped_read_pairs = read_pairs
 
 
-    def makeCollection(self, chrom_start, 
-                             chrom_end, 
-                             num_padding_positions):
+    def writeUnmapped(self, path_to_fastq_folder):
+        '''
+        Write reads to fastq files returning a tuple of paths to: reads 1, reads 2 and singletons
+        '''
+
+
+        prefix = '{}__{}'.format(self.reads_name, self.genome_name)
+
+        r1_fastq_filename = '{0}_unmapped_R1.fastq'.format(
+                        prefix)
+
+        r2_fastq_filename = '{0}_unmapped_R2.fastq'.format(
+                        prefix)
+
+        rS_fastq_filename = '{0}_unmapped_S.fastq'.format(
+                        prefix)
+
+        print('Writing to:\n{}/{}\n{}/{}\n{}/{}\n'.format(
+                        path_to_fastq_folder,
+                        r1_fastq_filename,
+                        path_to_fastq_folder,
+                        r2_fastq_filename,
+                        path_to_fastq_folder,
+                        rS_fastq_filename))
+
+        r1_out_path = _os.path.sep.join([path_to_fastq_folder,r1_fastq_filename])
+        r1_out = open(r1_out_path, 'w')
+
+        r2_out_path = _os.path.sep.join([path_to_fastq_folder,r2_fastq_filename])
+        r2_out = open(r2_out_path, 'w')
+
+        rS_out_path = _os.path.sep.join([path_to_fastq_folder,rS_fastq_filename])
+        rS_out = open(rS_out_path, 'w')
+
+        num_written = 0
+        for seq_name,read_pairs in self.unmapped_read_pairs.items():
+            if len(self.unmapped_read_pairs) == 0:
+                self.logger.warning('no unmapped or poorly mapped reads found '\
+                        'between {} and {} in {} (this might not be a problem).'\
+                        ''.format(self.reads_name, seq_name, self.genome_name))
+            for read_id,reads in read_pairs.items():
+                num_written += 1
+                if len(reads) == 2:
+                    r1seq,r1qual = reads[1]
+                    r1_out.write('@{}/1\n{}\n+\n{}\n'.format(
+                                read_id,
+                                r1seq,
+                                r1qual))
+                    r2seq,r2qual = reads[2]
+                    r2_out.write('@{}/1\n{}\n+\n{}\n'.format(
+                                read_id,
+                                r2seq,
+                                r2qual))
+                elif len(reads) == 1:
+                    n,(rseq,rqual) = reads.items()[0]
+                    rS_out.write('@{}/{}\n{}\n+\n{}\n'.format(
+                                read_id,
+                                n,
+                                rseq,
+                                rqual))
+
+        r1_out.close()
+        r2_out.close()
+        rS_out.close()
+
+        if not num_written:
+            self.logger.debug('No reads written so removing empty fastq files '\
+                    'at: {}, {} and {}'.format(r1_out_path, r2_out_path, 
+                    rS_out_path))
+            _os.unlink(r1_out_path)
+            _os.unlink(r2_out_path)
+            _os.unlink(rS_out_path)
+
+        # return output destination for assembly
+        return(r1_out_path, r2_out_path, rS_out_path)
+
+
+    def makeCollection(self, seq_name,
+                             seq_start, 
+                             seq_end, 
+                             num_padding_positions,
+                             circular = True):
         '''
         Using pySAM, fetch all aligned reads in a specified region . . .
         '''
 
-
-        # for now, only handling first chromosome
-        chromo_name = self.reads.references[0]
+        ## this bit accounts for padding off one end requiring reads to be
+        ## collected from the other end. Set circular = False for assembly
+        ## contigs or linear chromosomes
         # a pos0 slice from a pos1 index should be s-1,e
         # so this is approximate as pos1 or pos0 not specified
         range_min = 0
-        range_max = self.reads.lengths[0]
+        range_max = self.reads.lengths[self.reads.references.index(seq_name)]
         ranges = []
-        range_start = chrom_start - num_padding_positions
-        range_end = chrom_end + num_padding_positions
+        range_start = seq_start - num_padding_positions
+        range_end = seq_end + num_padding_positions
 
         if range_start < range_min and range_end > range_max:
-            print('WARNING: requested alignment range ({}-{}bp), which includes '\
-                    'additional padding ({}bp) exceeds alignment (reference sequence) '\
-                    'length: {}. Using all reads in this alignment.'.format(range_start, 
-                    range_end, num_padding_positions, self.reads.lengths[0]))
+            self.logger.warning('requested alignment range ({}-{}bp), which '\
+                    'includes additional padding ({}bp) exceeds alignment '\
+                    '(reference sequence) length: {}. Using all reads in this '\
+                    'alignment.'.format(range_start, range_end, 
+                    num_padding_positions, self.reads.lengths[0]))
             range_start = range_min
             range_end = range_max
         elif range_start < range_min:
-            assert range_start < 0, 'range_start should be negative'
-            ranges += [(range_max + range_start, range_max)]
+            if circular:
+                self.logger.debug('Assuming sequences are circlur and not '\
+                        'contigs: collecting some reads from far end of a '\
+                        'sequence ({})'.format(seq_name))
+                ranges += [(range_max + range_start, range_max)]
             range_start = range_min
         elif range_end > range_max:
-            ranges += [(range_min, range_end - range_max)]
+            if circular:
+                self.logger.debug('Assuming sequences are circlur and not '\
+                        'contigs: collecting some reads from far end of a '\
+                        'sequence ({})'.format(seq_name))
+                ranges += [(range_min, range_end - range_max)]
             range_end = range_max
 
         if len(ranges) == 1:
-            print('WARNING: Alignment range ({} to {} bp) spans start or end. Chromosome '\
-                    'assumed to be circular so some reads from other end included in '\
-                    'reads collection'.format(chrom_start - num_padding_positions, 
+            self.logger.warning('Alignment range ({} to {} bp) spans start or '\
+                    'end. Chromosome assumed to be circular so some reads from '\
+                    'other end included in reads collection'.format(
+                    chrom_start - num_padding_positions, 
                     chrom_end + num_padding_positions))
 
         ranges += [(range_start, range_end)]
 
         read_pairs = {}
         for start,end in ranges:
-            print('Collecting from {} to {} bp in {}'.format(start, end, chromo_name))
-            reads_iter = self.reads.fetch(chromo_name, start, end)
+            self.logger.info('Collecting from {} to {} bp in {}'.format(start, 
+                    end, seq_name))
+            reads_iter = self.reads.fetch(str(seq_name), start, end)
             for r in reads_iter:
                 if r.is_reverse:
                     # SEQ being reverse complemented
-                    read_info = (r.query_sequence[::-1].translate(self.transtable), r.qual[::-1])
+                    read_info = (r.query_sequence[::-1].translate(self.transtable), 
+                            r.qual[::-1])
                 else:
                     read_info = (r.query_sequence, r.qual)
                 
@@ -1970,57 +2510,59 @@ class Collector:
                     read_pairs[r.query_name] = {}
                     read_pairs[r.query_name][int(r.is_read2)+1] = read_info
 
-        self.read_pairs = read_pairs
-        self.chrom_start = chrom_start
-        self.chrom_end = chrom_end
-        self.num_padding_positions = num_padding_positions
+        self.collected_read_pairs = read_pairs
+        self.collected_seq_name = seq_name
+        self.collected_start = seq_start
+        self.collected_end = seq_end
+        self.collected_num_padding_positions = num_padding_positions
 
-        print('Found {} pairs with at least one read mapped to this region'.format(len(self.read_pairs)))
+        self.logger.info('Found {} pairs with at least one read mapped to this '\
+                'region'.format(len(read_pairs)))
 
     def writeCollection(self, path_to_fastq_folder):
         '''
         Write reads to a fastq file
         '''
 
-        if len(self.read_pairs) == 0:
-            print('WARNING: no reads found at {}-{} bp between {} and {}. Not writing fastq files.'.format(
-                        self.chrom_start,
-                        self.chrom_end,
-                        self.reads_name, 
-                        self.genome_name))
+        if len(self.collected_read_pairs) == 0:
+            self.logger.warning('no reads found at {}-{} bp between {} and {}. '\
+                    'Not writing fastq files.'.format(self.collected_start,
+                    self.collected_end, self.reads_name, 
+                    self.collected_seq_name))
             return(None, None, None)
         else:
-            prefix = '{}__{}'.format(self.reads_name, self.genome_name)
-            zeropadding = len(str(self.reads.header['SQ'][0]['LN']))
+            prefix = '{}__{}__{}'.format(self.reads_name, self.genome_name, 
+                    self.collected_seq_name)
+            seq_name_i = self.reads.references.index(self.collected_seq_name)
+            zeropadding = len(str(self.reads.lengths[seq_name_i]))
             
             r1_fastq_filename = '{0}_{1:0{3}d}-{2:0{3}d}+{4}_R1.fastq'.format(
                             prefix,
-                            self.chrom_start,
-                            self.chrom_end,
+                            self.collected_start,
+                            self.collected_end,
                             zeropadding,
-                            self.num_padding_positions)
+                            self.collected_num_padding_positions)
             
             r2_fastq_filename = '{0}_{1:0{3}d}-{2:0{3}d}+{4}_R2.fastq'.format(
                             prefix,
-                            self.chrom_start,
-                            self.chrom_end,
+                            self.collected_start,
+                            self.collected_end,
                             zeropadding,
-                            self.num_padding_positions)
+                            self.collected_num_padding_positions)
             
             rS_fastq_filename = '{0}_{1:0{3}d}-{2:0{3}d}+{4}_S.fastq'.format(
                             prefix,
-                            self.chrom_start,
-                            self.chrom_end,
+                            self.collected_start,
+                            self.collected_end,
                             zeropadding,
-                            self.num_padding_positions)
+                            self.collected_num_padding_positions)
             
-            print('Writing to:\n{}/{}\n{}/{}\n{}/{}\n'.format(
-                            path_to_fastq_folder,
-                            r1_fastq_filename,
-                            path_to_fastq_folder,
-                            r2_fastq_filename,
-                            path_to_fastq_folder,
-                            rS_fastq_filename))
+            self.logger.info('Writing to pair member 1 to: {}{}{}'.format(
+                    path_to_fastq_folder, _os.path.sep, r1_fastq_filename))
+            self.logger.info('Writing to pair member 2 to: {}{}{}'.format(
+                    path_to_fastq_folder, _os.path.sep, r2_fastq_filename))
+            self.logger.info('Writing to unpaired to: {}{}{}'.format(
+                    path_to_fastq_folder, _os.path.sep, rS_fastq_filename))
             
             r1_out_path = _os.path.sep.join([path_to_fastq_folder,r1_fastq_filename])
             r1_out = open(r1_out_path, 'w')
@@ -2032,7 +2574,7 @@ class Collector:
             rS_out = open(rS_out_path, 'w')
             
             
-            for read_id,reads in self.read_pairs.items():
+            for read_id,reads in self.collected_read_pairs.items():
                 if len(reads) == 2:
                     r1seq,r1qual = reads[1]
                     r1_out.write('@{}/1\n{}\n+\n{}\n'.format(
@@ -2060,109 +2602,6 @@ class Collector:
             return(r1_out_path, r2_out_path, rS_out_path)
 
 
-    def getUnmapped(self, low_quality_mapping_threshold = 10):
-        '''
-        Using pySAM, fetch all unmapped and poorly mapped (aligned) paired end reads
-        default for poorly mapped is 10% (0.1) chance of being wrong or worse:
-        -10*math.log(0.1)/math.log(10) == 10
-        '''
-
-        # for now, only handling first chromosome
-        chromo_name = self.reads.references[0]
-        # a pos0 slice from a pos1 index should be s-1,e
-        # so this is approximate as pos1 or pos0 not specified
-        reads_iter = self.reads.fetch(chromo_name)
-
-        print('Searching for unmapped and poorly mapped (aligned) reads for {} against {}'.format(self.reads.header['RG'][0]['ID'], chromo_name))
-        c = 0
-        read_pairs = {}
-        for r in reads_iter:
-            c += 1
-            if r.is_unmapped or r.mapping_quality <= low_quality_mapping_threshold:
-                if r.is_reverse:
-                    # SEQ being reverse complemented
-                    # not sure why unmapped reads would be reverse complemented from fastq sequence
-                    read_info = (r.query_sequence[::-1].translate(self.transtable), r.qual[::-1])
-                else:
-                    read_info = (r.query_sequence, r.qual)
-                try:
-                    read_pairs[r.query_name][int(r.is_read2)+1] = (r.query_sequence, r.qual)
-                except KeyError:
-                    read_pairs[r.query_name] = {}
-                    read_pairs[r.query_name][int(r.is_read2)+1] = (r.query_sequence, r.qual)
-
-        self.unmapped_read_pairs = read_pairs
-
-        print('Found {} pairs (of {:,}) with at least one read unmapped'.format(len(self.unmapped_read_pairs), c))
-
-
-
-    def writeUnmapped(self, path_to_fastq_folder):
-        '''
-        Write reads to fastq files returning a tuple of paths to: reads 1, reads 2 and singletons
-        '''
-        if len(self.unmapped_read_pairs) == 0:
-            print('WARNING: no unmapped or poorly mapped reads found between {} and {} (this might not be a problem).'.format(
-                        self.reads_name, 
-                        self.genome_name))
-
-        prefix = '{}__{}'.format(self.reads_name, self.genome_name)
-
-        r1_fastq_filename = '{0}_unmapped_R1.fastq'.format(
-                        prefix)
-
-        r2_fastq_filename = '{0}_unmapped_R2.fastq'.format(
-                        prefix)
-
-        rS_fastq_filename = '{0}_unmapped_S.fastq'.format(
-                        prefix)
-
-        print('Writing to:\n{}/{}\n{}/{}\n{}/{}\n'.format(
-                        path_to_fastq_folder,
-                        r1_fastq_filename,
-                        path_to_fastq_folder,
-                        r2_fastq_filename,
-                        path_to_fastq_folder,
-                        rS_fastq_filename))
-
-
-        r1_out_path = _os.path.sep.join([path_to_fastq_folder,r1_fastq_filename])
-        r1_out = open(r1_out_path, 'w')
-
-        r2_out_path = _os.path.sep.join([path_to_fastq_folder,r2_fastq_filename])
-        r2_out = open(r2_out_path, 'w')
-
-        rS_out_path = _os.path.sep.join([path_to_fastq_folder,rS_fastq_filename])
-        rS_out = open(rS_out_path, 'w')
-
-        for read_id,reads in self.unmapped_read_pairs.items():
-            if len(reads) == 2:
-                r1seq,r1qual = reads[1]
-                r1_out.write('@{}/1\n{}\n+\n{}\n'.format(
-                            read_id,
-                            r1seq,
-                            r1qual))
-                r2seq,r2qual = reads[2]
-                r2_out.write('@{}/1\n{}\n+\n{}\n'.format(
-                            read_id,
-                            r2seq,
-                            r2qual))
-            elif len(reads) == 1:
-                n,(rseq,rqual) = reads.items()[0]
-                rS_out.write('@{}/{}\n{}\n+\n{}\n'.format(
-                            read_id,
-                            n,
-                            rseq,
-                            rqual))
-
-        r1_out.close()
-        r2_out.close()
-        rS_out.close()
-
-        # return output destination for assembly
-        return(r1_out_path, r2_out_path, rS_out_path)
-
-
 class Aligner:
     '''
     Aligner class of the Structure module contains methods to align contigs, 
@@ -2176,7 +2615,10 @@ class Aligner:
         '''
         
         self.genome = genome
-        self.ORFs_ordered = sorted(genome.ORF_ranges, key = genome.ORF_ranges.get)
+        self.ORFs_ordered = {}
+        for seq_name,annotations in genome.annotations.items():
+            self.ORFs_ordered[seq_name] = sorted(annotations[0], 
+                    key = annotations[0].get)
         self.exe_aligner = _get_exe_path('seq-align')
     def seqalign(self, seqA, seqB, algorithm = 'needleman_wunsch', protein = 'no'):
         

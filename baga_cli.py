@@ -698,10 +698,10 @@ parser_Structure.add_argument('-p', "--plot",
     action = 'store_true')
 
 parser_Structure.add_argument('-r', "--plot_range", 
-    help = "plot a specific region to see how it was affected by structural rearrangements found using '--check'. Uses the svgwrite library",
-    type = int,
-    nargs = 2,
-    metavar = 'CHROMOSOME_POSITION')
+    help = "plot a specific region on a specific sequence to see how it was affected by structural rearrangements found using '--check'. Uses the svgwrite library. e.g., '--plot_range chrm1 2000 3000 chrm2 4000 5000' will plot region 2000 to 3000 bp in sequence (replicon or contig) 1 and 4000 to 5000 bp in sequence 2",
+    type = str,
+    nargs = '+',
+    metavar = 'CHROMOSOME_NAME START_POSITION END_POSITION')
 
 parser_Structure.add_argument('-t', "--ratio_threshold", 
     help = "When checking for rearrangements, the ratio of non-proper pair to proper pair assigned reads above this value cause a region of read alignments to be considered rearranged. This ratio tends to zero rhen the distance between aligned paired reads is close to the expectation according to the estimated mean fragment size. It increases to around one adjacent to rearrangements e.g., within a fragment's length of a large deletion in the sample/insertion in the reference. Lower values are more sensitive to rearrangements but might include false positive rearrangements, but these can be examined by local de novo assembly of reads and pairwise alignment of contig with reference. If used to filter regions affected by unreliable short read alignments for variant calling, lower values are more conservative (will exclude more false positive variants) but might cause omission of true positive variants. Default = 0.15",
@@ -731,10 +731,10 @@ parser_Structure.add_argument('-C', "--collect",
     action = 'store_true')
 
 parser_Structure.add_argument('-R', "--collect_ranges", 
-    help = "extract short reads aligned at specified region or regions, write to a .fastq file, assemble de novo using SPAdes and align contigs back to reference chromosome. --num_padding_positions will be set to zero. If more than one region set e.g., --collect_ranges 10000 20000 80000 90000, the reads in range 10000-20000 bp and 80000-90000 bp along with unmapped and poorly mapped reads will be assembled together.",
+    help = "extract short reads aligned at specified region or regions, write to a .fastq file, assemble de novo using SPAdes and align contigs back to reference chromosome. --num_padding_positions will be set to zero. If more than one region set e.g., --collect_ranges chrm1 10000 20000 chrm1 80000 90000, the reads in range 10000-20000 bp and 80000-90000 bp on chromosome 'chrm1' along with unmapped and poorly mapped reads will be assembled together.",
     type = int,
     nargs = '+',
-    metavar = 'CHROMOSOME_POSITION')
+    metavar = 'CHROMOSOME_NAME START_POSITION END_POSITION')
 
 parser_Structure.add_argument('-F', "--force", 
     help = "overwrite existing assemblies when using --collect/-C.",
@@ -2278,24 +2278,34 @@ if task_name == 'Structure':
     from baga import Structure
     from baga import CollectData
     
-    if not(args.check or args.plot or args.plot_range or args.summarise or args.collect):
-        parser_Structure.error('Need at least one of --check/-c, --plot/-p or --plot_range/-r or --summarise/-s or --collect/-C')
+    if not(args.check or args.plot or args.plot_range or args.summarise or \
+            args.collect):
+        parser_Structure.error('Need at least one of --check/-c, --plot/-p or '\
+                '--plot_range/-r or --summarise/-s or --collect/-C')
     
-    if args.check or args.plot or args.plot_range or args.collect or args.collect_ranges:
+    if args.check or args.plot or args.plot_range or args.collect or \
+            args.collect_ranges:
         # collect BAMs
         if args.reads_name:
             # baga pipeline information provided
             if not args.genome_name:
-                parser.error('--genome_name/-g is required with --reads_name/-n. (The baga CollectData-processed genome used with the AlignReads option)')
+                parser.error('--genome_name/-g is required with --reads_name/-n.'\
+                        ' (The baga CollectData-processed genome used with the '\
+                        'AlignReads option)')
             
-            use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
-            e = 'Could not locate a saved baga.CollectData.Genome-<genome_name>.baga for name given: {}'.format(args.genome_name)
+            use_path_genome,use_name_genome = check_baga_path(
+                    'baga.CollectData.Genome', args.genome_name)
+            e = 'Could not locate a saved '\
+                    'baga.CollectData.Genome-<genome_name>.baga for name '\
+                    'given: {}'.format(args.genome_name)
             assert all([use_path_genome,use_name_genome]), e
             
             # in case full filename provided
-            use_name_group = args.reads_name.replace('baga.AlignReads.SAMs-', '' , 1).replace('.p.gz', '').replace('.baga', '')
+            use_name_group = args.reads_name.replace('baga.AlignReads.SAMs-', 
+                    '' , 1).replace('.p.gz', '').replace('.baga', '')
             
-            print('Loading alignments information for: {}__{} from AlignReads output'.format(use_name_group, use_name_genome))
+            print('Loading alignments information for: {}__{} from AlignReads '\
+                    'output'.format(use_name_group, use_name_genome))
             
             from baga import AlignReads
             alns_name = '{}__{}'.format(use_name_group, use_name_genome)
@@ -2308,7 +2318,8 @@ if task_name == 'Structure':
                     'AlignReads commands "--align --deduplicate --indelrealign" '\
                     'have been performed.'.format(args.reads_name)
             assert hasattr(alignments, 'ready_BAMs'), e
-            ### shouldn't all BAMs have headers parsed and stored in dict with (sample,genome) from the start?
+            ### shouldn't all BAMs have headers parsed and stored in dict with
+            ### (sample,genome) from the start?
             BAMs = alignments.ready_BAMs[-1]
             sample_names = sorted(alignments.read_files)
             
@@ -2318,8 +2329,10 @@ if task_name == 'Structure':
             for path in args.alignments_paths:
                 if os.path.isdir(path):
                     path_contents = os.listdir(path)
-                    theseBAMs = [os.path.sep.join([path,f]) for f in path_contents if f[-3:] in ('BAM', 'bam')]
-                    e = 'No BAM files (*.bam or *.BAM) found in:\n{}'.format(args.alignments_paths)
+                    theseBAMs = [os.path.sep.join([path,f]) for f in \
+                            path_contents if f[-3:] in ('BAM', 'bam')]
+                    e = 'No BAM files (*.bam or *.BAM) found in:\n{}'.format(
+                            args.alignments_paths)
                     assert len(theseBAMs), e
                     BAMs += theseBAMs
                 else:
@@ -2392,104 +2405,73 @@ if task_name == 'Structure':
             # each do() should have a good doc string describing the order and why
         
         if args.plot or args.plot_range:
+            # plot range needs a sequence specified as well as ordinates
             if args.plot_range:
-                if args.plot_range[0] > args.plot_range[1]:
-                    sys.exit('--plot_range values must be ascending!')
+                # sanity checks
+                if len(args.plot_range) % 3 != 0:
+                    parser.error("--plot_range must be supplied in multiples "\
+                            "of 3 as SEQUENCENAME START END. You supplied: "\
+                            "'--plot_range {}'".format(' '.join(args.plot_range)))
+                    sys.exit(1)
+                import string
+                ranges = list(zip(args.plot_range[1::3]+args.plot_range[2::3]))
+                notnumeric = [r for r in ranges if not set(r) <= set(string.digits)]
+                if not notnumeric:
+                    parser.error("--plot_range must be supplied as "\
+                            "SEQUENCENAME START END (in '{}', not numeric: '{}')"\
+                            "".format(' '.join(args.plot_range),
+                            ', '.join(notnumeric)))
+                    sys.exit(1)
+                use_ranges = {}
+                for i in range(0,len(args.plot_range),3):
+                    this_range = sorted([int(args.plot_range[i+1]), 
+                            int(args.plot_range[i+2])])
+                    try:
+                        use_ranges[args.plot_range[i]] += [this_range]
+                    except KeyError:
+                        use_ranges[args.plot_range[i]] = [this_range]
+            else:
+                use_ranges = False
             # need genome for plotting
             if not args.genome_name:
-                parser.error('--genome_name/-g is required for plotting. (A baga CollectData-processed genome)')
-            else:
-                use_name_genome = args.genome_name.replace('baga.CollectData.Genome-', '' , 1).replace('.baga', '')
-                print('Loading genome %s' % use_name_genome)
-                genome = CollectData.Genome(local_path = 'baga.CollectData.Genome-{}.baga'.format(use_name_genome), format = 'baga')
+                parser.error('--genome_name/-g is required for plotting. '\
+                        '(A baga CollectData-processed genome)')
             
-            if not args.include_samples and not args.reads_name:
-                # need to get sample names from BAMs because not supplied
-                # and didn't collect yet because args.include_samples not provided
-                try:
-                    import pysam
-                except ImportError:
-                    sys.exit('Need pysam to get sample names if not provided for plotting. Use Dependencies --get pysam to install locally')
-                
-                sample_names = []
-                for BAM in BAMs:
-                    sample_names += [pysam.Samfile(BAM, 'rb').header['RG'][0]['ID']]
-                
-                sample_names.sort()
+            use_path_genome,use_name_genome = check_baga_path(
+                    'baga.CollectData.Genome', args.genome_name)
+            e = 'Could not locate a saved '\
+                    'baga.CollectData.Genome-<genome_name>.baga for name '\
+                    'given: {}'.format(args.genome_name)
+            assert all([use_path_genome,use_name_genome]), e
+            task_logger.info('Loading genome {}'.format(use_name_genome))
+            genome = CollectData.Genome(sample_name = use_name_genome, 
+                    inherit_from = 'self')
+            # args.include_samples and/or args.reads_name <== determined by what's in BAMs?
             
-            plot_folder = 'plots_structure'
-            filter_name = 'high non-proper pairs'
-            
-            for sample in sample_names:
-                # get information for plotting
-                filein = 'baga.Structure.CheckerInfo-{}__{}.baga'.format(sample, use_name_genome)
-                
-                try:
-                    checker_info = Structure.loadCheckerInfo(filein)
-                except IOError:
-                    print('Could not find: {}'.format(filein))
-                
-                e = 'Genome name for checker {} ({}) does not match name of supplied genome ({})'.format(
-                                                                            filein, 
-                                                                            checker_info['genome_name'], 
-                                                                            genome.id)
-                assert checker_info['genome_name'] == genome.id, e
-                
-                outdir = os.path.sep.join([plot_folder, checker_info['genome_name']])
-                if not os.path.exists(outdir):
-                    os.makedirs(outdir)
-                
-                print('Plotting filter regions for {} reads aligned to {}'.format(sample, genome.id))
-                
-                if args.plot_range:
-                    # just the requested range
-                    do_ranges = [args.plot_range]
-                    
-                elif args.plot:
-                    # all ranges for filtering for this sample
-                    
-                    # currently range selection is rearrangements filter, not including the extensions
-                    # do_ranges = checker_info['suspect_region']['rearrangements_extended']
-                    
-                    do_ranges = []
-                    for s,e in checker_info['suspect_regions']['rearrangements']:
-                        # select consistant plotting region for comparison between samples
-                        plot_chrom_start = int(round(s - 500 - 100, -3))
-                        if s + 2500 > e:
-                            plot_chrom_end = plot_chrom_start + 2500
-                        else:
-                            plot_chrom_end = int(round(e + 500 + 100, -3))
-                        
-                        do_ranges += [(plot_chrom_start,plot_chrom_end)]
-                
-                for plot_chrom_start,plot_chrom_end in do_ranges:
-                    
-                    if args.reads_name:
-                        plot_filename = '{:07d}_{:07d}_{}__{}__{}.svg'.format(  plot_chrom_start, 
-                                                                                plot_chrom_end, 
-                                                                                checker_info['genome_name'], 
-                                                                                use_name_group, 
-                                                                                sample)
-                    else:
-                        plot_filename = '{:07d}_{:07d}_{}__{}.svg'.format(      plot_chrom_start, 
-                                                                                plot_chrom_end, 
-                                                                                checker_info['genome_name'],
-                                                                                sample)
-                    
-                    plot_output_path = [outdir, plot_filename]
-                    plot_output_path = os.path.sep.join(plot_output_path)
-                    print(plot_output_path)
-                    plotter = Structure.Plotter(checker_info, genome, plot_output_path)
-                    plotter.doPlot(plot_chrom_start, plot_chrom_end, panel = ((1,1),(1,1)), label = sample)
+            # always supply BAMs and genome as for checkStructure
+            # assumes each BAM has a checker object with it
+            # assumes all BAMs contains requested sequence name if specified
+            # need to exclude samples form a plot call in cli
+            # need to supply genome for annotations loaded in cli
+            Structure.plotRegions(BAMs, genome, 
+                    regions = use_ranges,
+                    force = False,
+                    # if part of a pipeline with existing logger:
+                    task_name = task_name,
+                    console_verbosity_lvl = verbosities[args.verbosity],
+                    log_folder = task_log_folder)
     
     ## check for allowed combinations for --summarise
     if args.checkinfos_path:
         if not args.summarise:
             parser.error('--summarise/-s is required with --checkinfos_path/-b.')
         if args.genome_name or args.reads_name:
-            parser.error('--genome_name/-g and --reads_name/-n cannot be used with --checkinfos_path/-b.')
+            parser.error('--genome_name/-g and --reads_name/-n cannot be used '\
+                    'with --checkinfos_path/-b.')
     elif args.reads_name and not args.genome_name:
-        parser.error('--genome_name/-g is required with --reads_name/-n. (The baga CollectData-processed genome used with the AlignReads option)')
+        parser.error('--genome_name/-g is required with --reads_name/-n. (The '\
+                'baga CollectData-processed genome used with the AlignReads '\
+                'option)')
     
     if args.summarise or args.collect or args.collect_ranges:
         # both tasks share some requirements: deal with these first
@@ -2497,17 +2479,25 @@ if task_name == 'Structure':
         if args.reads_name:
             # baga pipeline information provided
             if not args.genome_name:
-                parser.error('--genome_name/-g is required with --reads_name/-n. (The baga CollectData-processed genome used with the AlignReads option)')
+                parser.error('--genome_name/-g is required with '\
+                        '--reads_name/-n. (The baga CollectData-processed '\
+                        'genome used with the AlignReads option)')
             
-            use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
-            assert all([use_path_genome,use_name_genome]), 'Could not locate genome given: {}'.format(args.genome_name)
+            use_path_genome,use_name_genome = check_baga_path(
+                    'baga.CollectData.Genome', args.genome_name)
+            assert all([use_path_genome,use_name_genome]), 'Could not locate '\
+                    'genome given: {}'.format(args.genome_name)
             
             # in case full filename provided
-            use_name_group = args.reads_name.replace('baga.AlignReads.SAMs-', '' , 1).replace('.p.gz', '').replace('.baga', '')
+            use_name_group = args.reads_name.replace('baga.AlignReads.SAMs-', 
+                    '' , 1).replace('.p.gz', '').replace('.baga', '')
             
             ## this was already done above <== need to refactor this whole section
-            baga_file = 'baga.AlignReads.SAMs-{}__{}.baga'.format(use_name_group, use_name_genome)
-            print('Loading alignments information for: {} aligned to {} from {} output'.format(use_name_group, use_name_genome, baga_file))
+            baga_file = 'baga.AlignReads.SAMs-{}__{}.baga'.format(
+                    use_name_group, use_name_genome)
+            print('Loading alignments information for: {} aligned to {} from '\
+                    '{} output'.format(use_name_group, use_name_genome, 
+                    baga_file))
             from baga import AlignReads
             alns_name = '{}__{}'.format(use_name_group, use_name_genome)
             alignments = AlignReads.SAMs(sample_name = alns_name, 
@@ -2529,58 +2519,11 @@ if task_name == 'Structure':
             # update sample_names
             sample_names = sorted(found_labels)
         
-        if args.checkinfos_path:
-            # treat include_samples as list of files to deal with
-            # list of folders or files provided
-            print(args.checkinfos_path)
-            baga_filenames = {}
-            for path in args.checkinfos_path:
-                if os.path.isdir(path):
-                    path_contents = os.listdir(path)
-                    for f in path_contents:
-                        if f[-5:] == '.baga' and f[:27] == 'baga.Structure.CheckerInfo-' and '__' in f[27:-5]:
-                            baga_filenames[tuple(f[27:-5].split('__'))] = f
-                    
-                    e = 'No baga.Structure.CheckerInfo-*__*.baga files found in:\n{}'.format(args.checkinfos_path)
-                    assert len(baga_filenames), e
-                else:
-                    # add file
-                    f = path.split(os.path.sep)[-1]
-                    if f[-5:] == '.baga' and f[:27] == 'baga.Structure.CheckerInfo-' and '__' in f[27:-5]:
-                        baga_filenames[tuple(f[27:-5].split('__'))] = f
-            
-            e = 'Could not find valid baga.Structure.CheckerInfo files at {}'.format(', '.join(args.checkinfos_path))
-            assert len(baga_filenames) > 0, e
-            
-        else:
-            try:
-                baga_filenames = dict([(tuple([sample, use_name_genome]),
-                        'baga.Structure.CheckerInfo-{}__{}.baga'.format(sample, use_name_genome)) \
-                        for sample in sample_names])
-            except NameError:
-                print('need --checkinfos_path or --reads_name')
-                sys.exit(1)
-        
-        checker_info = {}
-        for (sample, genome_name), filein in sorted(baga_filenames.items()):
-            try:
-                print('Loading from {}'.format(filein))
-                filein.replace('baga.Structure.CheckerInfo-','')
-                this_checker_info = Structure.loadCheckerInfo(filein)
-            except IOError as e:
-                print('Cannot access provided baga.Structure.CheckerInfo file: {}'.format(filein))
-                print(e)
-            
-            e = 'Genome name for checker {} ({}) does not match supplied genome name ({})'.format(
-                                                                        filein, 
-                                                                        this_checker_info['genome_name'], 
-                                                                        genome_name)
-            assert this_checker_info['genome_name'] == genome_name, e
-            # else proceed
-            checker_info[sample, genome_name] = this_checker_info
-        
         if args.summarise:
-            #### summarise only
+            sys.exit('Not yet implemented - sorry!')
+            #### summarise only <== make this a function in library . . .
+            #### just needs to load checkers by self-inheritance which itself
+            #### should be a separate function because needed by lots . . .
             if args.reads_name:
                 if args.genome_name:
                     foutname = 'rearrangements_regions_{}__{}.csv'.format(use_name_group,use_name_genome)
@@ -2616,172 +2559,72 @@ if task_name == 'Structure':
                                 'deletions including missing prophage and genomic islands\n'\
                                 ''.format(replicon_id, t, s))
         
-        # probably better in a .do_collect() method in the module
         if args.collect or args.collect_ranges:
-            use_path_genome,use_name_genome = check_baga_path('baga.CollectData.Genome', args.genome_name)
-            assert all([use_path_genome,use_name_genome]), 'Could not locate genome given: {}'.format(args.genome_name)
-            genome = CollectData.Genome(local_path = use_path_genome, format = 'baga')
-            ## which BAMs?
-            ## this is a bit clunky . . probably best to parse BAM headers once, above
-            ## move into baga function from cli?
-            import pysam
-            BAMs_by_ids = {}
-            for BAM in BAMs:
-                header = pysam.Samfile(BAM, 'rb').header
-                BAMs_by_ids[(header['RG'][0]['ID'],header['SQ'][0]['SN'])] = BAM
-            
-            from baga import AssembleReads
-            if args.max_memory:
-                use_mem_gigs = args.max_memory
-            else:
-                # round down available GBs
-                use_mem_gigs = int(baga.get_available_memory())
-            
-            for (sample, genome_name), info in sorted(checker_info.items()):
-                path_to_fastq_folder = os.path.sep.join(['read_collections', genome_name])
-                if not os.path.exists(path_to_fastq_folder):
-                    os.makedirs(path_to_fastq_folder)
-                
-                print('Extracting reads aligned near rearrangements between {} and genome {} . . .'.format(sample, genome_name))
-                collector = Structure.Collector(BAMs_by_ids[(sample, genome_name)])
-                
-                e = 'mismatch between BAM genome ({}) and genome used by BAGA ({})'.format(
-                                        collector.reads.references[0],
-                                        genome_name)
-                assert genome_name == collector.reads.references[0], e
-                
-                if args.collect_ranges:
-                    # single assembly of reads aligned to one or more ranges in reference
-                    # versus separate assemblies of multiple ranges i.e., those with putative rearrangements
-                    single_assembly = True
-                    # ensure pairs of start-end ranges given
-                    e = 'Odd number of ranges provided. Required: start-end, '\
-                    'start-end integers as --collect_ranges start end start end'
-                    assert len(args.collect_ranges) % 2 == 0, e
-                    e = 'Ranges must be non-overlapping and in ascending order'
-                    assert sorted(args.collect_ranges) == args.collect_ranges, e
-                    use_regions = zip(args.collect_ranges[::2],args.collect_ranges[1::2])
-                    use_num_padding_positions = 0
-                else:
-                    single_assembly = False
-                    # join main rearrangement zones with extended regions if found
-                    # to get contiguous blocks for investigation
-                    all_regions = sorted(
-                                  info['suspect_regions']['rearrangements'] + \
-                                  info['suspect_regions']['rearrangements_extended'])
-                    
-                    from collections import Counter
-                    use_regions = [a for b in all_regions for a in b]
-                    c = Counter(use_regions)
-                    use_regions = [a for a in use_regions if c[a] == 1]
-                    use_regions = zip(use_regions[::2],use_regions[1::2])
-                    use_num_padding_positions = args.num_padding_positions
-                
-                collector.getUnmapped()
-                r1_out_path_um, r2_out_path_um, rS_out_path_um = collector.writeUnmapped(path_to_fastq_folder)
-                
-                # assemble poorly/unmapped alone first
-                reads_path_unmapped = {}
-                output_folder_um = '_'.join(r1_out_path_um.split('_')[:-1]).split(os.path.sep)[-1]
-                reads_path_unmapped[output_folder_um] = r1_out_path_um, r2_out_path_um, rS_out_path_um
-                path_to_bad_unmapped_contigs = os.path.sep.join(['read_collections',
-                                                    genome_name, 
-                                                    output_folder_um,
-                                                    'contigs.fasta'])
-                if os.path.exists(path_to_bad_unmapped_contigs) and \
-                   os.path.getsize(path_to_bad_unmapped_contigs) > 0 and \
-                   not args.force:
-                    print('Found assembly at {}\nUse --force/-F to overwrite. Skipping . . .'.format(path_to_bad_unmapped_contigs))
-                else:
-                    if not args.force:
-                        print('Nothing found at {}. Doing assembly.'.format(path_to_bad_unmapped_contigs))
-                    
-                    reads = AssembleReads.DeNovo(paths_to_reads = reads_path_unmapped)
-                    reads.SPAdes(output_folder = ['read_collections', genome_name], mem_num_gigs = use_mem_gigs,
-                            only_assembler = True, careful = False)
-                
-                # assemble read from each region with poorly/unmapped
-                reads_paths = {}
-                # make a second dict of reads for assembly, all values for unmapped reads
-                # that need to be included in each assembly
-                reads_path_unmapped = {}
-                assemblies_by_region = {}
-                for (s,e) in use_regions:
-                    collector.makeCollection(s, e, use_num_padding_positions)
-                    r1_out_path, r2_out_path, rS_out_path = collector.writeCollection(path_to_fastq_folder)
-                    if not r1_out_path:
-                        # if no reads found, False returned
-                        # do not add to reads_paths dict for assembly
-                        print('debug: no reads found by collector')
-                        continue
-                    # put assembly in folder with same name as read files
-                    output_folder = '_'.join(r1_out_path.split('_')[:-1]).split(os.path.sep)[-1]
-                    path_to_contigs = os.path.sep.join(['read_collections', 
-                                                        genome_name, 
-                                                        output_folder, 
-                                                        'contigs.fasta'])
-                    assemblies_by_region[s,e] = path_to_contigs
-                    if os.path.exists(path_to_contigs) and \
-                            os.path.getsize(path_to_contigs) > 0 and \
-                            not args.force:
-                        print('Found assembly at {}\nUse --force/-F to overwrite. Skipping . . .'.format(path_to_contigs))
-                    else:
-                        reads_paths[output_folder] = (r1_out_path, r2_out_path, rS_out_path)
-                        reads_path_unmapped[output_folder] = r1_out_path_um, r2_out_path_um, rS_out_path_um
-                
-                print('debug: len(assemblies_by_region) == {}'.format(len(assemblies_by_region)))
-                reads = AssembleReads.DeNovo(paths_to_reads = reads_paths, 
-                        paths_to_reads2 = reads_path_unmapped)
-                reads.SPAdes(output_folder = ['read_collections', genome_name], 
-                        mem_num_gigs = use_mem_gigs, single_assembly = single_assembly, 
-                        only_assembler = True, careful = False)
-                # a dict of paths to contigs per region
-                aligner = Structure.Aligner(genome)
-                unmappedfasta = os.path.sep.join(['read_collections', 
-                                                  genome_name, 
-                                                  output_folder_um, 
-                                                  'contigs.fasta'])
-                if os.path.exists(unmappedfasta) and os.path.getsize(unmappedfasta) > 0:
-                    if len(assemblies_by_region) > 0:
-                        # provide dict of range tuples
-                        aligner.alignRegions(assemblies_by_region, 
-                                use_num_padding_positions, 
-                                path_to_omit_sequences = unmappedfasta, 
-                                single_assembly = single_assembly,
-                                min_region_length = args.min_align_region)
-                        aligner.reportAlignments()
-                    else:
-                        print('WARNING: no assembled regions found. Either there are '\
-                                'none which is fine, or SPAdes assemblies failed '\
-                                'to finish. You could check SPAdes log files in '\
-                                'folders in {}'.format(os.path.sep.join([
-                                'read_collections', genome_name])))
-                else:
-                    print('WARNING: no assembled unmapped and poorly mapped reads found at:\n{}'.format(unmappedfasta))
+            ## this is based on Structure.plotRegions()
+            ## which is based on Sturcture.checkStructure()
+            ## eventually clean all this up . . .
+
+            # plot range needs a sequence specified as well as ordinates
+            if args.collect_ranges:
+                # sanity checks
+                if len(args.collect_ranges) % 3 != 0:
+                    parser.error("--collect_ranges must be supplied in multiples "\
+                            "of 3 as SEQUENCENAME START END. You supplied: "\
+                            "'--plot_range {}'".format(' '.join(args.plot_range)))
+                    sys.exit(1)
+                import string
+                ranges = list(zip(args.collect_ranges[1::3]+args.collect_ranges[2::3]))
+                notnumeric = [r for r in ranges if not set(r) <= set(string.digits)]
+                if not notnumeric:
+                    parser.error("--collect_ranges must be supplied as "\
+                            "SEQUENCENAME START END (in '{}', not numeric: '{}')"\
+                            "".format(' '.join(args.collect_ranges),
+                            ', '.join(notnumeric)))
+                    sys.exit(1)
+                use_ranges = {}
+                for i in range(0,len(args.collect_ranges),3):
+                    this_range = sorted([int(args.collect_ranges[i+1]), 
+                            int(args.plot_range[i+2])])
                     try:
-                        r1_size = os.path.getsize(r1_out_path_um)
-                        r2_size = os.path.getsize(r2_out_path_um)
-                        print('but reads, {} ({:,} bytes) and {} ({:,} bytes), exist . . check SPAdes assembly log in {}'.format(
-                                                                r1_out_path_um,
-                                                                r1_size,
-                                                                r2_out_path_um,
-                                                                r2_size,
-                                                                unmappedfasta.replace('contigs.fasta','')))
-                    except IOError:
-                        print('WARNING: could not find unmapped and poorly '\
-                        'aligned reads at:\n{}\n{}\nthis is unexpected but '\
-                        'conceivable (if ALL reads really did map to reference!).'.format(
-                                r1_out_path_um,r2_out_path_um))
-                    print('proceeding with alignment of assembled putatively rearranged regions to reference nonetheless')
-                    if len(assemblies_by_region) > 0:
-                        aligner.alignRegions(assemblies_by_region, use_num_padding_positions, single_assembly = single_assembly)
-                        aligner.reportAlignments()
-                    else:
-                        print('WARNING: no assembled regions found. Either there are '\
-                                'none which is fine, or SPAdes assemblies failed '\
-                                'to finish. You could check SPAdes log files in '\
-                                'folders in {}'.format(os.path.sep.join([
-                                'read_collections', genome_name])))
+                        use_ranges[args.collect_ranges[i]] += [this_range]
+                    except KeyError:
+                        use_ranges[args.collect_ranges[i]] = [this_range]
+            else:
+                # will collect disrupted regions in cognate checker
+                use_ranges = False
+            
+            # need genome for plotting
+            if not args.genome_name:
+                parser.error('--genome_name/-g is required for '\
+                        'collecting mapped reads. '\
+                        '(A baga CollectData-processed genome)')
+            
+            use_path_genome,use_name_genome = check_baga_path(
+                    'baga.CollectData.Genome', args.genome_name)
+            e = 'Could not locate a saved '\
+                    'baga.CollectData.Genome-<genome_name>.baga for name '\
+                    'given: {}'.format(args.genome_name)
+            assert all([use_path_genome,use_name_genome]), e
+            task_logger.info('Loading genome {}'.format(use_name_genome))
+            genome = CollectData.Genome(sample_name = use_name_genome, 
+                    inherit_from = 'self')
+            
+            # always supply BAMs and genome as for checkStructure
+            # assumes each BAM has a checker object with it
+            # assumes all BAMs contains requested sequence name if specified
+            # need to exclude samples form a plot call in cli
+            # need to supply genome for annotations loaded in cli
+            Structure.collectRegions(BAMs, genome, 
+                    regions = use_ranges,
+                    max_memory = args.max_memory, 
+                    num_padding_positions = args.num_padding_positions,
+                    min_align_region = args.min_align_region, 
+                    force = False,
+                    # if part of a pipeline with existing logger:
+                    task_name = task_name,
+                    console_verbosity_lvl = verbosities[args.verbosity],
+                    log_folder = task_log_folder)
+
 
 ### Call Variants ###
 

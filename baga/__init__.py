@@ -258,6 +258,7 @@ def load(file_name):
     '''
     def loadArray(member_name,contents):
         if 'sequence' in member_name:
+            # it's a string
             if PY3:
                 array_data = _array('b', contents.getvalue())
                 # saved as bytes for space saving
@@ -267,9 +268,11 @@ def load(file_name):
                 array_data = _array('u', array_data.tobytes().decode('utf-8'))
             else:
                 array_data = _array('c', contents.getvalue())
-        elif member_name.startswith('ratio'):
+        elif 'ratio' in member_name:
+            # it's a float
             array_data = _array('f', contents.getvalue())
         else:
+            # it's an integer
             array_data = _array('i', contents.getvalue())
         return(array_data)
     

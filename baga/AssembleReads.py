@@ -141,12 +141,11 @@ class DeNovo:
         --cov-cutoff <float> positive float value, or 'auto', or 'off'. Default value is 'off'
         '''
 
-        assert isinstance(output_folder, list), 'Provide output folder as list of folders forming path'
+        if isinstance(output_folder, list):
+            output_folder = _os.path.sep.join(output_folder)
 
-        base_output_path = _os.path.sep.join(output_folder)
-
-        if not _os.path.exists(base_output_path):
-            _os.makedirs(base_output_path)
+        if not _os.path.exists(output_folder):
+            _os.makedirs(output_folder)
 
         # max threads is slightly different to cpus
         # . . can probably use more
@@ -159,7 +158,7 @@ class DeNovo:
             from baga import Dependencies
             use_exe = _get_exe_path('spades')
 
-        def run_SPAdes(cmd):
+        def run_SPAdes(cmd, out_path):
             proc = _subprocess.Popen(cmd, stdout=_subprocess.PIPE, stderr=_subprocess.PIPE)
             # allow for failed SPAdes runs (possibly caused by small fastq files) <== but also check they were actually built properly
             try:
@@ -183,7 +182,7 @@ class DeNovo:
                 
                 # with open('___SPAdes_{}_good_{}.log'.format(cnum, thetime), 'w') as fout:
                     # fout.write(stdout_value)
-                path2contigs = _os.path.sep.join([this_output_path,'contigs.fasta'])
+                path2contigs = _os.path.sep.join([out_path,'contigs.fasta'])
             except _subprocess.CalledProcessError as e:
                 print('SPAdes probably did not complete: error returned ({})'.format(proc.returncode))
                 print('Error: {}'.format(e))
@@ -191,7 +190,7 @@ class DeNovo:
                 with open('___SPAdes_{}_bad_{}.log'.format(cnum, thetime), 'w') as fout:
                     fout.write(dir(proc))
                     fout.write('\n' + str(e.returncode) + '\n')
-                    fout.write(_os.path.sep.join([this_output_path,'contigs.fasta']))
+                    fout.write(_os.path.sep.join([out_path,'contigs.fasta']))
                 
                 path2contigs = None
             
@@ -254,7 +253,7 @@ class DeNovo:
             folder = '{}__{}_{}'.format(pairname.split('__')[0],
                                         pairname.split('__')[1].split('_')[0],
                                         'multi_region')
-            this_output_path = _os.path.sep.join(output_folder + [folder])
+            this_output_path = _os.path.sep.join([output_folder, folder])
             if not _os.path.exists(this_output_path):
                 _os.makedirs(this_output_path)
             
@@ -268,7 +267,7 @@ class DeNovo:
             thetime = _time.asctime( _time.localtime(_time.time()) )
             print('about to launch SPAdes . . . at {}'.format(thetime))
             print(' '.join(cmd))
-            contigs['multi_region'] = run_SPAdes(cmd)
+            contigs['multi_region'] = run_SPAdes(cmd, out_path = this_output_path)
         else:
             start_time = _time.time()
             # prepare commandline and launch each SPAdes assembly
@@ -313,7 +312,7 @@ class DeNovo:
                 except AttributeError:
                     pass
                 
-                this_output_path = _os.path.sep.join(output_folder + [pairname])
+                this_output_path = _os.path.sep.join([output_folder, pairname])
                 if not _os.path.exists(this_output_path):
                     _os.makedirs(this_output_path)
                 
@@ -327,7 +326,7 @@ class DeNovo:
                 thetime = _time.asctime( _time.localtime(_time.time()) )
                 print('about to launch SPAdes . . . at {}'.format(thetime))
                 print(' '.join(cmd))
-                contigs[pairname] = run_SPAdes(cmd)
+                contigs[pairname] = run_SPAdes(cmd, out_path = this_output_path)
                 if len(self.read_files) > 1:
                     # report durations, time left etc
                     _report_time(start_time, cnum, len(self.read_files))
