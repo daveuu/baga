@@ -212,18 +212,21 @@ def checkStructure(BAMs,
                     raise OSError("pysam and samtools didn't like something "\
                             "about this bam: {}".format(stderr))
         
-        # path_to_bam = False, genome_name = False, 
-        # sample_name = False, inherit_from
-        #import pdb ; pdb.set_trace()
-        
+        inherit_from = False
         if not force:
-            # first attempt to resurrect a previous checker that might have read <== how will this fail?
-            # coverage depths etc. recorded
+            # because not force (--force via CLI) can check if previous checker 
+            # exists and that can be loaded from in which coverage depths etc.
+            # are recorded
+            # ===> this functionality might be duplicated in baga_cli.py
             reads = _pysam.Samfile(BAM, 'rb')
             # baga only compatible with one reads group per bam currently
             reads_name = reads.header['RG'][0]['ID']
             sample_name = '{}__{}'.format(reads_name, genome_name)
-            logger.info('Reloading from previous analysis: "{}"'.format(sample_name))
+            if _os.path.exists('baga.Structure.Checker-{}.baga'.format(sample_name)):
+                inherit_from = 'self'
+        
+        if inherit_from == 'self':
+            logger.info('Will reloading from previous analysis: "{}"'.format(sample_name))
             this_checker = Checker(sample_name = sample_name, 
                     task_name = task_name, 
                     console_verbosity_lvl = console_verbosity_lvl, 
