@@ -547,10 +547,9 @@ class Finder(_MetaSample):
         BC_struct = ORFs_s_v[BC_s_sl]
         BC_b_sl = self.ORFs_bytes_slices['broad_cluster_num']
         # store cluster info and a representative for this group
-        cluster_info_by_ORFrep = _np.empty((len(clusters),5), dtype = _np.uint32)
-        # keep a note of ranges for when eventually collecting RAAs from
-        # contiguous carrays
-        cluster_carray_ranges = {}
+        # last two are ordinates in nucleotide contiguous array:
+        # up to 4 bill. with uint32
+        cluster_info_by_ORFrep = _np.empty((len(clusters),7), dtype = _np.uint32)
         # could have a single context for lmdb_env outside loops?
         # query LMDB for ORF lens and IDs
         with _lmdb.Environment(self.folders['metadata'], readonly = True, 
@@ -561,22 +560,24 @@ class Finder(_MetaSample):
                     ORFs = sorted(cluster)
                     raw = [txn.get(_struct.pack(ORFs_s_k, g, o)) \
                             for g,o in ORFs]
-                    ranges = {ORF:_struct.unpack(AA_struct, data[AA_b_sl]) \
-                            for ORF,data in zip(ORFs,raw)}
-                    broad_clusters = {ORF:_struct.unpack(BC_struct, data[BC_b_sl])[0] \
-                            for ORF,data in zip(ORFs,raw)}
-                    cluster_carray_ranges.update(ranges)
-                    lengths = [e-s for s,e in ranges.values()]
+                    ranges = [_struct.unpack(AA_struct, data[AA_b_sl]) \
+                            for data in raw]
+                    broad_clusters = [_struct.unpack(BC_struct, data[BC_b_sl])[0] \
+                            for data in raw]
+                    lengths = [e-s for s,e in ranges]
                     # arbitrary selection of a representative ORF
-                    thisORF = ORFs[0]
-                    # assert len(set(broad_clusters.values())) == 1, \
+                    # (actually always first in sorted order)
+                    n = 0
+                    # keep a note of the RAA carray range for the representative
+                    # ORF for when getting sequence for k-mers and bitmaps
+                    # assert len(set(broad_clusters)) == 1, \
                             # 'broad clusters incongruent with a best match group cluster!'
-                    # genome, ORF, broad, min length, max length
-                    cluster_info_by_ORFrep[c,:] = thisORF[0], thisORF[1], \
-                            broad_clusters[thisORF], min(lengths), \
-                            max(lengths)
+                    # genome, ORF, carray_start, carray_end, broad, min length, max length
+                    cluster_info_by_ORFrep[c,:] = (ORFs[n][0], ORFs[n][1], 
+                            ranges[n][0], ranges[n][1], broad_clusters[n], 
+                            min(lengths), max(lengths))
         
-        return cluster_info_by_ORFrep, cluster_carray_ranges
+        return cluster_info_by_ORFrep
 
     def _collect_cluster_ranges(self, clusters):
         '''
@@ -669,60 +670,73 @@ class Finder(_MetaSample):
                 nontops[A] = these_nontops
         return(tops,zeros,nontops)
 
-    def _build_mrbs(self, all_ORFs_order, batch1_ranges, batch2_ranges, 
-            RAAs_carray):
+    def _build_mrb(self, ranges, RAAs_carray, by_genome = True):
         '''
-        Work out each genome range to collect that spans required ORFs in carray.
+        Build a multi roaring bitmap of k-mers given a ranges of an array
         
-        Whole ORF collection may span many genomes. Instead of slicing the 
-        potentially disk-based carray for each ORF, first organise ORFs by genome, 
-        then extract the region of each genome required, then slice each ORF from 
-        within that in-memory numpy array. This reduces disk IO (one search per 
-        genome) without much RAM cost (one partial genome loaded at a time).
+        Ranges are provided in a dictionary of ORFs and the roaring bitmaps 
+        are in key sorted order. If many ORFs are from the same genomes,
+        and the array is a bcolz disk-based compressed array, contiguous ranges
+        for each genome can be first extracted which can provide a 5x speed up.
+        Instead of slicing the potentially disk-based carray for each ORF, 
+        first organise ORFs by genome, then extract the region of each genome 
+        required, then slice each ORF from within that in-memory numpy array. 
+        This reduces disk IO (one search per genome) without much RAM cost 
+        (one partial genome loaded at a time).
         
         Parameters
         ----------
-        ORF_ranges  : dict
-            ORF ID tuple with tuple of range in the carray of RAAs
+        ranges : 2d-array
+            Genome, ORF IDs then range in the carray of RAAs: four integers per row
+        RAAs_carray: 1d-array
+            numpy array-like including bcolz carray
+        by_genome : bool
+            if True, all ORFs per genome will be extracted in a single
+            carray slice followed by subslices per required ORF
         '''
         # for converting array of 0-9 integers into single base-10 integer
         k_multiplier = _np.fromiter([10**n for n in range(self.k-1,-1,-1)], 
                 dtype = self.kmer_collections_dtype)
-        ORF_ranges = dict(batch1_ranges.items())
-        ORF_ranges.update(batch2_ranges.items())
-        # find start and end in RAA carray on a per genome basis for IO efficiency
-        max_ordinate = max((e for ORF,(s,e) in ORF_ranges.items()))
-        all_genomes = sorted(set((g for g,o in ORF_ranges)))
-        genome_ranges = {genome:[max_ordinate,0] for genome in all_genomes}
-        for (genome,ORF),(s,e) in ORF_ranges.items():
-            if genome_ranges[genome][0] > s:
-                genome_ranges[genome][0] = s
-            if genome_ranges[genome][1] < e:
-                genome_ranges[genome][1] = e
-        
-        # collect bitmpas in a dictionary by ID then build multibitmap
-        # in required ORF order
-        rb_kmers = {}
-        for genome,(genome_s,genome_e) in genome_ranges.items():
-            # minimize slices to carray by slicing once per genome
-            genome_contiguous_RAAs = RAAs_carray[genome_s:genome_e]
-            # then slice ORFs in memory for k-mer counting
-            # adjust per ORF ranges to within this slice for this genome
-            # (could vectorise this in a numpy array for all genomes?)
-            these_ranges = sorted([ORFinfo for ORFinfo in ORF_ranges.items() \
-                    if ORFinfo[0][0] == genome])
-            new_ranges = (((ORF,(AA_s-genome_s,AA_e-genome_s)) \
-                    for ORF,(AA_s,AA_e) in these_ranges))
-            # extract k-mers by striding numpy array, straight to roaringbitmap
-            # put in dict by key for ordering later
-            rb_kmers.update((ORF,_rrbitmap((self.rolling_window(
-                    genome_contiguous_RAAs[s:e], self.k)*k_multiplier)\
-                    .sum(1, dtype = self.kmer_collections_dtype))) for ORF,(s,e) in new_ranges)
-        
-        # sorted in order corresponding to pairwise comparisons
-        rb_kmers = [rb_kmers[ORF] for ORF in sorted(rb_kmers)]
-        mrb = _mrbitmap(rb_kmers)
-        
+        if by_genome:
+            rb_kmers = []
+            # find start and end in RAA carray on a per genome basis for IO efficiency
+            max_ordinate = ranges[:,3].max()
+            all_genomes = set(ranges[:,0])
+            genome_ranges = {genome:[max_ordinate,0] for genome in all_genomes}
+            for (genome,ORF,s,e) in ranges:
+                if genome_ranges[genome][0] > s:
+                    genome_ranges[genome][0] = s
+                if genome_ranges[genome][1] < e:
+                    genome_ranges[genome][1] = e
+            # add bitmaps to a list sorted by genome then ORF number
+            # eventual index in multi-roaring bitmap is same as sorted order
+            for genome,(genome_s,genome_e) in sorted(genome_ranges.items()):
+                # minimize slices to carray by slicing once per genome
+                genome_contiguous_RAAs = RAAs_carray[genome_s:genome_e]
+                # then slice ORFs in memory for k-mer counting
+                these_ranges = sorted([(row[1],row[2:]) for row in \
+                        ranges[ranges[:,0]==genome,:]])
+                # adjust per ORF ranges to within this slice for this genome
+                # (could vectorise this in a numpy array for all genomes?)
+                # importantly, ranges are sorted by ORF ID (which should be same
+                # or close to carray ranges) and is used for knowing an ORFs index
+                # in the multi-bm
+                new_ranges = ((AA_s-genome_s, AA_e-genome_s) for ORF,(AA_s,AA_e) \
+                        in these_ranges)
+                # extract k-mers by striding numpy array, straight to roaringbitmap
+                # put in dict by key for ordering later
+                rb_kmers += [_rrbitmap((self.rolling_window(
+                        genome_contiguous_RAAs[s:e], self.k)*k_multiplier)\
+                        .sum(1, dtype = self.kmer_collections_dtype)) for (s,e) \
+                        in new_ranges]
+            mrb = _mrbitmap(rb_kmers)
+        else:
+            # just slice carray for each ORF
+            # probably a better way of iterating down this array . .
+            mrb = _mrbitmap([_rrbitmap((self.rolling_window(
+                    RAAs_carray[s:e], self.k)*k_multiplier).sum(1, 
+                    dtype = self.kmer_collections_dtype)) for ORF,(s,e) \
+                    in sorted((tuple(row[:2]),row[2:]) for row in ranges)])
         return mrb
 
     def _compare_ORF_pairs(self, mrb, pairwise_test_inds, pairwise_test_IDs, 
@@ -757,7 +771,6 @@ class Finder(_MetaSample):
         pairwise_hit_IDs += [_np.array(pairwise_test_IDs[1], dtype = _np.uint32)[hits]]
         
         return b1_to_b2_dists, pairwise_hit_IDs
-
 
     def _parse_distances(self, b1_to_b2_dists, pairwise_hit_IDs):
         '''
@@ -808,65 +821,6 @@ class Finder(_MetaSample):
         else:
             self.logger.debug('no hits to process in _parse_distances()')
         return b1_hits, b2_hits
-
-
-    ## remove if not needed
-    # def _parse_distances_per_genome(self, b1_to_b2_dists, pairwise_tests, 
-                # b1_ORFs_in_mrb, genome1, b2_ORFs_in_mrb, genome2, 
-                # ORF_IDs_in_mrb):
-        # '''
-        # Extract per ORF distances to other genome from lists
-        
-        # From a list of distances with lists of pairs and genomes of interest
-        # create dictionaries of distances.
-        
-        # Parameters
-        # ----------
-        # b1_to_b2_dists
-        # pairwise_tests
-        # b1_ORFs_in_mrb
-        # genome1
-        # b2_ORFs_in_mrb
-        # genome2
-        # ORF_IDs_in_mrb
-        # '''
-        # # ORF_IDs_in_mrb
-        # ORF2BM = {}
-        # dists_these_genomes = (pairwise_tests[0][:,0]==genome1) & (pairwise_tests[1][:,0]==genome2)
-        # if not any(dists_these_genomes):
-            # return {}, {}, ORF2BM
-        # # get distances for this genome combination
-        # these_results = b1_to_b2_dists[dists_these_genomes]
-        # # get indexes in multibitmap input for this genome combination
-        # these_b1_inds = b1_ORFs_in_mrb[dists_these_genomes]
-        # these_b2_inds = b2_ORFs_in_mrb[dists_these_genomes]
-        # # iterate through each (unique) batch 1 ORF cluster rep
-        # # record the hits and their scores
-        # b1_hits = {}
-        # for b1_cluster_rep in _np.unique(these_b1_inds):
-            # # get scores for this b1 cluster rep against all b2 cluster reps
-            # these_hits = these_b1_inds==b1_cluster_rep
-            # hit_scores = these_results[these_hits]
-            # hit_indexes = these_b2_inds[these_hits]
-            # hit_IDs = ORF_IDs_in_mrb[hit_indexes,:]
-            # these_hits = {tuple(ID):s for ID,s in zip(hit_IDs,hit_scores)}
-            # b1_hits[tuple(ORF_IDs_in_mrb[b1_cluster_rep])] = these_hits
-            # # retain relevent ID to index mappings for additional jaccard dist calcs
-            # ORF2BM.update(((tuple(ID),int(i)) for ID,i in zip(hit_IDs,hit_indexes)))
-        # # iterate through each (unique) batch 2 ORF cluster rep
-        # # record the hits and their scores
-        # b2_hits = {}
-        # for b2_cluster_rep in _np.unique(these_b2_inds):
-            # # get scores for this b1 cluster rep against all b2 cluster reps
-            # these_hits = these_b2_inds==b2_cluster_rep
-            # hit_scores = these_results[these_hits]
-            # hit_indexes = these_b1_inds[these_hits]
-            # hit_IDs = ORF_IDs_in_mrb[hit_indexes,:]
-            # these_hits = {tuple(ID):s for ID,s in zip(hit_IDs,hit_scores)}
-            # b2_hits[tuple(ORF_IDs_in_mrb[b2_cluster_rep])] = these_hits
-            # # retain relevent ID to index mappings for additional jaccard dist calcs
-            # ORF2BM.update(((tuple(ID),int(i)) for ID,i in zip(hit_IDs,hit_indexes)))
-        # return(b1_hits, b2_hits, ORF2BM)
 
     def _parse_hits(self, 
             b1_tops, b1_zeros, b1_nontops, b1_hits, 
@@ -3295,14 +3249,16 @@ class Finder(_MetaSample):
 
         self.logger.info('Merging groups from separate genome group analyses')
         # this exploits the genome membership overlap between initial groups of genomes
-        # ideally, all homologous groups are formed here. Exceptions will be where
-        # "linking" genomes have lost an ORF in which case those two clusters need to be
-        # tested against each other at this pangenome versus pangenome comparison here
+        # ideally, all homologous groups are formed here.
         merged_clusters = self._union_find(
                 (a for b in self.bm_clusters for a in b))
+        # Exceptions will be where "linking" genomes have lost an ORF in which case those
+        # two clusters need to be tested against each other below in the pangenome versus
+        # pangenome comparison
 
-        ###### no duplicates after merging best match clusters
-        assert len([a for b in merged_clusters for a in b]) == len(set([a for b in merged_clusters for a in b]))
+        ## should be no duplicates after merging best match clusters
+        assert len([a for b in merged_clusters for a in b]) == \
+                len(set([a for b in merged_clusters for a in b]))
 
         self.logger.info('Assessing inter-genome group cluster relationships '\
                 'for further merging')
@@ -3316,87 +3272,96 @@ class Finder(_MetaSample):
         # singletons after first round that could be inparalogous but never tested
         # because no hits within initial group. Can be tested here where both hits are
         # in same genome. 
-        putative_para_singletons = set([cluster[0] for cluster in merged_clusters if len(cluster) == 1])
+        putative_para_singletons = set([cluster[0] for cluster in merged_clusters if \
+                len(cluster) == 1])
+
+        self.logger.debug('Preparing clusters for analysis')
+        # collect cluster info for all merged clusters so far
+        # collect cluster info and a representative ORF for each merged cluster
+        # (genome, ORF, start, end in carray, broad cluster, min, max ORF lengths)
+        cluster_info = self._collect_cluster_info(merged_clusters)
+        # adjust min and max cluster sequence lengths for between
+        # cluster comparisons in which only those with an overlap of 
+        # min-max lengths plus original PW comparison length range are
+        # compared (numpy recasting so not using *=)
+        cluster_info[:,5] = cluster_info[:,5]*lower_len_lim
+        cluster_info[:,6] = cluster_info[:,6]*upper_len_lim
+        # make dict of ORF ranges in carray for self._build_mrb
+        self.logger.debug('Building bitmaps')
+        mrb = self._build_mrb(cluster_info[:,:4], RAAs_carray, by_genome = True)
+        # index is ORF sorted order but dict is quickest way to find index
+        #ORFs = [tuple(row[:2]) for row in cluster_info]
+        # ORFrep : broad cluster, short, long
+        info_by_reps = {tuple(row[:2]):tuple(row[4:]) for row in cluster_info}
+        mrb_ORF_index = {ORF:i for i,ORF in enumerate(sorted(info_by_reps))}
+
+        # make sets of genomes per cluster for queries later
+        g_merged_clusters = []
+        for cluster in merged_clusters:
+            g_merged_clusters += [{g for g,o in cluster}]
 
         recip_best_hits = []
-
         for n,group1 in enumerate(thegroups[:-1]):
-            # ===> build all of group 1 bitmaps here
-            # then select by length and broad cluster as needed
+            # these clusters feature group 1 genomes
+            group1_clusters = [clstr for (clstr,gclstr) in \
+                    zip(merged_clusters,g_merged_clusters) if gclstr & group1]
+            # this must be same rep selecting algorithm as in
+            # collect_cluster_info() above
+            group1_clusters_reps = [sorted(clstr)[0] for clstr in group1_clusters]
             for m,group2 in enumerate(thegroups[n+1:],n+1):
-                # ===> build all of group 2 bitmaps here
-                # then select by length and broad cluster as needed
-                # and store in memory or on disk for when this group 2 becomes group 1
-                # check effect on memory usage
-                self.logger.debug('Collecting required ORFs for comparing '\
-                        'genome groups: {} and {}'.format(n+1, m+1))
-                batch1 = []
-                batch2 = []
-                # select appropriate clusters for this group pair
-                # any overlap with one but not other includes within-group
-                # plus others but exlcudes those spanning both groups which
-                # includes core and near-core clusters
-                for cluster in merged_clusters:
-                    genomes = set(genome for genome,_ in cluster)
-                    group1_overlap = genomes & group1
-                    group2_overlap = genomes & group2
-                    if group1_overlap and not group2_overlap:
-                        batch1 += [cluster]
-                    elif group2_overlap and not group1_overlap:
-                        batch2 += [cluster]
+                self.logger.debug('Preparing group 2 clusters (initial group: {}) . . .'\
+                        ''.format(n+m+1))
+                group2_clusters = [clstr for (clstr,gclstr) in \
+                        zip(merged_clusters,g_merged_clusters) if gclstr & group2]
                 # collect cluster info and a representative for each cluster
-                # in this genome group.
-                # (genome, ORF, broad cluster, min, max ORF lengths)
-                # Also keep a note of ranges for when eventually collecting
-                # RAAs from contiguous carrays
-                batch1_cluster_info, batch1_ranges = self._collect_cluster_info(batch1)
-                self.logger.debug('batch1_cluster_info.shape: {} by {}'.format(*batch1_cluster_info.shape))
-                # adjust min and max cluster sequence lengths for between
-                # cluster comparisons in which only those with an overlap of 
-                # min-max lengths plus original PW comparison length range are
-                # compared (numpy recasting so not using *=)
-                batch1_cluster_info[:,3] = batch1_cluster_info[:,3]*lower_len_lim
-                batch1_cluster_info[:,4] = batch1_cluster_info[:,4]*upper_len_lim
-                # same for batch 2
-                batch2_cluster_info, batch2_ranges = self._collect_cluster_info(batch2)
-                self.logger.debug('batch2_cluster_info.shape: {} by {}'.format(*batch2_cluster_info.shape))
-                batch2_cluster_info[:,3] = batch2_cluster_info[:,3]*lower_len_lim
-                batch2_cluster_info[:,4] = batch2_cluster_info[:,4]*upper_len_lim
-                # now we have batch1_cluster_info vs batch2_cluster_info
+                # as for outer loop genome group.
+                group2_clusters_reps = [sorted(clstr)[0] for clstr in group2_clusters]
+                # collect within-group clusters in each of these genome
+                # groups. Members of these clusters cannot yet have
+                # been compared to each other so must be selected for comparison
+                # here, at the pangenome to pangenome level.
+                # Criteria for this selection is: any merged cluster with
+                # shared members in only one of these two genome groups.
+                # This will select clusters sharing within-group members plus
+                # potentially some from other groups, but excludes those spanning
+                # both groups which therefore excludes core and near-core clusters
+                batch1infos = []
+                for cluster1,rep1 in zip(group1_clusters,group1_clusters_reps):
+                    genomes1 = set(genome for genome,_ in cluster1)
+                    if not genomes1 & group2:
+                        # genome, ORF, broad, min len, max len, mrb index
+                        batch1infos += [rep1+info_by_reps[rep1]+tuple([mrb_ORF_index[rep1]])]
+                
+                batch1infos = _np.array(batch1infos, _np.uint32)
+                
+                batch2infos = []
+                for cluster2,rep2 in zip(group2_clusters,group2_clusters_reps):
+                    genomes2 = set(genome for genome,_ in cluster2)
+                    if not genomes2 & group1:
+                        # genome, ORF, broad, min len, max len, mrb index
+                        batch2infos += [rep2+info_by_reps[rep2]+tuple([mrb_ORF_index[rep2]])]
+                
+                batch2infos = _np.array(batch2infos, _np.uint32)
+                
+                # collect broad clusters
+                broad_clusters = set(batch1infos[:,2]) | set(batch2infos[:,2])
+                
+                self.logger.debug('{} broad clusters among ORFs for comparison'\
+                        ''.format(len(broad_clusters)))
+                
+                # now we have batch1infos vs batch2infos
                 # containing ORF_ID of cluster representative (0,1),
-                # broad_cluster (2), minlen (3), maxlen (4).
+                # broad_cluster (2), minlen (3), maxlen (4), mrb index
                 b1_ORFs_ind_for_tests = _array('L')
                 b2_ORFs_ind_for_tests = _array('L')
                 b1_ORFs_IDs_for_tests = []
                 b2_ORFs_IDs_for_tests = []
-                # among ORFs for this genome group comparison
-                # collect broad clusters
-                broad_clusters = _np.unique(_np.concatenate(
-                        [batch1_cluster_info[:,2], batch2_cluster_info[:,2]]))
-                self.logger.debug('{} broad clusters among ORFs for comparison'\
-                        ''.format(len(broad_clusters)))
-                # compile a list of ORFs for testing here
-                ORFs_for_testing1 = [tuple(ORF) for ORF in batch1_cluster_info[:,:2]]
-                ORFs_for_testing2 = [tuple(ORF) for ORF in batch2_cluster_info[:,:2]]
-                # ORFs will be in this order in the bitmap
-                # (is sorting actually necessary here if order is stored?)
-                all_ORFs_order = {ORF:n for n,ORF in \
-                        enumerate(sorted(ORFs_for_testing1 + ORFs_for_testing2))}
-                # assign bitmap indexes here while building pairwise comparisons
-                batch1_ORF_indices = _np.fromiter((all_ORFs_order[ORF] 
-                        for ORF in ORFs_for_testing1), _np.uint32)
-                batch2_ORF_indices = _np.fromiter((all_ORFs_order[ORF] \
-                        for ORF in ORFs_for_testing2), _np.uint32)
-                batch1_cluster_info = _np.column_stack(
-                        (batch1_cluster_info, batch1_ORF_indices))
-                batch2_cluster_info = _np.column_stack(
-                        (batch2_cluster_info, batch2_ORF_indices))
                 for broad_cluster in broad_clusters:
                     # collect ORFs in each broad cluster for this genome group pair
-                    these = batch1_cluster_info[:,2] == broad_cluster
-                    g1_this_brdcls = batch1_cluster_info[these,]
-                    these = batch2_cluster_info[:,2] == broad_cluster
-                    g2_this_brdcls = batch2_cluster_info[these,]
+                    these = batch1infos[:,2] == broad_cluster
+                    g1_this_brdcls = batch1infos[these,]
+                    these = batch2infos[:,2] == broad_cluster
+                    g2_this_brdcls = batch2infos[these,]
                     if g1_this_brdcls.shape[0] and g2_this_brdcls.shape[0]:
                         # at least some ORFs shared: if lengths close enough,
                         # store for PW comparison
@@ -3411,12 +3376,12 @@ class Finder(_MetaSample):
                                 b1_ORFs_IDs_for_tests += \
                                         [tuple([genome_num, ORF_num])]*keeps.shape[0]
                                 # against a selection of batch 2 cluster reps
-                                b2_ORFs_ind_for_tests.extend(keeps[:,-1])
+                                b2_ORFs_ind_for_tests.extend(keeps[:,5])
                                 b2_ORFs_IDs_for_tests += \
                                         [tuple(ORF_id) for ORF_id in keeps[:,:2]]
                 
-                pairwise_test_IDs = b1_ORFs_IDs_for_tests,b2_ORFs_IDs_for_tests
                 pairwise_test_inds = b1_ORFs_ind_for_tests,b2_ORFs_ind_for_tests
+                pairwise_test_IDs = b1_ORFs_IDs_for_tests,b2_ORFs_IDs_for_tests
                 # among the many ORFs excluded from comparisons here are those
                 # in other clusters that span into respective groups (would
                 # have been already merged), ORFs in a different "broad 
@@ -3425,15 +3390,9 @@ class Finder(_MetaSample):
                 # elimination we have mostly hits left.
                 self.logger.debug('Collected {:,} ORF pairs for comparison between '\
                         'groups: {} ({} clusters) and {} ({} clusters)'.format(
-                        len(pairwise_test_IDs[0]), n+1, batch1_cluster_info.shape[0], 
-                        m+1, batch2_cluster_info.shape[0]))
+                        len(pairwise_test_IDs[0]), n+1, len(group1_clusters), 
+                        m+1, len(group2_clusters)))
                 
-                # we now know which ORFs can be compared between these genome groups
-                # (appropriate genomes, broad clusters, length restrictions)
-                # build multiroaring bitmap and convert paired IDs to indices
-                # in bitmap
-                self.logger.debug('Building bitmaps . . .')
-                mrb = self._build_mrbs(all_ORFs_order, batch1_ranges, batch2_ranges, RAAs_carray)
                 # then apply the pairwise tests using this multiroaring bitmap and retain only hits
                 self.logger.debug('Calculating distances . . .')
                 # all PW ORF indices and IDs in, hit IDs out with distances
@@ -3477,7 +3436,7 @@ class Finder(_MetaSample):
                 
                 if len(para_pairs_test):
                     recip_best_hits += (pair for pair in self._test_inparalogy(
-                            mrb, para_pairs_test, all_ORFs_order) if len(pair) > 1)
+                            mrb, para_pairs_test, mrb_ORF_index) if len(pair) > 1)
 
         self.reduced_clusters = self._union_find(
                 _chain(merged_clusters, recip_best_hits))
