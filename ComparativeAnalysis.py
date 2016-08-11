@@ -290,6 +290,15 @@ class MultipleSequenceAlignment:
                             # so 1 should index first query, 0 causes exclusion of all variants
                             query = query_char_states[int(GTstate)-1]
                         
+                        # The ‘*’ allele is reserved to indicate that the allele is
+                        # missing due to an upstream deletion. If there are no alternative
+                        # alleles, then the missing value should be used.
+                        # https://samtools.github.io/hts-specs/VCFv4.2.pdf
+                        if query == '*':
+                            # the upstream deletion should handle the appropriate gaps
+                            # so do nothing here
+                            continue
+                        
                         if GTstate != '0':
                             if len(ref) == len(query) == 1 and query != '-':
                                 SNPs[s][int(pos1)] = (ref, query)
