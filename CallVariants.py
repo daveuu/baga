@@ -48,6 +48,7 @@ import pysam as _pysam
 from Bio import SeqIO as _SeqIO
 from Bio.Seq import Seq as _Seq
 from Bio.SeqRecord import SeqRecord as _SeqRecord
+from Bio.Data.CodonTable import TranslationError as _TranslationError
 
 # package functions
 from baga import decide_max_processes as _decide_max_processes
@@ -1644,6 +1645,14 @@ class Summariser:
                             annotations[(chromosome,pos1,r,use_q)] = (ref_codon, var_codon, 
                                     ref_AA, var_AA, frame1, ORF_id, gene_name, strand)
                     except (KeyError, TypeError):
+                        pass
+                    except _TranslationError:
+                        print('WARNING: problem encountered translating a DNA sequence '\
+                                'causing a variant to be omitted from the summary. '\
+                                'This may be caused by unexpected characters including "*" '\
+                                'sometimes introduced by variant callers.')
+                        print('Problem variant was: "{}" at position {} in seq. ID "{}", '\
+                                'sample ""'.format(q, pos1, chromosome, sample))
                         pass
 
         all_chromosomes = sorted(set([a for b in all_variants.values() for a in b]))
