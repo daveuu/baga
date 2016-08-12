@@ -295,9 +295,10 @@ class MultipleSequenceAlignment:
                         # alleles, then the missing value should be used.
                         # https://samtools.github.io/hts-specs/VCFv4.2.pdf
                         if query == '*':
-                            # the upstream deletion should handle the appropriate gaps
-                            # so do nothing here
-                            continue
+                            # although VCF standard says there should be an upstream deletion,
+                            # sometimes the appropriate gaps are not passed on to cover this
+                            # position, so manually replace with the gap character
+                            query = '-'
                         
                         if GTstate != '0':
                             if len(ref) == len(query) == 1 and query != '-':
