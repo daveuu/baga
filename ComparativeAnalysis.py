@@ -933,6 +933,13 @@ class MultipleSequenceAlignment:
                 print('WARNING: {} may get truncated to ten characters ({}) in {}.phy because of Phylip specs'.format(
                                         sample, sample[:10], MSA_filename))
         
+        MSA_lengths = set([len(rec.seq) for rec in forMSA])
+        if len(MSA_lengths) > 1:
+            print('ERROR: sequences for multiple alignment are of differing lengths:')
+            for length in sorted(MSA_lengths):
+                these_recs = sorted([rec.id for rec in forMSA if len(rec.seq) == length])
+                print('{} sequences are length {}: {}'.format(len(these_recs), length, ', '.join(['"'+i+'"' for i in these_recs])))
+        
         MSA = _MultipleSeqAlignment(forMSA)
         
         print('Writing multiple nucleotide sequence alignment to Fasta file {}.fna'.format(MSA_filename))
