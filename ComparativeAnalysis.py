@@ -899,13 +899,17 @@ class MultipleSequenceAlignment:
                             dropped += ['Dropped {}, character {} because missing in {} samples'.format(pos1, all_SNP_reference[pos1], gaps[pos1])]
                             excluded_sites.add(pos1)
                             continue
-                    
                     try:
-                        this_sequence.append(these_variants[pos1][1])
-                        variable_positions_pos1[len(this_sequence)] = pos1
+                        # add a variant character if possible
+                        if these_variants[pos1][1] == '.':
+                            # . in VCF is insufficient data to call:
+                            # the data is missing (unknown)
+                            this_sequence.append(nodata_char)
+                        else:
+                            this_sequence.append(these_variants[pos1][1])
+                            variable_positions_pos1[len(this_sequence)] = pos1
                     except KeyError:
                         this_sequence.append(all_SNP_reference[pos1])
-            
             
             alignment_arrays[sample] = this_sequence
         
