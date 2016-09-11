@@ -198,13 +198,29 @@ class MultipleSequenceAlignment:
         for this_filter in filters:
             if this_filter in CallVariants.known_filters:
                 for vcf_header_string in CallVariants.known_filters[this_filter]['string']:
-                    filter_name = _re.findall(pattern, vcf_header_string)[0]
-                    if vcf_header_string[:6] == '##INFO':
-                        obeyfilters_INFO.add(filter_name)
-                    else:
-                        obeyfilters_FILTER.add(filter_name)
+                    try:
+                        filter_name = _re.findall(pattern, vcf_header_string)[0]
+                        if vcf_header_string[:6] == '##INFO':
+                            obeyfilters_INFO.add(filter_name)
+                        else:
+                            obeyfilters_FILTER.add(filter_name)
+                        print('Found BAGA filter: {}'.format(filter_name))
+                    except IndexError:
+                        print('There was a problem parsing filter name from: {}'.format(vcf_header_string))
+                        raise IndexError
             else:
-                print('Unknown filter type: {}. Choose from {}'.format(this_filter, ', '.join(CallVariants.known_filters) ))
+                found = False
+                for filter_group,these_other_filters in CallVariants.other_filters.items():
+                    if this_filter in these_other_filters:
+                        obeyfilters_FILTER.add(this_filter)
+                        print('Found {} filter: {}'.format(filter_group, this_filter))
+                        found = True
+                        break
+                if not found:
+                    print('Unknown filter type: {}. Choose from . . .'.format(this_filter))
+                    print('\tBAGA filters: '.format(', '.join(CallVariants.known_filters) ))
+                    for filter_group,these_other_filters in CallVariants.other_filters.items():
+                        print('\t{} filters: '.format(filter_group, ', '.join(these_other_filters) ))
 
         genome_ids = {}
         genome_lengths = {}
@@ -246,7 +262,6 @@ class MultipleSequenceAlignment:
                                         ','.join(sample_names),
                                         ','.join(FILTER))]
                     continue
-                
                 # collect per sample filters for this row
                 sample_INFOs = bits[9:]
                 GTindex = FORMAT.split(':').index('GT')
