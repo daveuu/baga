@@ -1523,7 +1523,7 @@ class Summariser:
         return(all_variants, all_headerdicts)
 
 
-    def simple(self):
+    def simple(self, nodata_char = '?'):
         '''
         List all variants with rows corresponding to those in the VCF file(s) in a .csv file
         '''
@@ -1579,6 +1579,7 @@ class Summariser:
 
         # collect by chromsome,position
         by_position = _defaultdict(dict)
+        by_position_nodata = _defaultdict(dict)
         by_position_freqs = _defaultdict(dict)
         annotations = {}
         for sample,chromosomes in all_variants.items():
@@ -1592,6 +1593,15 @@ class Summariser:
                     else:
                         freq,total = 1,1
                         use_q = q
+                    
+                    if use_q == '.':
+                        # . in VCF is insufficient data to call:
+                        # the data is missing (unknown)
+                        # use desired "no data" character
+                        by_position_nodata[chromosome,pos1][sample] = nodata_char
+                        # no need to attempt codon prediction or
+                        # add a row as a real variant would below
+                        continue
                     
                     try:
                         by_position[chromosome,pos1][(r,use_q)][sample] = filters
@@ -1655,8 +1665,11 @@ class Summariser:
                                 'This may be caused by unexpected characters including "*" '\
                                 'sometimes introduced by variant callers.')
                         print('Problem variant was: "{}" at position {} in seq. ID "{}", '\
-                                'sample ""'.format(q, pos1, chromosome, sample))
+                                'sample "{}"'.format(q, pos1, chromosome, sample))
                         pass
+
+        # allow KeyError that defaultdict does not raise
+        by_position_nodata = dict(by_position_nodata)
 
         all_chromosomes = sorted(set([a for b in all_variants.values() for a in b]))
 
@@ -1694,23 +1707,28 @@ class Summariser:
                     freq_filtered = 0
                     for sample in sample_order:
                         try:
-                            freq,total = by_position_freqs[chromosome,pos1][(r,q)][sample]
-                            if freq == total == 1:
-                                val = 1
-                            else:
-                                val = float(freq) / float(total)
-                            filters = samples[sample]
-                            if \
-                                    filters == set(['.']) or \
-                                    filters == set(['PASS']) or \
-                                    len(filters) == 0:
-                                this_row += [val]
-                                freq_filtered += 1
-                            else:
-                                this_row += ['+'.join(filters)]
-                            freq_all += 1
+                            this_row += [by_position_nodata[chromosome,pos1][sample]]
                         except KeyError:
-                            this_row += [0]
+                            # not no data ambiguity so get freq
+                            try:
+                                freq,total = by_position_freqs[chromosome,pos1][(r,q)][sample]
+                                if freq == total == 1:
+                                    val = 1
+                                else:
+                                    val = float(freq) / float(total)
+                                
+                                filters = samples[sample]
+                                # what does the {'.'} here mean for filters?
+                                if filters == set(['.']) or \
+                                        filters == set(['PASS']) or \
+                                        len(filters) == 0:
+                                    this_row += [val]
+                                    freq_filtered += 1
+                                else:
+                                    this_row += ['+'.join(filters)]
+                                freq_all += 1
+                            except KeyError:
+                                this_row += [0]
                     
                     this_row += [freq_all, freq_filtered]
                     fout.write(','.join(map(quote,this_row))+'\n')
