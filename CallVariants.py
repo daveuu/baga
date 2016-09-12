@@ -208,6 +208,9 @@ def sortVariantsKeepFilter(header, colnames, variantrows):
                     else:
                         # store ALT as tuple of variant character, frequency, population_size
                         variants[sample][cols['CHROM']][int(cols['POS'])] = [[cols['REF'], (ALT,freq,len(allele_nums))], samples_filtered[sample]]
+            elif data['GT'] == '.':
+                # store ALT as '.' meaning insufficient information to call variant
+                variants[sample][cols['CHROM']][int(cols['POS'])] = [[cols['REF'], '.'], samples_filtered[sample]]
 
     # convert nested defaultdicts to dicts
     variants = dict(variants)
