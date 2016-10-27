@@ -237,6 +237,27 @@ class Finder(_MetaSample):
         
         return(DNAseqs,ORFs)
 
+    def load_gbk(self, gbk_file):
+        ORFs = _defaultdict(dict)
+        seqs_DNA_arrays = {}
+        seqnames = []
+        for n,chromosome in enumerate(_SeqIO.parse(gbk_file,'genbank')):
+            seqs_DNA_arrays[(chromosome.id,'mol_{}'.format(n))] = \
+                    _np.fromiter(chromosome.seq, dtype = 'S1')
+            #_array('u',chromosome.seq)
+            for f in chromosome.features:
+                if f.type == 'source':
+                    seqnames += [f.qualifiers['organism'][0]]
+                if f.type == 'CDS':
+                    s,e = f.location.nofuzzy_start,f.location.nofuzzy_end
+                    if f.strand == -1:
+                        strand = '-'
+                    else:
+                        strand = '+'
+                    ORFs[chromosome.id][f.qualifiers['locus_tag'][0]] = s,e,strand
+        
+        return(seqs_DNA_arrays,dict(ORFs))
+
     def load_gff_old(self, gff_file):
         '''Extract genome sequence and ordinates from gff files'''
         prefasta = True
@@ -269,22 +290,6 @@ class Finder(_MetaSample):
         data.seek(0)
         seqs_DNA_arrays = {g.id:_array('u',g.seq) for g in \
                 _SeqIO.parse(data,'fasta')}
-        return(seqs_DNA_arrays,dict(ORFs),seqnames)
-
-    def load_gbk(self, gbk_file):
-        ORFs = _defaultdict(dict)
-        seqs_DNA_arrays = {}
-        seqnames = []
-        for g in SeqIO.parse(gbk_file,'genbank'):
-            seqs_DNA_arrays[g.id] = _array('u',g.seq)
-            for f in g.features:
-                if f.type == 'source':
-                    seqnames += [f.qualifiers['organism'][0]]
-                if f.type == 'CDS':
-                    s,e = f.location.nofuzzy_start,f.location.nofuzzy_end
-                    strand = f.strand
-                    ORFs[g.id][f.qualifiers['locus_tag'][0]] = s,e,strand
-        
         return(seqs_DNA_arrays,dict(ORFs),seqnames)
 
     def load_baga_old(self, baga_file):
@@ -997,7 +1002,7 @@ class Finder(_MetaSample):
             genomes_to_process += [(gff,self.load_gff)]
 
         for gbk in self.gbks:
-            genomes_to_process += [(gff,self.load_gbk)]
+            genomes_to_process += [(gbk,self.load_gbk)]
 
         # then store locations of saved, processed files
 
