@@ -682,7 +682,7 @@ class Finder(_MetaSample):
                 nontops[A] = these_nontops
         return(tops,zeros,nontops)
 
-    def _build_mrb(self, ranges, RAAs_carray, by_genome = True):
+    def _build_mrb(self, ranges, RAAs_carray, by_genome = True, k = None):
         '''
         Build a multi roaring bitmap of k-mers given a ranges of an array
         
@@ -705,9 +705,19 @@ class Finder(_MetaSample):
         by_genome : bool
             if True, all ORFs per genome will be extracted in a single
             carray slice followed by subslices per required ORF
+        k : int
+            use this k instead of the attribute k that may have been set 
+            already. An analysis should use the same k throughout so it is
+            easier to set it as an attribute, but this argument allows that
+            to be overridden e.g., for testing broad cluster clustering.
         '''
+        if not k:
+            try:
+                k = self.k
+            except AttributeError:
+                print('you must set k as an attribute or use the k argument')
         # for converting array of 0-9 integers into single base-10 integer
-        k_multiplier = _np.fromiter([10**n for n in range(self.k-1,-1,-1)], 
+        k_multiplier = _np.fromiter([10**n for n in range(k-1,-1,-1)], 
                 dtype = self.kmer_collections_dtype)
         if by_genome:
             rb_kmers = []
@@ -738,7 +748,7 @@ class Finder(_MetaSample):
                 # extract k-mers by striding numpy array, straight to roaringbitmap
                 # put in dict by key for ordering later
                 rb_kmers += [_rrbitmap((self.rolling_window(
-                        genome_contiguous_RAAs[s:e], self.k)*k_multiplier)\
+                        genome_contiguous_RAAs[s:e], k)*k_multiplier)\
                         .sum(1, dtype = self.kmer_collections_dtype)) for (s,e) \
                         in new_ranges]
             mrb = _mrbitmap(rb_kmers)
@@ -746,7 +756,7 @@ class Finder(_MetaSample):
             # just slice carray for each ORF
             # probably a better way of iterating down this array . .
             mrb = _mrbitmap([_rrbitmap((self.rolling_window(
-                    RAAs_carray[s:e], self.k)*k_multiplier).sum(1, 
+                    RAAs_carray[s:e], k)*k_multiplier).sum(1, 
                     dtype = self.kmer_collections_dtype)) for ORF,(s,e) \
                     in sorted((tuple(row[:2]),row[2:]) for row in ranges)])
         return mrb
