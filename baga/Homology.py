@@ -2394,21 +2394,37 @@ class Finder(_MetaSample):
 
 
     def AA_DB_broad_clustering(self, iterations = [(0.80,5,0.6), (0.68,4,0.6), (0.56,4,0.6)], 
-            store_to_disk = True, max_cpus = -1, max_memory = 8):
+            pc_len_diff = 0.6, k = 5, store_to_disk = True, max_cpus = -1, max_memory = 8):
         '''Create broad clusters of distant sequences using CD-HIT
+
+        Requires a final round to merge CD-HIT false negatives. Sequences 
+        represented by others in narrow clusters and so not included in this 
+        analysis will all have a broad cluster ID of zero i.e., are not in a
+        broad cluster.
 
         Parameters
         ----------
         iterations : list
             tuples of (float,int,float) representing (identity, word length, 
-            length difference) for subsequent iterations. Identity should decrease,
-            Word length should decrease with identity as recommended in the CD-Hit 
-            documentation. Length difference can remain constant.
+            length difference) for subsequent iterations. Identity should 
+            decrease, Word length should decrease with identity as recommended 
+            in the CD-Hit documentation. Length difference can remain constant.
+        pc_len_diff : float
+            corresponds to "length difference" in CD-HIT iterations but as used 
+            in final corrective round of CD-HIT broad cluster shared reduced 
+            amino acid alphabet k-mers.
+        k : int
+            k-mer length for reduced amino acid alphabet k-mer content 
+            comparisons between broad clusters provided by CD-HIT: while very 
+            fast, CD-HIT suffers from a high false negative rate so a final 
+            round of comparisons must be performed to merge broad clusters where 
+            necessary
         store_to_disk : True
-            if True, the LMDB key-value store of ORF metadata will be updated. Use False
-            to store ORF broad cluster affiliation in a dictionary in memory. If the whole
-            analysis can fit in memory, it is faster not to store_to_disk. To allow larger
-            analyses than memory permits, set store_to_disk as True.
+            if True, the LMDB key-value store of ORF metadata will be updated. 
+            Use False to store ORF broad cluster affiliation in a dictionary in 
+            memory. If the whole analysis can fit in memory, it is faster not 
+            to store_to_disk. To allow larger analyses than memory permits, set 
+            store_to_disk as True.
         max_cpus : int
             Maximum CPUs or threads to use
         max_memory : int
@@ -2453,9 +2469,11 @@ class Finder(_MetaSample):
         max_processes = _decide_max_processes( max_cpus )
         max_memory = max_memory*1000
 
+        # Caution:
         # the maximum distance for broad CD-hit clustering needs to cluster 
         # all potential orthologs and inparalogs. Insufficent clustering here 
         # guarantees false negative orthologs later
+        # ==> and CD-Hit actually misses a lot of clusters: see below for the fix
 
         broad_clusters = []
         first = True
@@ -2478,7 +2496,7 @@ class Finder(_MetaSample):
                     '-T',str(max_processes)]
             
             self.logger.log(PROGRESS, 'Running CD-Hit broad clustering on all '\
-                    'input ORFs in {}.faa, output to {}.faa ({:.01%} identity, '\
+                    'input ORFs in {}, output to {}.faa ({:.01%} identity, '\
                     '{:.01%} length)'.format(infilename, outfile, identity, length))
             proc_returncode,stdout = self._launch_external(cmd, 'cd-hit', 
                     self.log_folder, main_logger = self.logger)
@@ -2491,24 +2509,154 @@ class Finder(_MetaSample):
                         these_clusters += [this_cluster]
                         this_cluster = []
                 else:
-                    this_cluster += [line.split('>')[1].split('...')[0]]
+                    # Convert to tuple of ints from string
+                    this_cluster += [tuple(map(int,line.split('>')[1].split('...')[0].split('__')))]
             
             # add last cluster
             if len(this_cluster):
                 these_clusters += [this_cluster]
             
-            # merge with smaller clusters from previous round to maintain full
-            # membership throughout iterations
+            # merge with smaller clusters from previous round to maintain 
+            # full membership throughout iterations.
             broad_clusters = self._union_find(broad_clusters + these_clusters)
+
+        # correct CD-HIT false positives: check for clusters that should be merged
+        # use a reduced amino acid alphabet k-mer content comparison
+
+        # collect info per broad cluster including min and max lengths for sorting order
+        info_array_bc = self._collect_cluster_info(broad_clusters)
+
+        # sort broad clusters small to large by length <== probably not necessary
+        ORF_mid_lengths = \
+                (info_array_bc[:,6] + info_array_bc[:,5]) / 2
+        inds = ORF_mid_lengths.argsort()
+        broad_clusters,min_ORF_len,max_ORF_len = list(zip(*[
+                (broad_clusters[i],info_array_bc[i,6],info_array_bc[i,5]) for i in inds]))
+
+        # prepare arrays for pairwise indices for all input broad clusters:
+        # only need to compare those of comparable length as set by pc_len_diff
+        ## is it possible to vectorise entire thing using views of arrays instead of these nested loops
+        A_indexes = _array('L')
+        B_indexes = _array('L')
+        c = 0
+        min_factor = 1 - pc_len_diff
+        max_factor = 1 + pc_len_diff
+        for i,(minlenA,maxlenA) in enumerate(zip(min_ORF_len,max_ORF_len)):
+            for j,(minlenB,maxlenB) in enumerate(zip(min_ORF_len[i+1:],max_ORF_len[i+1:]),i+1):
+                c += 1
+                if minlenA*min_factor < maxlenB*max_factor and minlenB*min_factor < maxlenA*max_factor:
+                    #print(i,j)
+                    A_indexes.append(i)
+                    B_indexes.append(j)
+                
+                # does presorting by length actually help here? any opportunities to speed it up?
+                # eventually vectorise conditional to collect indices:
+                # Bs_before = len(B_indexes)
+                # B_indexes.extend(_np.where(
+                        # # length and broad cluster restrictions for ORF-to-ORF tests
+                        # # 0 is unassigned broad clusters for short ORFs
+                        # (lower < self.bm_group_ORF_lens[s2:e2]) & \
+                        # (self.bm_group_ORF_lens[s2:e2] < upper) & \
+                        # ((self.bm_group_ORF_broad_clusters[s2:e2] == b_cluster) | \
+                                # (self.bm_group_ORF_broad_clusters[s2:e2] == 0))
+                        # )[0] + s2)
+                # Bs_after = len(B_indexes)
+                # num_pairs = Bs_after-Bs_before
+                # A_indexes.extend([i]*num_pairs)
+
+        # calculate (jaccard) distances
+        self.logger.log(PROGRESS, 'Calculating {:,} jaccard distance pairs for CD-HIT '\
+                'broad cluster correction.'.format(len(A_indexes)))
+        self.logger.debug('Would have been {:,} pairs for all broad clusters '\
+                'regardless of length'.format(c))
+
+        ## just assume all will be used else will have to correct indexes etc
+        # to_collect = set(A_indexes)
+        # to_collect.update(B_indexes)
+        ## still save on comparisons
+
+        # then take a random subset of e.g 5 <== this can be tuned
+        # . . is 5 optimal here? a bottleneck?
+        # alternative is just a random ORF per broad cluster but more likely
+        reps = []
+        for cluster in broad_clusters:
+            if len(cluster) > 5:
+                reps += [_random.sample(cluster,5)]
+            else:
+                reps += [cluster]
+
+        _,these_AA_ranges,_ = self._collect_cluster_ranges(reps)
+
+        ## count RAA k-mers and generate intersections and unions for set of sets into new multi-bitmap
+        k = 5
+        if k <= 2:
+            self.kmer_collections_dtype = _np.uint8  # (0 to 255)
+        elif 2 < k <= 4:
+            self.kmer_collections_dtype = _np.uint16 # (0 to 65535)
+        elif 4 < k <= 9:
+            self.kmer_collections_dtype = _np.uint32 # (0 to 4294967295)
+
+        ## is list of mrbs better here?
+        ## why not one big mrb and grab intersections by indices? <== more memory efficient presumably
+        ## intersection can be calced by MRB indices
+        RAA_mrbs = []
+        with _bcolz.open(self.folders['RAAs_bcolz'], mode = 'r') \
+                as RAAs_carray:
+            for n,(ORFs,ranges) in enumerate(zip(reps,these_AA_ranges)):
+                use_ranges = _np.array([list(a[0])+list(a[1]) for a in \
+                        zip(ORFs,ranges)], dtype=_np.uint32)
+                RAA_mrbs += [self._build_mrb(use_ranges, RAAs_carray, 
+                        by_genome = False, k = k)]
+
+        # take intersection of each entire MRB for reach broad cluster
+        bitmaps_broad_isectns = []
+        for a in RAA_mrbs:
+            bitmaps_broad_isectns += [a.intersection(list(range(len(a))))]
+
+        bitmaps_broad_isectns = _mrbitmap(bitmaps_broad_isectns)
+
+        ## no union equivalent <== a function to add
+        bitmaps_broad_unions = []
+        for a in RAA_mrbs:
+            rb = _rrbitmap(a[0])
+            for i in range(1,len(a)):
+                rb.update(a[i])
+            
+            bitmaps_broad_unions += [rb]
+
+        bitmaps_broad_unions = _mrbitmap(bitmaps_broad_unions)
+
+        # perform distance measures on set of set k-mers
+        # and propose merging
+        to_merge = []
+        for i,j in zip(A_indexes,B_indexes):
+            # intersectn = bitmaps_broad_isectns[i].intersection(
+                    # bitmaps_broad_isectns[j])
+            # union = bitmaps_broad_unions[i].union(bitmaps_broad_unions[j])
+            ## jaccard of intersections of sampled reps in each set of sets
+            ## would be more conservative - more false negative merges
+            # jaccard_d = bitmaps_broad_isectns[i].jaccard_dist(
+                    # bitmaps_broad_isectns[j])
+            ## currently: jaccard of unions - fewer false negative merges
+            jaccard_d = bitmaps_broad_unions[i].jaccard_dist(
+                    bitmaps_broad_unions[j])
+            if jaccard_d < 0.9:
+                to_merge += [reps[i] + reps[j]]
+
+        # could do a more explicit expansion of reps here but this
+        # union find algorithm is fast . . .
+        to_merge += broad_clusters
+
+        broad_clusters = self._union_find(to_merge)
 
         ORF2broad_cluster = {}
         for n,cluster in enumerate(broad_clusters):
             for member in cluster:
-                ORF2broad_cluster[tuple(map(int,member.split('__')))] = n
+                ORF2broad_cluster[member] = n
+
 
         self.logger.info('There were {} final broad clusters'.format(
                 len(ORF2broad_cluster)))
-
 
         ## update ORF broad cluster affiliation in metadata store ##
         # slice in bytes string value
