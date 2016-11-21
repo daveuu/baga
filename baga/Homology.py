@@ -2991,7 +2991,7 @@ class Finder(_MetaSample):
 
 
     def genome_pw_best_matches(self, lower_len_lim = 0.85, 
-            upper_len_lim = 1.15, jacc_dist_max = 0.8, 
+            upper_len_lim = 1.15, jacc_dist_max = 0.85, 
             nprocs = 1):
         '''Calculate shared k-mer ORF to ORF distances between genomes
 
