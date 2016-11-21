@@ -541,6 +541,13 @@ class Finder(_MetaSample):
         ----------
         clusters : list
             List of lists of ORFs
+        
+        Returns
+        -------
+        ndarray
+            Five column 2-d array with a row per cluster and columns of: 
+            ORF ID, Genome ID, AA carray start, carray end, 
+            broad cluster ID, minimum ORF length, maximum ORF length.
         '''
         # info for parsing LMDB metadata database
         ORFs_s_k = self.ORFs_struct_key
