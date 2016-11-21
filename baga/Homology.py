@@ -1350,7 +1350,7 @@ class Finder(_MetaSample):
                         self.stop_codons[strd] & set(_np.array(nucs[s:e]).view('S3'))]
                 # then add the ORFs off the end of the contig to omit
                 bad_ORFs[chromosome_ID] += [ORF for ORF,(s,e,strd) in \
-                        ORF_info.items() if e >= len(nucs)]
+                        ORF_info.items() if e > len(nucs)]
                 
                 if set(bad_ORFs[chromosome_ID]) == set(ORF_info):
                     # if all ORFs bad or if there are no ORFs called, 
