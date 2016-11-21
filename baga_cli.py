@@ -1331,7 +1331,7 @@ parser_Homology.add_argument('-j', "--max_jaccard",
             "sequence. This depends on k. This could be calibrated against "\
             "alignments scores of a preferred scheme.",
     type = float,
-    default = 0.65)
+    default = 0.85)
 
 parser_Homology.add_argument("-A", "--output_AAs", 
     help = "generate fasta files of amino acid sequences for each family.",
