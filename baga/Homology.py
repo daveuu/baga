@@ -2171,14 +2171,17 @@ class Finder(_MetaSample):
         # choice so more gene families have an ORF in two or more genome
         # groups and can be merged in the Reduce 1 stage.
 
-        # always prefer higher frequency, more shared genome
-        genome_rep_counts = _Counter((genome for cluster in \
-                self.bm_selected_genomes for genome in cluster))
-        freqs = sorted(set(genome_rep_counts.values()), reverse = True)
-        shared_genomes = []
-        for thisfreq in freqs:
-            shared_genomes += [[genome for genome,freq in \
-                    genome_rep_counts.items() if freq == thisfreq]]
+        if len(self.bm_selected_genomes) > 1:
+            # prepare some data structures for selecting genomes by frequency
+            # among divided groups of genomes
+            # always prefer higher frequency, more shared genome
+            genome_rep_counts = _Counter((genome for cluster in \
+                    self.bm_selected_genomes for genome in cluster))
+            freqs = sorted(set(genome_rep_counts.values()), reverse = True)
+            shared_genomes = []
+            for thisfreq in freqs:
+                shared_genomes += [[genome for genome,freq in \
+                        genome_rep_counts.items() if freq == thisfreq]]
 
         # all genomes should be present in this dictionary
         # even if set is empty i.e., no ORFs clustered
@@ -2190,34 +2193,41 @@ class Finder(_MetaSample):
         for cluster in self.narrow_clusters:
             assert len(cluster) > 1
             cluster_represented = False
-            # select a single ORF per genome represented in this cluster
-            # (should be single copy only . . .)
-            genomes2reps = dict(((genome_num,(genome_num,ORF_num)) \
-                    for genome_num,ORF_num in cluster))
-            # currently not considered: RAA jaccard is limit of resolution
-            # during initial clustering - paralogous draws are resolved later
-            # assert len(genomes2reps) == len(cluster), 'multi-copy narrow cluster!!'
-            # decide which genome should have the cluster representative
-            # first consider one of those at the highest frequency
-            for prioritised in shared_genomes:
-                options = sorted(set(prioritised) & set(genomes2reps))
-                if options:
-                    genome = _random.choice(options)
-                    representative_ORF = genomes2reps[genome]
-                    cluster_expansions[representative_ORF] = cluster
-                    c += 1
-                    cluster_represented = True
-                    # collect representatives
-                    try:
-                        cluster_rep_bygenome[genome] += [representative_ORF]
-                    except KeyError:
-                        cluster_rep_bygenome[genome] = [representative_ORF]
-                    # record which are represented, 
-                    # excluding representatives and singles
-                    for genome2,ORF in cluster:
-                        if representative_ORF != (genome2,ORF):
-                            clustered_bygenome[genome2].add((genome2,ORF))
-                    break
+            if len(self.bm_selected_genomes) == 1:
+                # for when no divide and conquor (one genome group, no reduce)
+                # pick an arbitrary representative
+                representative_ORF = cluster[0]
+                genome = representative_ORF[0]
+                cluster_represented = True
+            else:
+                # select a single ORF per genome represented in this cluster
+                # (should be single copy only . . .)
+                genomes2reps = dict(((genome_num,(genome_num,ORF_num)) \
+                        for genome_num,ORF_num in cluster))
+                # currently not considered: RAA jaccard is limit of resolution
+                # during initial clustering - paralogous draws are resolved later
+                # assert len(genomes2reps) == len(cluster), 'multi-copy narrow cluster!!'
+                # decide which genome should have the cluster representative
+                # first consider one of those at the highest frequency
+                for prioritised in shared_genomes:
+                    options = sorted(set(prioritised) & set(genomes2reps))
+                    if options:
+                        genome = _random.choice(options)
+                        representative_ORF = genomes2reps[genome]
+                        cluster_represented = True
+                        break
+            c += 1
+            cluster_expansions[representative_ORF] = cluster
+            # collect representatives
+            try:
+                cluster_rep_bygenome[genome] += [representative_ORF]
+            except KeyError:
+                cluster_rep_bygenome[genome] = [representative_ORF]
+            # record which are represented, 
+            # excluding representatives and singles
+            for genome2,ORF in cluster:
+                if representative_ORF != (genome2,ORF):
+                    clustered_bygenome[genome2].add((genome2,ORF))
             # a representative should always have been selected
             # so assert this is the case
             assert representative_ORF in cluster
@@ -3625,17 +3635,25 @@ class Finder(_MetaSample):
 
     def do_de_novo(self, max_genomes_per_group = 10, genome_pairs_shared = 2, 
             bm_lower_len_lim = 0.8, bm_upper_len_lim = 1.25, k = 5, 
-            jacc_dist_max = 0.65, max_cpus = -1, max_memory = 8, 
+            jacc_dist_max = 0.85, max_cpus = -1, max_memory = 8, 
             retain_individual_sketches = False, performchecks = True):
         '''Perform a complete inference of homologous groups of protein coding genes'''
 
-        # make a minhash tree using mash distances and dendropy NJ
-        self.make_genome_tree(
-                retain_individual_sketches = retain_individual_sketches)
-        # could report a tree at this point?
-        # print(fam_finder_S.mash_NJ_tree.as_ascii_plot(plot_metric='length'))
-        # select groups of genomes for separate analyses
-        self.phylo_select_genomes(max_genomes_per_group, genome_pairs_shared)
+        if max_genomes_per_group < len(self.ORFs_per_genome):
+            # make a minhash tree using mash distances and dendropy NJ
+            self.make_genome_tree(
+                    retain_individual_sketches = retain_individual_sketches)
+            # could report a tree at this point?
+            # print(fam_finder_S.mash_NJ_tree.as_ascii_plot(plot_metric='length'))
+            # select groups of genomes for separate analyses
+            self.phylo_select_genomes(max_genomes_per_group, genome_pairs_shared)
+        else:
+            # no dividing of genomes so no genome phylogeny information needed
+            # just one group of all he genomes
+            self.logger.info('Genomes per group ({}) >= total genomes ({}) so '\
+                    'no MapReduce (divide and conquor) will take place'.format(
+                    max_genomes_per_group, len(self.ORFs_per_genome)))
+            self.bm_selected_genomes = [_array('H', range(1,len(self.ORFs_per_genome)+1))]
 
         self.process_narrow_clusters()
 
@@ -3658,10 +3676,15 @@ class Finder(_MetaSample):
                     upper_len_lim = bm_upper_len_lim, jacc_dist_max = jacc_dist_max, 
                     nprocs = nprocs)
 
-        # Reduce as in MapReduce. Includes some more ORF comparisons
-        self.reduce_clusters(lower_len_lim = bm_lower_len_lim, 
-                upper_len_lim = bm_upper_len_lim, jacc_dist_max = jacc_dist_max, 
-                nprocs = nprocs)
+        if max_genomes_per_group < len(self.ORFs_per_genome):
+            # Reduce as in MapReduce. Includes some more ORF comparisons
+            self.reduce_clusters(lower_len_lim = bm_lower_len_lim, 
+                    upper_len_lim = bm_upper_len_lim, jacc_dist_max = jacc_dist_max, 
+                    nprocs = nprocs)
+        else:
+            self.logger.debug('No Reduce to do')
+            assert len(self.bm_clusters) == 1
+            self.reduced_clusters = self.bm_clusters[0]
 
         # expand narrow, high identity clusters
         self.expand_clusters()
