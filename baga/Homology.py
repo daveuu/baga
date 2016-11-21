@@ -3523,6 +3523,11 @@ class Finder(_MetaSample):
                 
                 batch2infos = _np.array(batch2infos, _np.uint32)
                 
+                if batch1infos.shape[0] == 0 or batch2infos.shape[0] == 0:
+                    self.logger.debug('No pangenomes comparisons to make between '\
+                            'groups {} and {}'.format(n+1, m+1))
+                    continue
+                
                 # collect broad clusters
                 broad_clusters = set(batch1infos[:,2]) | set(batch2infos[:,2])
                 
