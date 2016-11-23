@@ -2393,8 +2393,8 @@ class Finder(_MetaSample):
             self.bm_selected_genomes = new_bm_selected_genomes
 
 
-    def AA_DB_broad_clustering(self, iterations = [(0.80,5,0.6), (0.68,4,0.6), (0.56,4,0.6)], 
-            pc_len_diff = 0.6, k = 5, store_to_disk = True, max_cpus = -1, max_memory = 8):
+    def AA_DB_broad_clustering(self, iterations = [(0.80,5), (0.68,4), (0.56,4)], 
+            k = 5, store_to_disk = True, max_cpus = -1, max_memory = 8):
         '''Create broad clusters of distant sequences using CD-HIT
 
         Requires a final round to merge CD-HIT false negatives. Sequences 
@@ -2405,14 +2405,9 @@ class Finder(_MetaSample):
         Parameters
         ----------
         iterations : list
-            tuples of (float,int,float) representing (identity, word length, 
-            length difference) for subsequent iterations. Identity should 
-            decrease, Word length should decrease with identity as recommended 
-            in the CD-Hit documentation. Length difference can remain constant.
-        pc_len_diff : float
-            corresponds to "length difference" in CD-HIT iterations but as used 
-            in final corrective round of CD-HIT broad cluster shared reduced 
-            amino acid alphabet k-mers.
+            tuples of (float,int) representing (identity, word length) for each 
+            CD-Hit iteration. Identity should decrease, Word length should 
+            decrease with identity as recommended in the CD-Hit documentation.
         k : int
             k-mer length for reduced amino acid alphabet k-mer content 
             comparisons between broad clusters provided by CD-HIT: while very 
@@ -2466,7 +2461,7 @@ class Finder(_MetaSample):
         d = dependencies['cd-hit']['default_source']
         exe_cdhit = _os.path.join(dependencies['cd-hit'][d]['exe']['main'])
 
-        max_processes = _decide_max_processes( max_cpus )
+        nprocs = _decide_max_processes( max_cpus )
         max_memory = max_memory*1000
 
         # Caution:
@@ -2477,7 +2472,7 @@ class Finder(_MetaSample):
 
         broad_clusters = []
         first = True
-        for identity, word_length, length in iterations:
+        for identity, word_length in iterations:
             if first:
                 infilename = '{}/reduced.faa'.format(self.folders['AAs'])
                 outfile = '{}/broad_{}'.format(self.folders['AAs'],identity)
@@ -2489,15 +2484,14 @@ class Finder(_MetaSample):
                     '-i',infilename,
                     '-o',outfile,
                     '-c',str(identity),
-                    '-aL',str(length),
                     '-n',str(word_length),
                     '-M',str(max_memory),
                     '-d','0', # omit description in .clstr output file
-                    '-T',str(max_processes)]
+                    '-T',str(nprocs)]
             
             self.logger.log(PROGRESS, 'Running CD-Hit broad clustering on all '\
-                    'input ORFs in {}, output to {}.faa ({:.01%} identity, '\
-                    '{:.01%} length)'.format(infilename, outfile, identity, length))
+                    'input ORFs in {}, output to {}.faa ({:.01%} identity)'\
+                    ''.format(infilename, outfile, identity))
             proc_returncode,stdout = self._launch_external(cmd, 'cd-hit', 
                     self.log_folder, main_logger = self.logger)
             self.logger.info('Parsing CD-Hit clusters . . .')
@@ -2522,58 +2516,19 @@ class Finder(_MetaSample):
 
         # correct CD-HIT false positives: check for clusters that should be merged
         # use a reduced amino acid alphabet k-mer content comparison
-
-        # collect info per broad cluster including min and max lengths for sorting order
-        info_array_bc = self._collect_cluster_info(broad_clusters)
-
-        # sort broad clusters small to large by length <== probably not necessary
-        ORF_mid_lengths = \
-                (info_array_bc[:,6] + info_array_bc[:,5]) / 2
-        inds = ORF_mid_lengths.argsort()
-        broad_clusters,min_ORF_len,max_ORF_len = list(zip(*[
-                (broad_clusters[i],info_array_bc[i,6],info_array_bc[i,5]) for i in inds]))
+        self.logger.log(PROGRESS, 'Preparing to correct {} CD-Hit broad clusters.'.format(len(broad_clusters)))
 
         # prepare arrays for pairwise indices for all input broad clusters:
-        # only need to compare those of comparable length as set by pc_len_diff
-        ## is it possible to vectorise entire thing using views of arrays instead of these nested loops
         A_indexes = _array('L')
         B_indexes = _array('L')
-        c = 0
-        min_factor = 1 - pc_len_diff
-        max_factor = 1 + pc_len_diff
-        for i,(minlenA,maxlenA) in enumerate(zip(min_ORF_len,max_ORF_len)):
-            for j,(minlenB,maxlenB) in enumerate(zip(min_ORF_len[i+1:],max_ORF_len[i+1:]),i+1):
-                c += 1
-                if minlenA*min_factor < maxlenB*max_factor and minlenB*min_factor < maxlenA*max_factor:
-                    #print(i,j)
-                    A_indexes.append(i)
-                    B_indexes.append(j)
-                
-                # does presorting by length actually help here? any opportunities to speed it up?
-                # eventually vectorise conditional to collect indices:
-                # Bs_before = len(B_indexes)
-                # B_indexes.extend(_np.where(
-                        # # length and broad cluster restrictions for ORF-to-ORF tests
-                        # # 0 is unassigned broad clusters for short ORFs
-                        # (lower < self.bm_group_ORF_lens[s2:e2]) & \
-                        # (self.bm_group_ORF_lens[s2:e2] < upper) & \
-                        # ((self.bm_group_ORF_broad_clusters[s2:e2] == b_cluster) | \
-                                # (self.bm_group_ORF_broad_clusters[s2:e2] == 0))
-                        # )[0] + s2)
-                # Bs_after = len(B_indexes)
-                # num_pairs = Bs_after-Bs_before
-                # A_indexes.extend([i]*num_pairs)
+        for i in range(len(broad_clusters)-1):
+            num_pairs = len(broad_clusters)-i-1
+            A_indexes.extend([i]*num_pairs)
+            B_indexes.extend(range(i+1,len(broad_clusters)))
 
         # calculate (jaccard) distances
         self.logger.log(PROGRESS, 'Calculating {:,} jaccard distance pairs for CD-HIT '\
                 'broad cluster correction.'.format(len(A_indexes)))
-        self.logger.debug('Would have been {:,} pairs for all broad clusters '\
-                'regardless of length'.format(c))
-
-        ## just assume all will be used else will have to correct indexes etc
-        # to_collect = set(A_indexes)
-        # to_collect.update(B_indexes)
-        ## still save on comparisons
 
         # then take a random subset of e.g 5 <== this can be tuned
         # . . is 5 optimal here? a bottleneck?
@@ -2596,9 +2551,8 @@ class Finder(_MetaSample):
         elif 4 < k <= 9:
             self.kmer_collections_dtype = _np.uint32 # (0 to 4294967295)
 
-        ## is list of mrbs better here?
         ## why not one big mrb and grab intersections by indices? <== more memory efficient presumably
-        ## intersection can be calced by MRB indices
+        ## per broad cluster intersection can be calced by indices of one big MRB
         RAA_mrbs = []
         with _bcolz.open(self.folders['RAAs_bcolz'], mode = 'r') \
                 as RAAs_carray:
@@ -2608,14 +2562,8 @@ class Finder(_MetaSample):
                 RAA_mrbs += [self._build_mrb(use_ranges, RAAs_carray, 
                         by_genome = False, k = k)]
 
-        # take intersection of each entire MRB for reach broad cluster
-        bitmaps_broad_isectns = []
-        for a in RAA_mrbs:
-            bitmaps_broad_isectns += [a.intersection(list(range(len(a))))]
-
-        bitmaps_broad_isectns = _mrbitmap(bitmaps_broad_isectns)
-
-        ## no union equivalent <== a function to add
+        ## jaccards of sample of 5 unions for now
+        # no union equivalent to intersection by index of mrb <== a function to add
         bitmaps_broad_unions = []
         for a in RAA_mrbs:
             rb = _rrbitmap(a[0])
@@ -2626,37 +2574,71 @@ class Finder(_MetaSample):
 
         bitmaps_broad_unions = _mrbitmap(bitmaps_broad_unions)
 
-        # perform distance measures on set of set k-mers
-        # and propose merging
-        to_merge = []
-        for i,j in zip(A_indexes,B_indexes):
-            # intersectn = bitmaps_broad_isectns[i].intersection(
-                    # bitmaps_broad_isectns[j])
-            # union = bitmaps_broad_unions[i].union(bitmaps_broad_unions[j])
-            ## jaccard of intersections of sampled reps in each set of sets
-            ## would be more conservative - more false negative merges
-            # jaccard_d = bitmaps_broad_isectns[i].jaccard_dist(
-                    # bitmaps_broad_isectns[j])
-            ## currently: jaccard of unions - fewer false negative merges
-            jaccard_d = bitmaps_broad_unions[i].jaccard_dist(
-                    bitmaps_broad_unions[j])
-            if jaccard_d < 0.9:
-                to_merge += [reps[i] + reps[j]]
+        # intersection version would be like this
+        # of each entire MRB for each broad cluster
+        # bitmaps_broad_isectns = []
+        # for a in RAA_mrbs:
+            # bitmaps_broad_isectns += [a.intersection(list(range(len(a))))]
+        # bitmaps_broad_isectns = _mrbitmap(bitmaps_broad_isectns)
 
+
+        # perform distance measures on set of set k-mers
+        # and propose merging. Jaccard of unions for now.
+        # only mrb PW jaccard dists currently implemented in
+        # roaringbitmap library
+
+        if nprocs == 1:
+            results = _np.frombuffer(
+                    bitmaps_broad_unions.jaccard_dist(A_indexes,B_indexes), 
+                    dtype = _np.float64).astype(_np.float16)
+        elif nprocs > 1:
+            prechunksize = int((len(A_indexes)+nprocs)/nprocs)
+            # slightly more efficient to create separate arrays above?
+            A_indexes_list = (A_indexes[p*prechunksize:(p+1)*prechunksize] for p in range(nprocs))
+            B_indexes_list = (B_indexes[p*prechunksize:(p+1)*prechunksize] for p in range(nprocs))
+            # jaccard_dist() has nogil so threading works
+            # allows efficient use of memory and cores
+            with _ThreadPoolExecutor(max_workers=nprocs) as executor:
+                results = _np.concatenate([
+                        _np.frombuffer(a,dtype = _np.float64).astype(_np.float16) \
+                        for a in executor.map(bitmaps_broad_unions.jaccard_dist, 
+                        A_indexes_list, B_indexes_list, chunksize=1)])
+
+        self.logger.log(PROGRESS, 'Parsing {:,} jaccard distances for broad clusters '\
+                ''.format(len(A_indexes)))
+
+        jacc_dist_max = 0.9
+
+        # retain only "hits" below threshold distance (would need calibrating
+        # to AA pID distance)
+        if nprocs == 1 or not have_numexpr:
+            hits = results < jacc_dist_max
+        else:
+            # numexpr quicker on 2 or more cores
+            hits = _ne.evaluate('results < jacc_dist_max')
+
+        # broad clusters at these indexes should be merged
+        A_indexes = _np.frombuffer(A_indexes, 
+                dtype = _np.uint64)[hits].astype(_np.uint32)
+        B_indexes = _np.frombuffer(B_indexes, 
+                dtype = _np.uint64)[hits].astype(_np.uint32)
+
+        # create list of merged lists
+        to_merge = [reps[i] + reps[j] for i,j in zip(A_indexes,B_indexes)]
+        # then add full-membership broad clusters to be merged
+        to_merge += broad_clusters
         # could do a more explicit expansion of reps here but this
         # union find algorithm is fast . . .
-        to_merge += broad_clusters
-
         broad_clusters = self._union_find(to_merge)
 
+        # finally prepare ORF to broad cluster mapping
         ORF2broad_cluster = {}
         for n,cluster in enumerate(broad_clusters):
             for member in cluster:
                 ORF2broad_cluster[member] = n
 
-
         self.logger.info('There were {} final broad clusters'.format(
-                len(ORF2broad_cluster)))
+                len(broad_clusters)))
 
         ## update ORF broad cluster affiliation in metadata store ##
         # slice in bytes string value
@@ -3816,7 +3798,8 @@ class Finder(_MetaSample):
         nprocs = _decide_max_processes(max_cpus)
 
         self.AA_DB_broad_clustering(
-                iterations = [(0.80,5,0.6), (0.68,4,0.6), (0.56,4,0.6)], 
+                # tuples of percent identity, word length for CD-Hit
+                iterations = [(0.80,5), (0.68,4), (0.56,4)], 
                 store_to_disk = True, max_cpus = 1, max_memory = 8)
 
         while len(self.bm_selected_genomes):
