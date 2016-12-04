@@ -1316,7 +1316,8 @@ parser_Homology.add_argument('-L', "--clustering_length_prop",
     help = "Proportion of a query sequence length that a target sequence can "\
             "be for a distance to be calculated. Greater or smaller than this "\
             "length is considered too large or small to have sufficient "\
-            "homology regardless of sequence evolutionary distance.",  ## <==== 20% here needs calibrating or checking literature
+            "homology regardless of sequence evolutionary distance. Default is "\
+            "0.15 meaning a greater than 15% difference is not tolerated.",  ## <==== 20% here needs calibrating or checking literature
     type = float,
     default = 0.15)
 
