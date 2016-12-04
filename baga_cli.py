@@ -1333,6 +1333,14 @@ parser_Homology.add_argument('-j', "--max_jaccard",
     type = float,
     default = 0.85)
 
+parser_Homology.add_argument("-B", "--no_broad_clusters", 
+    help = "Do not assign ORFs to broad clusters of low sequence identity. "\
+    "This option will bypass a heuristic that avoids comparisons of very "\
+    "different sequences. A pre-processing step assigns ORFs to large "\
+    "(broad, low sequence similarity) clusters and only comparisons within "\
+    "those large clusters are performed during the main analysis.",
+    action = 'store_true')
+
 parser_Homology.add_argument("-A", "--output_AAs", 
     help = "generate fasta files of amino acid sequences for each family.",
     action = 'store_true')
@@ -3809,7 +3817,8 @@ if task_name == 'Homology':
                 # True to allow restoration post processORFs()
                 retain_individual_sketches = True, 
                 # might need to optimise for memory usage (long lists?)
-                performchecks = True)
+                performchecks = True,
+                no_broad_clusters = args.no_broad_clusters)
         # save here to allow restoring this analysis
         fam_finder.saveLocal(serialiser = 'pickle')
     else:

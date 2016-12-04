@@ -2394,7 +2394,8 @@ class Finder(_MetaSample):
 
 
     def AA_DB_broad_clustering(self, iterations = [(0.80,5), (0.68,4), (0.56,4)], 
-            k = 5, store_to_disk = True, max_cpus = -1, max_memory = 8):
+            k = 5, store_to_disk = True, max_cpus = -1, max_memory = 8, 
+            single_broad_cluster = False):
         '''Create broad clusters of distant sequences using CD-HIT
 
         Requires a final round to merge CD-HIT false negatives. Sequences 
@@ -2424,14 +2425,60 @@ class Finder(_MetaSample):
             Maximum CPUs or threads to use
         max_memory : int
             Maximum memory in GB to use
+        single_broad_cluster : bool
+            For testing purposes, this whole heuristic can be switched off by 
+            putting all ORFs into the same broad cluster (set this to True)
         '''
 
-        # create input DB from .reduced_db['reps_by_genome'] ORFs
-        # this is remaining AA sequences after narrow clusters collapsed
-        # i.e., narrow cluster representatives and those unaffected by 
-        # narrow clustering (representing themselves only)
-        sourcefile = '{}/all.faa'.format(self.folders['AAs'])
-        outfile = '{}/reduced.faa'.format(self.folders['AAs'])
+
+        def store_broad_clusters(ORF2broad_cluster, store_to_disk):
+            '''update ORF broad cluster affiliation in metadata store'''
+            # slice in bytes string value
+            broad_cluster_num_sl = self.ORFs_bytes_slices['broad_cluster_num']
+            # encoding letter for struct: e.g. H for uint32
+            broad_cluster_num_enc = \
+                    self.ORFs_struct_value[self.ORFs_struct_slices['broad_cluster_num']]
+            if store_to_disk:
+                # update metadata in LMDB with ORF broad cluster affiliation
+                # is updating entire database in one transaction OK?
+                # or should this be done genome by genome?
+                # ==> might be better to create a new database here then delete the old
+                # one because LMDB never overwrites data: original DB will just grow . .
+                lmdb_env = _lmdb.Environment(self.folders['metadata'], 
+                        **self.lmdb_env_options)
+                ORFs_metadata = lmdb_env.open_db(b'ORFs')
+                with lmdb_env.begin(db = ORFs_metadata, write = True) as transaction:
+                    cursor = transaction.cursor()
+                    for k_bytes,v_bytes in cursor:
+                        ORF = _struct.unpack(self.ORFs_struct_key, k_bytes)
+                        try:
+                            broad_cluster_num = ORF2broad_cluster[ORF]
+                            # assign new values via a mutable bytes array
+                            new_v_bytes = bytearray(v_bytes)
+                            new_v_bytes[broad_cluster_num_sl] = \
+                                    _struct.pack(broad_cluster_num_enc, broad_cluster_num)
+                            transaction.put(k_bytes, bytes(new_v_bytes))
+                        except KeyError:
+                            pass
+                lmdb_env.close()
+            else:
+                # update self.ORFs_metadata with ORF broad cluster affiliation
+                for ORF,broad_cluster_num in ORF2broad_cluster.items():
+                    k_bytes = _struct.pack(self.ORFs_struct_key, *ORF)
+                    new_v_bytes = bytearray(self.ORFs_metadata[k_bytes])
+                    new_v_bytes[broad_cluster_num_sl] = \
+                            _struct.pack(broad_cluster_num_enc, broad_cluster_num)
+                    self.ORFs_metadata[k_bytes] = new_v_bytes
+                
+                # alternatively just use a separate dict directly for broad clusters
+                # (use slightly more memory - cannot resume later)
+                # single dict or key-value store for all ORF metadata should save on
+                # lookups later, but updating it here requires lookups anyway . . .
+                # . . . but dict and LMDB lookups relatively cheap?
+                # self.broad_clusters = ORF2broad_cluster
+            
+            del ORF2broad_cluster
+
 
         ORF_IDs = []
         for genome,num_ORFs in self.ORFs_per_genome.items():
@@ -2453,6 +2500,23 @@ class Finder(_MetaSample):
                     for genome,ORF in remaining_ORFs)]
 
         ORF_IDs = _chain(*ORF_IDs)
+
+        if single_broad_cluster:
+            # this assigns all ORFs to same broad cluster thus bypassing 
+            # this heursitic: useful for testing
+            ORF2broad_cluster = {ORF:1 for ORF in ORF_IDs}
+            store_broad_clusters(ORF2broad_cluster, store_to_disk)
+            return
+
+        # create input DB from .reduced_db['reps_by_genome'] ORFs
+        # this is remaining AA sequences after narrow clusters collapsed
+        # i.e., narrow cluster representatives and those unaffected by 
+        # narrow clustering (representing themselves only)
+        sourcefile = '{}/all.faa'.format(self.folders['AAs'])
+        outfile = '{}/reduced.faa'.format(self.folders['AAs'])
+
+
+
         # fast way of transferring a subset of fasta file entries to another file by ID
         # uses memory map of initial fasta and writes appropriate slices to new file
         self._transfer_ORFs2fasta(ORF_IDs, sourcefile, outfile)
@@ -2640,52 +2704,7 @@ class Finder(_MetaSample):
         self.logger.info('There were {} final broad clusters'.format(
                 len(broad_clusters)))
 
-        ## update ORF broad cluster affiliation in metadata store ##
-        # slice in bytes string value
-        broad_cluster_num_sl = self.ORFs_bytes_slices['broad_cluster_num']
-        # encoding letter for struct: e.g. H for uint32
-        broad_cluster_num_enc = \
-                self.ORFs_struct_value[self.ORFs_struct_slices['broad_cluster_num']]
-        if store_to_disk:
-            # update metadata in LMDB with ORF broad cluster affiliation
-            # is updating entire database in one transaction OK?
-            # or should this be done genome by genome?
-            # ==> might be better to create a new database here then delete the old
-            # one because LMDB never overwrites data: original DB will just grow . .
-            lmdb_env = _lmdb.Environment(self.folders['metadata'], 
-                    **self.lmdb_env_options)
-            ORFs_metadata = lmdb_env.open_db(b'ORFs')
-            with lmdb_env.begin(db = ORFs_metadata, write = True) as transaction:
-                cursor = transaction.cursor()
-                for k_bytes,v_bytes in cursor:
-                    ORF = _struct.unpack(self.ORFs_struct_key, k_bytes)
-                    try:
-                        broad_cluster_num = ORF2broad_cluster[ORF]
-                        # assign new values via a mutable bytes array
-                        new_v_bytes = bytearray(v_bytes)
-                        new_v_bytes[broad_cluster_num_sl] = \
-                                _struct.pack(broad_cluster_num_enc, broad_cluster_num)
-                        transaction.put(k_bytes, bytes(new_v_bytes))
-                    except KeyError:
-                        pass
-            lmdb_env.close()
-        else:
-            # update self.ORFs_metadata with ORF broad cluster affiliation
-            for ORF,broad_cluster_num in ORF2broad_cluster.items():
-                k_bytes = _struct.pack(self.ORFs_struct_key, *ORF)
-                new_v_bytes = bytearray(self.ORFs_metadata[k_bytes])
-                new_v_bytes[broad_cluster_num_sl] = \
-                        _struct.pack(broad_cluster_num_enc, broad_cluster_num)
-                self.ORFs_metadata[k_bytes] = new_v_bytes
-            
-            # alternatively just use a separate dict directly for broad clusters
-            # (use slightly more memory - cannot resume later)
-            # single dict or key-value store for all ORF metadata should save on
-            # lookups later, but updating it here requires lookups anyway . . .
-            # . . . but dict and LMDB lookups relatively cheap?
-            # self.broad_clusters = ORF2broad_cluster
-
-        del ORF2broad_cluster
+        store_broad_clusters(ORF2broad_cluster, store_to_disk)
 
 
     def extract_RAA_kmers(self, k = 5, nprocs = 1):
@@ -3771,7 +3790,8 @@ class Finder(_MetaSample):
     def do_de_novo(self, max_genomes_per_group = 10, genome_pairs_shared = 2, 
             bm_lower_len_lim = 0.8, bm_upper_len_lim = 1.25, k = 5, 
             jacc_dist_max = 0.85, max_cpus = -1, max_memory = 8, 
-            retain_individual_sketches = False, performchecks = True):
+            retain_individual_sketches = False, performchecks = True,
+            no_broad_clusters = False):
         '''Perform a complete inference of homologous groups of protein coding genes'''
 
         if max_genomes_per_group < len(self.ORFs_per_genome):
@@ -3800,7 +3820,10 @@ class Finder(_MetaSample):
         self.AA_DB_broad_clustering(
                 # tuples of percent identity, word length for CD-Hit
                 iterations = [(0.80,5), (0.68,4), (0.56,4)], 
-                store_to_disk = True, max_cpus = 1, max_memory = 8)
+                store_to_disk = True, max_cpus = 1, max_memory = 8,
+                # all other options ignored if single_broad_cluster
+                # is set to True
+                single_broad_cluster = no_broad_clusters)
 
         while len(self.bm_selected_genomes):
             # collects for genomes in fam_finder.bm_selected_genomes[0]
